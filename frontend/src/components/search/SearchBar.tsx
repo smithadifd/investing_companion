@@ -57,7 +57,7 @@ export function SearchBar() {
   return (
     <div ref={containerRef} className="relative w-full max-w-md">
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <input
           ref={inputRef}
           type="text"
@@ -66,15 +66,15 @@ export function SearchBar() {
           onFocus={() => setIsOpen(true)}
           onKeyDown={handleKeyDown}
           placeholder="Search for a symbol (e.g., AAPL, CCJ)..."
-          className="w-full pl-10 pr-10 py-3 rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
+          className="w-full pl-10 pr-10 py-3 rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
         />
         {isLoading && (
-          <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-gray-400" />
+          <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
         )}
         {!isLoading && query && (
           <button
             onClick={handleClear}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
           >
             <X className="h-4 w-4" />
           </button>
@@ -82,27 +82,27 @@ export function SearchBar() {
       </div>
 
       {isOpen && results && results.length > 0 && (
-        <div className="absolute z-50 w-full mt-1 bg-white rounded-lg border border-gray-200 shadow-lg max-h-64 overflow-auto">
+        <div className="absolute z-50 w-full mt-1 bg-card rounded-lg border border-border shadow-lg max-h-64 overflow-auto">
           {results.map((result) => (
             <button
               key={result.symbol}
               onClick={() => handleSelect(result.symbol)}
-              className="w-full px-4 py-3 text-left hover:bg-gray-50 flex justify-between items-center border-b border-gray-100 last:border-b-0 transition-colors"
+              className="w-full px-4 py-3 text-left hover:bg-muted flex justify-between items-center border-b border-border last:border-b-0 transition-colors"
             >
               <div className="flex items-center gap-3">
-                <span className="font-semibold text-gray-900">{result.symbol}</span>
-                <span className="text-gray-600 text-sm truncate max-w-[200px]">
+                <span className="font-semibold text-card-foreground">{result.symbol}</span>
+                <span className="text-muted-foreground text-sm truncate max-w-[200px]">
                   {result.name}
                 </span>
               </div>
-              <span className="text-xs text-gray-400 uppercase">{result.exchange}</span>
+              <span className="text-xs text-muted-foreground uppercase">{result.exchange}</span>
             </button>
           ))}
         </div>
       )}
 
       {isOpen && debouncedQuery.length > 0 && !isLoading && results && results.length === 0 && (
-        <div className="absolute z-50 w-full mt-1 bg-white rounded-lg border border-gray-200 shadow-lg p-4 text-center text-gray-500">
+        <div className="absolute z-50 w-full mt-1 bg-card rounded-lg border border-border shadow-lg p-4 text-center text-muted-foreground">
           No results found for &quot;{debouncedQuery}&quot;
         </div>
       )}

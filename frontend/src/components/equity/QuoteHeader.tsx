@@ -15,10 +15,10 @@ export function QuoteHeader({ equity }: QuoteHeaderProps) {
     return (
       <div>
         <div className="flex items-baseline gap-4">
-          <h1 className="text-3xl font-bold text-gray-900">{equity.symbol}</h1>
-          <span className="text-gray-600">{equity.name}</span>
+          <h1 className="text-3xl font-bold text-foreground">{equity.symbol}</h1>
+          <span className="text-muted-foreground">{equity.name}</span>
         </div>
-        <p className="mt-2 text-gray-500">Quote data unavailable</p>
+        <p className="mt-2 text-muted-foreground">Quote data unavailable</p>
       </div>
     );
   }
@@ -29,15 +29,15 @@ export function QuoteHeader({ equity }: QuoteHeaderProps) {
   return (
     <div>
       <div className="flex items-baseline gap-4 flex-wrap">
-        <h1 className="text-3xl font-bold text-gray-900">{equity.symbol}</h1>
-        <span className="text-gray-600">{equity.name}</span>
+        <h1 className="text-3xl font-bold text-foreground">{equity.symbol}</h1>
+        <span className="text-muted-foreground">{equity.name}</span>
         {equity.exchange && (
-          <span className="text-sm text-gray-400">{equity.exchange}</span>
+          <span className="text-sm text-muted-foreground">{equity.exchange}</span>
         )}
       </div>
 
       <div className="mt-3 flex items-center gap-4 flex-wrap">
-        <span className="text-4xl font-semibold text-gray-900">
+        <span className="text-4xl font-semibold text-foreground">
           {formatCurrency(quote.price)}
         </span>
         <div
@@ -57,33 +57,33 @@ export function QuoteHeader({ equity }: QuoteHeaderProps) {
         </div>
       </div>
 
-      <div className="mt-4 flex gap-6 text-sm text-gray-600 flex-wrap">
+      <div className="mt-4 flex gap-6 text-sm text-muted-foreground flex-wrap">
         <div>
-          <span className="text-gray-400">Open:</span>{' '}
+          <span className="opacity-70">Open:</span>{' '}
           {formatCurrency(quote.open)}
         </div>
         <div>
-          <span className="text-gray-400">High:</span>{' '}
+          <span className="opacity-70">High:</span>{' '}
           {formatCurrency(quote.high)}
         </div>
         <div>
-          <span className="text-gray-400">Low:</span>{' '}
+          <span className="opacity-70">Low:</span>{' '}
           {formatCurrency(quote.low)}
         </div>
         <div>
-          <span className="text-gray-400">Volume:</span>{' '}
+          <span className="opacity-70">Volume:</span>{' '}
           {formatLargeNumber(quote.volume)}
         </div>
         {quote.market_cap && (
           <div>
-            <span className="text-gray-400">Market Cap:</span>{' '}
+            <span className="opacity-70">Market Cap:</span>{' '}
             {formatLargeNumber(quote.market_cap)}
           </div>
         )}
       </div>
 
       {(equity.sector || equity.industry) && (
-        <div className="mt-3 flex gap-4 text-sm text-gray-500">
+        <div className="mt-3 flex gap-4 text-sm text-muted-foreground">
           {equity.sector && <span>{equity.sector}</span>}
           {equity.sector && equity.industry && <span>•</span>}
           {equity.industry && <span>{equity.industry}</span>}

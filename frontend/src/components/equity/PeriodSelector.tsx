@@ -18,15 +18,15 @@ const periods = [
 
 export function PeriodSelector({ value, onChange }: PeriodSelectorProps) {
   return (
-    <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+    <div className="flex gap-1 bg-muted rounded-lg p-1">
       {periods.map((period) => (
         <button
           key={period.value}
           onClick={() => onChange(period.value)}
           className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
             value === period.value
-              ? 'bg-white text-gray-900 shadow-sm'
-              : 'text-gray-600 hover:text-gray-900'
+              ? 'bg-card text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
           }`}
         >
           {period.label}

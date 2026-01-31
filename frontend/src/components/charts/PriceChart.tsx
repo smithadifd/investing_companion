@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { useTheme } from 'next-themes';
 import { createChart, IChartApi, ColorType, Time } from 'lightweight-charts';
 import type { OHLCVData } from '@/lib/api/types';
 
@@ -12,30 +13,33 @@ interface PriceChartProps {
 export function PriceChart({ data, height = 400 }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  const { resolvedTheme } = useTheme();
 
   useEffect(() => {
     if (!containerRef.current || data.length === 0) return;
+
+    const isDark = resolvedTheme === 'dark';
 
     // Create chart
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
       height,
       layout: {
-        background: { type: ColorType.Solid, color: '#ffffff' },
-        textColor: '#333333',
+        background: { type: ColorType.Solid, color: isDark ? '#1f2937' : '#ffffff' },
+        textColor: isDark ? '#9ca3af' : '#333333',
       },
       grid: {
-        vertLines: { color: '#f0f0f0' },
-        horzLines: { color: '#f0f0f0' },
+        vertLines: { color: isDark ? '#374151' : '#f0f0f0' },
+        horzLines: { color: isDark ? '#374151' : '#f0f0f0' },
       },
       crosshair: {
         mode: 1,
       },
       rightPriceScale: {
-        borderColor: '#e0e0e0',
+        borderColor: isDark ? '#374151' : '#e0e0e0',
       },
       timeScale: {
-        borderColor: '#e0e0e0',
+        borderColor: isDark ? '#374151' : '#e0e0e0',
         timeVisible: true,
         secondsVisible: false,
       },
@@ -106,15 +110,15 @@ export function PriceChart({ data, height = 400 }: PriceChartProps) {
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, [data, height]);
+  }, [data, height, resolvedTheme]);
 
   if (data.length === 0) {
     return (
       <div
-        className="flex items-center justify-center bg-gray-50 rounded-lg"
+        className="flex items-center justify-center bg-muted rounded-lg"
         style={{ height }}
       >
-        <span className="text-gray-500">No data available</span>
+        <span className="text-muted-foreground">No data available</span>
       </div>
     );
   }

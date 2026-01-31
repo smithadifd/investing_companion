@@ -53,10 +53,10 @@ export function FundamentalsCard({ fundamentals }: FundamentalsCardProps) {
       {metrics.map(({ label, value, format }) => (
         <div
           key={label}
-          className="p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+          className="p-4 bg-muted rounded-lg hover:bg-muted/80 transition-colors"
         >
-          <div className="text-sm text-gray-500">{label}</div>
-          <div className="text-lg font-semibold text-gray-900">{format(value)}</div>
+          <div className="text-sm text-muted-foreground">{label}</div>
+          <div className="text-lg font-semibold text-foreground">{format(value)}</div>
         </div>
       ))}
     </div>

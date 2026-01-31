@@ -77,12 +77,12 @@ async def get_history(
     symbol: str,
     period: str = Query(
         "1y",
-        regex="^(1d|5d|1mo|3mo|6mo|1y|2y|5y|10y|max)$",
+        pattern="^(1d|5d|1mo|3mo|6mo|1y|2y|5y|10y|max)$",
         description="Time period",
     ),
     interval: str = Query(
         "1d",
-        regex="^(1m|5m|15m|30m|1h|1d|1wk|1mo)$",
+        pattern="^(1m|5m|15m|30m|1h|1d|1wk|1mo)$",
         description="Data interval",
     ),
     db: AsyncSession = Depends(get_db),

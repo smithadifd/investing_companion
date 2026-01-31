@@ -1,14 +1,26 @@
+import { SearchBar } from '@/components/search/SearchBar';
+
 export default function Home() {
   return (
-    <main className="min-h-screen p-8">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-4xl font-bold mb-4">
+    <main className="min-h-screen bg-gray-50">
+      <div className="max-w-4xl mx-auto px-4 py-8">
+        <h1 className="text-4xl font-bold text-gray-900 mb-2">
           Investing Companion
         </h1>
         <p className="text-gray-600 mb-8">
           Your self-hosted investing analysis dashboard
         </p>
 
+        {/* Search */}
+        <div className="mb-12 p-6 bg-white rounded-lg shadow-sm">
+          <h2 className="font-semibold text-gray-900 mb-4">Quick Search</h2>
+          <SearchBar />
+          <p className="text-sm text-gray-500 mt-3">
+            Search for any stock, ETF, or index by symbol or name
+          </p>
+        </div>
+
+        {/* Feature cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <DashboardCard
             title="Watchlists"
@@ -36,21 +48,19 @@ export default function Home() {
           />
         </div>
 
-        <div className="mt-12 p-4 bg-gray-100 rounded-lg">
-          <h2 className="font-semibold mb-2">Quick Search</h2>
-          <input
-            type="text"
-            placeholder="Search for a symbol (e.g., AAPL, CCJ)..."
-            className="w-full p-3 rounded border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            disabled
-          />
-          <p className="text-sm text-gray-500 mt-2">
-            Search functionality coming in Phase 1
+        {/* Status */}
+        <div className="mt-12 p-4 bg-green-50 border border-green-200 rounded-lg">
+          <div className="flex items-center gap-2">
+            <div className="h-2 w-2 bg-green-500 rounded-full"></div>
+            <span className="text-green-800 font-medium">Phase 1 Complete</span>
+          </div>
+          <p className="text-green-700 text-sm mt-1">
+            Search for equities, view quotes, charts, and fundamentals
           </p>
         </div>
       </div>
     </main>
-  )
+  );
 }
 
 function DashboardCard({
@@ -59,18 +69,18 @@ function DashboardCard({
   href,
   status,
 }: {
-  title: string
-  description: string
-  href: string
-  status: string
+  title: string;
+  description: string;
+  href: string;
+  status: string;
 }) {
   return (
-    <div className="p-6 border rounded-lg hover:shadow-md transition-shadow">
-      <h3 className="text-xl font-semibold mb-2">{title}</h3>
+    <div className="p-6 bg-white border rounded-lg hover:shadow-md transition-shadow">
+      <h3 className="text-xl font-semibold text-gray-900 mb-2">{title}</h3>
       <p className="text-gray-600 mb-4">{description}</p>
       <span className="text-sm text-orange-600 bg-orange-100 px-2 py-1 rounded">
         {status}
       </span>
     </div>
-  )
+  );
 }

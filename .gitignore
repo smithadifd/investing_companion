@@ -20,8 +20,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Python lib directories (in root only)
+/lib/
+/lib64/
 parts/
 sdist/
 var/

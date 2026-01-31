@@ -18,11 +18,11 @@
 **Goal**: Development environment and infrastructure ready
 
 ### Deliverables
-- [ ] Docker Compose with all services (Postgres, Redis, API, Frontend)
-- [ ] FastAPI skeleton with health endpoint
-- [ ] Next.js skeleton with basic layout
-- [ ] Database connection and Alembic setup
-- [ ] Environment configuration (.env structure)
+- [x] Docker Compose with all services (Postgres, Redis, API, Frontend)
+- [x] FastAPI skeleton with health endpoint
+- [x] Next.js skeleton with basic layout
+- [x] Database connection and Alembic setup
+- [x] Environment configuration (.env structure)
 - [ ] Basic CI workflow (linting, type checking)
 
 ### Success Criteria
@@ -45,19 +45,19 @@ open localhost:3000  # Shows placeholder page
 ### Deliverables
 
 #### Backend
-- [ ] Equity model + basic CRUD endpoints
-- [ ] Yahoo Finance data provider integration
-- [ ] Quote endpoint (`GET /api/v1/equity/{symbol}/quote`)
-- [ ] Historical data endpoint (`GET /api/v1/equity/{symbol}/history`)
-- [ ] Search endpoint (`GET /api/v1/equity/search?q=...`)
-- [ ] Basic caching (15-min for quotes, 1-day for fundamentals)
+- [x] Equity model + basic CRUD endpoints
+- [x] Yahoo Finance data provider integration
+- [x] Quote endpoint (`GET /api/v1/equity/{symbol}/quote`)
+- [x] Historical data endpoint (`GET /api/v1/equity/{symbol}/history`)
+- [x] Search endpoint (`GET /api/v1/equity/search?q=...`)
+- [x] Basic caching (15-min for quotes, 1-day for fundamentals)
 
 #### Frontend
-- [ ] Dashboard page with search bar
-- [ ] Equity detail page (`/equity/[symbol]`)
-- [ ] Price chart using TradingView Lightweight Charts
-- [ ] Basic fundamentals display (P/E, Market Cap, etc.)
-- [ ] Simple responsive layout
+- [x] Dashboard page with search bar
+- [x] Equity detail page (`/equity/[symbol]`)
+- [x] Price chart using TradingView Lightweight Charts
+- [x] Basic fundamentals display (P/E, Market Cap, etc.)
+- [x] Simple responsive layout
 
 #### Data Model
 ```

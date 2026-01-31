@@ -23,7 +23,8 @@ export function QuoteHeader({ equity }: QuoteHeaderProps) {
     );
   }
 
-  const isPositive = quote.change >= 0;
+  const changeNum = typeof quote.change === 'string' ? parseFloat(quote.change) : quote.change;
+  const isPositive = changeNum >= 0;
 
   return (
     <div>

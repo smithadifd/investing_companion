@@ -1,5 +1,6 @@
 /**
  * API type definitions
+ * Note: Decimal fields from Python API are serialized as strings
  */
 
 export interface EquitySearchResult {
@@ -11,13 +12,13 @@ export interface EquitySearchResult {
 
 export interface Quote {
   symbol: string;
-  price: number;
-  change: number;
-  change_percent: number;
-  open: number;
-  high: number;
-  low: number;
-  previous_close: number | null;
+  price: number | string;
+  change: number | string;
+  change_percent: number | string;
+  open: number | string;
+  high: number | string;
+  low: number | string;
+  previous_close: number | string | null;
   volume: number;
   market_cap: number | null;
   timestamp: string;
@@ -25,10 +26,10 @@ export interface Quote {
 
 export interface OHLCVData {
   timestamp: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
+  open: number | string;
+  high: number | string;
+  low: number | string;
+  close: number | string;
   volume: number | null;
 }
 
@@ -41,18 +42,18 @@ export interface HistoryData {
 export interface Fundamentals {
   market_cap: number | null;
   enterprise_value: number | null;
-  pe_ratio: number | null;
-  forward_pe: number | null;
-  peg_ratio: number | null;
-  price_to_book: number | null;
-  price_to_sales: number | null;
-  eps_ttm: number | null;
-  dividend_yield: number | null;
-  beta: number | null;
-  week_52_high: number | null;
-  week_52_low: number | null;
+  pe_ratio: number | string | null;
+  forward_pe: number | string | null;
+  peg_ratio: number | string | null;
+  price_to_book: number | string | null;
+  price_to_sales: number | string | null;
+  eps_ttm: number | string | null;
+  dividend_yield: number | string | null;
+  beta: number | string | null;
+  week_52_high: number | string | null;
+  week_52_low: number | string | null;
   avg_volume: number | null;
-  profit_margin: number | null;
+  profit_margin: number | string | null;
 }
 
 export interface EquityDetail {

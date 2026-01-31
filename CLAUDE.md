@@ -5,7 +5,7 @@
 Self-hosted investing companion web application providing equity analysis, watchlists, ratio tracking, market overviews, AI-powered insights, and real-time alerts.
 
 **Owner**: Andrew (user@example.com)
-**Status**: Architecture phase - not yet in development
+**Status**: Phase 1 complete - equity prototype functional
 
 ---
 
@@ -109,9 +109,22 @@ cd backend && alembic revision --autogenerate -m "description"
 |------|---------|
 | `docs/ROADMAP.md` | Phased development plan |
 | `docs/architecture/OVERVIEW.md` | System architecture |
+| `docs/sessions/` | Session notes and history |
 | `backend/app/core/config.py` | Environment configuration |
 | `backend/app/db/models/*.py` | Database models |
 | `frontend/src/lib/api/client.ts` | API client |
+
+---
+
+## Session Notes
+
+Development sessions are documented in `docs/sessions/`. Each session log includes:
+- What was accomplished
+- Issues encountered and resolved
+- Commits made
+- Next steps identified
+
+When starting a new session, review the most recent session notes for context.
 
 ---
 
@@ -189,8 +202,8 @@ npm test
 
 ## Phase Status
 
-- [x] Phase 0: Foundation (structure, docs) - IN PROGRESS
-- [ ] Phase 1: Prototype (equity display, charts)
+- [x] Phase 0: Foundation (structure, docs) - COMPLETE
+- [x] Phase 1: Prototype (equity display, charts) - COMPLETE
 - [ ] Phase 2: MVP (watchlists, analysis, import)
 - [ ] Phase 3: Intelligence (AI, ratios, indices)
 - [ ] Phase 4: Alerts (notifications)

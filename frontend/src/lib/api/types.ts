@@ -86,3 +86,131 @@ export interface ApiError {
     details?: Record<string, unknown>;
   };
 }
+
+// Watchlist types
+export interface WatchlistItemEquity {
+  id: number;
+  symbol: string;
+  name: string;
+  exchange: string | null;
+  sector: string | null;
+}
+
+export interface WatchlistItem {
+  id: number;
+  watchlist_id: number;
+  equity_id: number;
+  notes: string | null;
+  target_price: number | string | null;
+  thesis: string | null;
+  added_at: string;
+  equity: WatchlistItemEquity;
+  quote: Quote | null;
+}
+
+export interface WatchlistSummary {
+  id: number;
+  name: string;
+  description: string | null;
+  is_default: boolean;
+  item_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Watchlist {
+  id: number;
+  name: string;
+  description: string | null;
+  is_default: boolean;
+  items: WatchlistItem[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WatchlistCreate {
+  name: string;
+  description?: string;
+  is_default?: boolean;
+}
+
+export interface WatchlistUpdate {
+  name?: string;
+  description?: string;
+  is_default?: boolean;
+}
+
+export interface WatchlistItemCreate {
+  equity_id?: number;
+  symbol?: string;
+  notes?: string;
+  target_price?: number;
+  thesis?: string;
+}
+
+export interface WatchlistItemUpdate {
+  notes?: string;
+  target_price?: number;
+  thesis?: string;
+}
+
+export interface WatchlistExportItem {
+  symbol: string;
+  name: string;
+  notes: string | null;
+  target_price: number | string | null;
+  thesis: string | null;
+  added_at: string;
+}
+
+export interface WatchlistExport {
+  name: string;
+  description: string | null;
+  exported_at: string;
+  items: WatchlistExportItem[];
+}
+
+export interface WatchlistImportItem {
+  symbol: string;
+  notes?: string;
+  target_price?: number;
+  thesis?: string;
+}
+
+export interface WatchlistImport {
+  name: string;
+  description?: string;
+  items: WatchlistImportItem[];
+}
+
+// Technical indicators types
+export interface TechnicalIndicators {
+  timestamps: string[];
+  closes: number[];
+  sma_20: (number | null)[];
+  sma_50: (number | null)[];
+  sma_200: (number | null)[];
+  ema_12: (number | null)[];
+  ema_26: (number | null)[];
+  rsi: (number | null)[];
+  macd: (number | null)[];
+  macd_signal: (number | null)[];
+  macd_histogram: (number | null)[];
+  bb_upper: (number | null)[];
+  bb_middle: (number | null)[];
+  bb_lower: (number | null)[];
+}
+
+export interface TechnicalSummary {
+  price: number;
+  sma_20: number | null;
+  sma_50: number | null;
+  sma_200: number | null;
+  rsi: number | null;
+  macd: number | null;
+  macd_signal: number | null;
+  above_sma_20: boolean | null;
+  above_sma_50: boolean | null;
+  above_sma_200: boolean | null;
+  rsi_signal: 'overbought' | 'oversold' | 'neutral' | null;
+}

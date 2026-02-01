@@ -8,6 +8,17 @@ import type {
   EquitySearchResult,
   HistoryData,
   Quote,
+  TechnicalIndicators,
+  TechnicalSummary,
+  Watchlist,
+  WatchlistCreate,
+  WatchlistExport,
+  WatchlistImport,
+  WatchlistItem,
+  WatchlistItemCreate,
+  WatchlistItemUpdate,
+  WatchlistSummary,
+  WatchlistUpdate,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
@@ -86,6 +97,140 @@ class ApiClient {
     return this.fetch<HistoryData>(
       `/equity/${encodeURIComponent(symbol)}/history?period=${period}&interval=${interval}`
     );
+  }
+
+  /**
+   * Get technical indicators
+   */
+  async getTechnicals(symbol: string, period = '1y'): Promise<TechnicalIndicators> {
+    return this.fetch<TechnicalIndicators>(
+      `/equity/${encodeURIComponent(symbol)}/technicals?period=${period}`
+    );
+  }
+
+  /**
+   * Get technical indicators summary
+   */
+  async getTechnicalsSummary(symbol: string): Promise<TechnicalSummary> {
+    return this.fetch<TechnicalSummary>(
+      `/equity/${encodeURIComponent(symbol)}/technicals/summary`
+    );
+  }
+
+  /**
+   * Get peer companies for comparison
+   */
+  async getPeers(symbol: string, limit = 5): Promise<EquityDetail[]> {
+    return this.fetch<EquityDetail[]>(
+      `/equity/${encodeURIComponent(symbol)}/peers?limit=${limit}`
+    );
+  }
+
+  // Watchlist methods
+
+  /**
+   * Get all watchlists
+   */
+  async getWatchlists(): Promise<WatchlistSummary[]> {
+    return this.fetch<WatchlistSummary[]>('/watchlists');
+  }
+
+  /**
+   * Get a single watchlist with items
+   */
+  async getWatchlist(id: number, includeQuotes = true): Promise<Watchlist> {
+    return this.fetch<Watchlist>(
+      `/watchlists/${id}?include_quotes=${includeQuotes}`
+    );
+  }
+
+  /**
+   * Create a new watchlist
+   */
+  async createWatchlist(data: WatchlistCreate): Promise<Watchlist> {
+    return this.fetch<Watchlist>('/watchlists', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Update a watchlist
+   */
+  async updateWatchlist(id: number, data: WatchlistUpdate): Promise<Watchlist> {
+    return this.fetch<Watchlist>(`/watchlists/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Delete a watchlist
+   */
+  async deleteWatchlist(id: number): Promise<void> {
+    await fetch(`${API_BASE}/watchlists/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * Add an item to a watchlist
+   */
+  async addWatchlistItem(
+    watchlistId: number,
+    data: WatchlistItemCreate
+  ): Promise<WatchlistItem> {
+    return this.fetch<WatchlistItem>(`/watchlists/${watchlistId}/items`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Update a watchlist item
+   */
+  async updateWatchlistItem(
+    watchlistId: number,
+    itemId: number,
+    data: WatchlistItemUpdate
+  ): Promise<WatchlistItem> {
+    return this.fetch<WatchlistItem>(
+      `/watchlists/${watchlistId}/items/${itemId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }
+    );
+  }
+
+  /**
+   * Remove an item from a watchlist
+   */
+  async removeWatchlistItem(watchlistId: number, itemId: number): Promise<void> {
+    await fetch(`${API_BASE}/watchlists/${watchlistId}/items/${itemId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * Export a watchlist to JSON
+   */
+  async exportWatchlist(id: number): Promise<WatchlistExport> {
+    const response = await fetch(`${API_BASE}/watchlists/${id}/export`);
+    if (!response.ok) {
+      throw new ApiError('Failed to export watchlist', 'EXPORT_ERROR', response.status);
+    }
+    return response.json();
+  }
+
+  /**
+   * Import a watchlist from JSON
+   */
+  async importWatchlist(data: WatchlistImport): Promise<Watchlist> {
+    return this.fetch<Watchlist>('/watchlists/import', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   }
 }
 

@@ -145,17 +145,23 @@ class EquityService:
 
     async def get_or_create_equity(self, symbol: str) -> Optional[Equity]:
         """Get equity from DB or create from provider data."""
+        import logging
+        logger = logging.getLogger(__name__)
+
         try:
             stmt = select(Equity).where(Equity.symbol == symbol.upper())
             result = await self.db.execute(stmt)
             equity = result.scalar_one_or_none()
 
             if equity:
+                logger.info(f"Found existing equity: {equity.symbol}")
                 return equity
 
             # Fetch from Yahoo and create
+            logger.info(f"Fetching equity info from Yahoo for: {symbol}")
             info = await self.yahoo.get_info(symbol)
             if not info or not info.get("symbol"):
+                logger.warning(f"No info found for symbol: {symbol}")
                 return None
 
             equity = Equity(
@@ -172,8 +178,10 @@ class EquityService:
             await self.db.commit()
             await self.db.refresh(equity)
 
+            logger.info(f"Created new equity: {equity.symbol}")
             return equity
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error in get_or_create_equity for {symbol}: {e}")
             # Database not available, return None
             return None
 
@@ -217,3 +225,88 @@ class EquityService:
             )
 
         return None
+
+    async def get_peers(self, symbol: str, limit: int = 5) -> List[EquityDetailResponse]:
+        """Get peer companies in the same sector for comparison."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # First get the target equity's sector
+        equity = await self.get_or_create_equity(symbol)
+        if not equity or not equity.sector:
+            logger.info(f"No sector found for {symbol}, trying external peer lookup")
+            # Try to get sector from Yahoo
+            info = await self.yahoo.get_info(symbol)
+            sector = info.get("sector") if info else None
+            if sector:
+                return await self.get_sector_peers_external(symbol, sector, limit)
+            return []
+
+        # Find other equities in the same sector from the database
+        try:
+            stmt = (
+                select(Equity)
+                .where(
+                    Equity.sector == equity.sector,
+                    Equity.symbol != symbol.upper(),
+                    Equity.is_active == True,
+                )
+                .limit(limit)
+            )
+            result = await self.db.execute(stmt)
+            peer_equities = result.scalars().all()
+
+            # If we don't have enough in DB, use external data
+            if len(peer_equities) < limit:
+                return await self.get_sector_peers_external(symbol, equity.sector, limit)
+
+            # Get full details for each peer
+            peers = []
+            for peer in peer_equities:
+                detail = await self.get_equity_detail(peer.symbol)
+                if detail:
+                    peers.append(detail)
+
+            return peers
+        except Exception as e:
+            logger.error(f"Error fetching peers for {symbol}: {e}")
+            return await self.get_sector_peers_external(symbol, equity.sector, limit)
+
+    async def get_sector_peers_external(
+        self, symbol: str, sector: str, limit: int = 5
+    ) -> List[EquityDetailResponse]:
+        """Get peer companies using external data (common sector constituents)."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Common sector stocks for peer discovery
+        SECTOR_STOCKS = {
+            "Technology": ["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AVGO", "ORCL", "CRM", "AMD", "INTC"],
+            "Healthcare": ["UNH", "JNJ", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT", "DHR", "BMY"],
+            "Financial Services": ["BRK-B", "JPM", "V", "MA", "BAC", "WFC", "GS", "MS", "AXP", "C"],
+            "Consumer Cyclical": ["AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "TJX", "LOW", "BKNG", "CMG"],
+            "Communication Services": ["GOOGL", "META", "NFLX", "DIS", "CMCSA", "VZ", "T", "TMUS", "CHTR", "EA"],
+            "Industrials": ["UNP", "HON", "UPS", "BA", "CAT", "RTX", "DE", "LMT", "GE", "MMM"],
+            "Consumer Defensive": ["PG", "KO", "PEP", "WMT", "COST", "PM", "MO", "CL", "MDLZ", "KHC"],
+            "Energy": ["XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PXD", "VLO", "PSX", "OXY"],
+            "Utilities": ["NEE", "DUK", "SO", "D", "SRE", "AEP", "EXC", "XEL", "ED", "WEC"],
+            "Real Estate": ["AMT", "PLD", "CCI", "EQIX", "PSA", "O", "SPG", "WELL", "DLR", "AVB"],
+            "Basic Materials": ["LIN", "APD", "SHW", "ECL", "FCX", "NEM", "NUE", "DOW", "DD", "PPG"],
+        }
+
+        peers = []
+        symbols_to_check = SECTOR_STOCKS.get(sector, [])
+
+        # Filter out the current symbol and limit
+        symbols_to_check = [s for s in symbols_to_check if s.upper() != symbol.upper()][:limit]
+
+        for peer_symbol in symbols_to_check:
+            try:
+                detail = await self.get_equity_detail(peer_symbol)
+                if detail:
+                    peers.append(detail)
+            except Exception as e:
+                logger.warning(f"Failed to fetch peer {peer_symbol}: {e}")
+                continue
+
+        return peers

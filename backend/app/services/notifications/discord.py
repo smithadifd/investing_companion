@@ -21,13 +21,52 @@ class DiscordNotificationService:
         Args:
             webhook_url: Discord webhook URL. Falls back to settings if not provided.
         """
-        self.webhook_url = webhook_url or settings.DISCORD_WEBHOOK_URL
+        self._env_webhook_url = webhook_url or settings.DISCORD_WEBHOOK_URL
         self._client: Optional[httpx.AsyncClient] = None
+        self._cached_db_url: Optional[str] = None
+        self._cache_checked: bool = False
+
+    async def _get_webhook_url(self) -> Optional[str]:
+        """Get webhook URL, checking database if not in environment."""
+        # If we have an environment URL, use it (takes precedence)
+        if self._env_webhook_url:
+            return self._env_webhook_url
+
+        # Check database for user setting (single-user app, so user_id=None)
+        if not self._cache_checked:
+            try:
+                from app.db.session import AsyncSessionLocal
+                from app.services.settings import SettingsService
+
+                async with AsyncSessionLocal() as session:
+                    settings_service = SettingsService(session)
+                    self._cached_db_url = await settings_service.get_unmasked_setting(
+                        SettingsService.DISCORD_WEBHOOK_URL,
+                        user_id=None,
+                    )
+                self._cache_checked = True
+                if self._cached_db_url:
+                    logger.info("Discord webhook URL loaded from user settings")
+            except Exception as e:
+                logger.warning(f"Could not load Discord webhook from database: {e}")
+                self._cache_checked = True
+
+        return self._cached_db_url
+
+    def clear_cache(self) -> None:
+        """Clear the cached webhook URL to force re-reading from database."""
+        self._cached_db_url = None
+        self._cache_checked = False
 
     @property
     def is_configured(self) -> bool:
-        """Check if Discord webhook is configured."""
-        return bool(self.webhook_url)
+        """Check if Discord webhook is configured (sync check for env only)."""
+        return bool(self._env_webhook_url)
+
+    async def is_configured_async(self) -> bool:
+        """Check if Discord webhook is configured (async, includes database)."""
+        url = await self._get_webhook_url()
+        return bool(url)
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client."""
@@ -106,7 +145,8 @@ class DiscordNotificationService:
         Returns:
             Tuple of (success, error_message)
         """
-        if not self.is_configured:
+        webhook_url = await self._get_webhook_url()
+        if not webhook_url:
             return False, "Discord webhook URL not configured"
 
         try:
@@ -171,7 +211,7 @@ class DiscordNotificationService:
             }
 
             client = await self._get_client()
-            response = await client.post(self.webhook_url, json=payload)
+            response = await client.post(webhook_url, json=payload)
 
             if response.status_code == 204:
                 logger.info(f"Discord notification sent for alert: {alert_name}")
@@ -196,7 +236,8 @@ class DiscordNotificationService:
         Returns:
             Tuple of (success, error_message)
         """
-        if not self.is_configured:
+        webhook_url = await self._get_webhook_url()
+        if not webhook_url:
             return False, "Discord webhook URL not configured"
 
         try:
@@ -222,7 +263,7 @@ class DiscordNotificationService:
             }
 
             client = await self._get_client()
-            response = await client.post(self.webhook_url, json=payload)
+            response = await client.post(webhook_url, json=payload)
 
             if response.status_code == 204:
                 logger.info("Discord test notification sent successfully")
@@ -252,7 +293,8 @@ class DiscordNotificationService:
         Returns:
             Tuple of (success, error_message)
         """
-        if not self.is_configured:
+        webhook_url = await self._get_webhook_url()
+        if not webhook_url:
             return False, "Discord webhook URL not configured"
 
         try:
@@ -294,7 +336,7 @@ class DiscordNotificationService:
             payload = {"embeds": [embed]}
 
             client = await self._get_client()
-            response = await client.post(self.webhook_url, json=payload)
+            response = await client.post(webhook_url, json=payload)
 
             if response.status_code == 204:
                 return True, None
@@ -309,3 +351,8 @@ class DiscordNotificationService:
 
 # Singleton instance
 discord_service = DiscordNotificationService()
+
+
+async def get_discord_service_configured() -> bool:
+    """Helper to check if Discord is configured (async, for use in endpoints)."""
+    return await discord_service.is_configured_async()

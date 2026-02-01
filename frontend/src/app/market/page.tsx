@@ -65,9 +65,14 @@ function getHeatmapBg(value: number | string | null): string {
 
 function IndexCard({ index }: { index: IndexQuote }) {
   const change = toNumber(index.change_percent);
+  // URL-encode the symbol for the link (handles ^ in index symbols)
+  const encodedSymbol = encodeURIComponent(index.symbol);
 
   return (
-    <div className="bg-white dark:bg-neutral-800 rounded-lg p-4 border border-neutral-200 dark:border-neutral-700">
+    <Link
+      href={`/equity/${encodedSymbol}`}
+      className="bg-white dark:bg-neutral-800 rounded-lg p-4 border border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600 hover:shadow-md transition-all"
+    >
       <div className="flex justify-between items-start mb-2">
         <div>
           <h3 className="font-semibold text-neutral-900 dark:text-neutral-50">
@@ -91,7 +96,7 @@ function IndexCard({ index }: { index: IndexQuote }) {
           {toNumber(index.change) >= 0 ? '+' : ''}{formatPrice(index.change)}
         </span>
       </div>
-    </div>
+    </Link>
   );
 }
 

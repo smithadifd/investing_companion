@@ -19,7 +19,7 @@ type TabType = 'chart' | 'fundamentals' | 'ai';
 
 export default function EquityPage() {
   const params = useParams();
-  const symbol = (params.symbol as string).toUpperCase();
+  const symbol = decodeURIComponent(params.symbol as string).toUpperCase();
   const [period, setPeriod] = useState('1y');
   const [activeTab, setActiveTab] = useState<TabType>('chart');
 

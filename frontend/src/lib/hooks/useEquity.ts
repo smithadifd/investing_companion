@@ -53,3 +53,39 @@ export function useHistory(symbol: string, period = '1y', interval = '1d') {
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }
+
+/**
+ * Get technical indicators
+ */
+export function useTechnicals(symbol: string, period = '1y') {
+  return useQuery({
+    queryKey: ['equity', symbol, 'technicals', period],
+    queryFn: () => api.getTechnicals(symbol, period),
+    enabled: !!symbol,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+/**
+ * Get technical indicators summary
+ */
+export function useTechnicalsSummary(symbol: string) {
+  return useQuery({
+    queryKey: ['equity', symbol, 'technicals', 'summary'],
+    queryFn: () => api.getTechnicalsSummary(symbol),
+    enabled: !!symbol,
+    staleTime: 60 * 1000, // 1 minute
+  });
+}
+
+/**
+ * Get peer companies for comparison
+ */
+export function usePeers(symbol: string, limit = 5) {
+  return useQuery({
+    queryKey: ['equity', symbol, 'peers', limit],
+    queryFn: () => api.getPeers(symbol, limit),
+    enabled: !!symbol,
+    staleTime: 10 * 60 * 1000, // 10 minutes - peers don't change often
+  });
+}

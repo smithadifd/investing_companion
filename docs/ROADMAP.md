@@ -96,27 +96,27 @@ price_history (TimescaleDB hypertable)
 ### Deliverables
 
 #### Backend
-- [ ] Watchlist model + CRUD endpoints
-- [ ] WatchlistItem with notes, target price, thesis
-- [ ] Fundamental analysis aggregation service
-- [ ] Technical indicators service (RSI, MACD, Moving Averages)
-- [ ] Import endpoint (CSV, JSON upload)
-- [ ] Export endpoint (CSV, JSON download)
-- [ ] Alpha Vantage integration for additional indicators
+- [x] Watchlist model + CRUD endpoints
+- [x] WatchlistItem with notes, target price, thesis
+- [x] Fundamental analysis aggregation service (peer comparison)
+- [x] Technical indicators service (RSI, MACD, Moving Averages)
+- [x] Import endpoint (CSV, JSON upload)
+- [x] Export endpoint (CSV, JSON download)
+- [ ] Alpha Vantage integration for additional indicators (optional)
 
 #### Frontend
-- [ ] Watchlist management page
-- [ ] Create/edit watchlist modal
-- [ ] Add equity to watchlist (from detail page or search)
-- [ ] Equity notes and thesis editor
-- [ ] Technical analysis tab on equity detail
-  - Indicator overlays on chart
-  - RSI, MACD sub-charts
-- [ ] Fundamental analysis tab
-  - Key metrics table
-  - Peer comparison (same sector)
-- [ ] Import dialog (drag & drop CSV/JSON)
-- [ ] Export button on watchlist
+- [x] Watchlist management page
+- [x] Create/edit watchlist modal
+- [x] Add equity to watchlist (from detail page or search)
+- [x] Equity notes and thesis editor
+- [x] Technical analysis tab on equity detail
+  - [x] Indicator overlays on chart (SMA, EMA, Bollinger Bands)
+  - [x] RSI, MACD sub-charts
+- [x] Fundamental analysis tab
+  - [x] Key metrics table
+  - [x] Peer comparison (same sector)
+- [x] Import dialog (drag & drop CSV/JSON)
+- [x] Export button on watchlist
 
 #### Data Model Additions
 ```
@@ -177,6 +177,7 @@ equity_fundamentals
 - [ ] Pre-defined ratio library (Gold/Silver, SPY/QQQ, etc.)
 - [ ] Market indices aggregation
 - [ ] Sector performance ranking
+- [ ] Alpha Vantage integration (optional - for additional indicators, forex, economic data)
 
 #### Frontend
 - [ ] AI Analysis component (chat-like interface on equity page)

@@ -204,7 +204,7 @@ npm test
 
 - [x] Phase 0: Foundation (structure, docs) - COMPLETE
 - [x] Phase 1: Prototype (equity display, charts) - COMPLETE
-- [ ] Phase 2: MVP (watchlists, analysis, import)
+- [x] Phase 2: MVP (watchlists, analysis, import) - COMPLETE
 - [ ] Phase 3: Intelligence (AI, ratios, indices)
 - [ ] Phase 4: Alerts (notifications)
 - [ ] Phase 5: Polish (auth, settings)

@@ -1,0 +1,459 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import { useTheme } from 'next-themes';
+import {
+  createChart,
+  IChartApi,
+  ISeriesApi,
+  ColorType,
+  Time,
+  LineStyle,
+} from 'lightweight-charts';
+import type { OHLCVData, TechnicalIndicators } from '@/lib/api/types';
+
+interface AdvancedChartProps {
+  data: OHLCVData[];
+  technicals?: TechnicalIndicators;
+  height?: number;
+  showSMA?: boolean;
+  showEMA?: boolean;
+  showBollingerBands?: boolean;
+  showRSI?: boolean;
+  showMACD?: boolean;
+}
+
+interface ChartColors {
+  background: string;
+  text: string;
+  grid: string;
+  border: string;
+}
+
+const INDICATOR_COLORS = {
+  sma20: '#f59e0b', // amber
+  sma50: '#3b82f6', // blue
+  sma200: '#8b5cf6', // purple
+  ema12: '#10b981', // emerald
+  ema26: '#ec4899', // pink
+  bbUpper: '#6366f1', // indigo
+  bbLower: '#6366f1',
+  bbMiddle: '#6366f1',
+  rsi: '#f59e0b',
+  macdLine: '#3b82f6',
+  macdSignal: '#ef4444',
+  macdHistogramPositive: '#22c55e',
+  macdHistogramNegative: '#ef4444',
+};
+
+export function AdvancedChart({
+  data,
+  technicals,
+  height = 400,
+  showSMA = true,
+  showEMA = false,
+  showBollingerBands = false,
+  showRSI = true,
+  showMACD = true,
+}: AdvancedChartProps) {
+  const mainContainerRef = useRef<HTMLDivElement>(null);
+  const rsiContainerRef = useRef<HTMLDivElement>(null);
+  const macdContainerRef = useRef<HTMLDivElement>(null);
+
+  const mainChartRef = useRef<IChartApi | null>(null);
+  const rsiChartRef = useRef<IChartApi | null>(null);
+  const macdChartRef = useRef<IChartApi | null>(null);
+
+  const { resolvedTheme } = useTheme();
+
+  const getColors = (): ChartColors => {
+    const isDark = resolvedTheme === 'dark';
+    return {
+      background: isDark ? '#1f2937' : '#ffffff',
+      text: isDark ? '#9ca3af' : '#333333',
+      grid: isDark ? '#374151' : '#f0f0f0',
+      border: isDark ? '#374151' : '#e0e0e0',
+    };
+  };
+
+  // Main price chart
+  useEffect(() => {
+    if (!mainContainerRef.current || data.length === 0) return;
+
+    const colors = getColors();
+    const chart = createChart(mainContainerRef.current, {
+      width: mainContainerRef.current.clientWidth,
+      height,
+      layout: {
+        background: { type: ColorType.Solid, color: colors.background },
+        textColor: colors.text,
+      },
+      grid: {
+        vertLines: { color: colors.grid },
+        horzLines: { color: colors.grid },
+      },
+      crosshair: { mode: 1 },
+      rightPriceScale: { borderColor: colors.border },
+      timeScale: {
+        borderColor: colors.border,
+        timeVisible: true,
+        secondsVisible: false,
+      },
+    });
+
+    // Candlestick series
+    const candlestickSeries = chart.addCandlestickSeries({
+      upColor: '#22c55e',
+      downColor: '#ef4444',
+      borderDownColor: '#ef4444',
+      borderUpColor: '#22c55e',
+      wickDownColor: '#ef4444',
+      wickUpColor: '#22c55e',
+    });
+
+    const chartData = data.map((item) => ({
+      time: item.timestamp.split('T')[0] as Time,
+      open: Number(item.open),
+      high: Number(item.high),
+      low: Number(item.low),
+      close: Number(item.close),
+    }));
+    candlestickSeries.setData(chartData);
+
+    // Volume series
+    const volumeSeries = chart.addHistogramSeries({
+      color: '#26a69a',
+      priceFormat: { type: 'volume' },
+      priceScaleId: 'volume',
+    });
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: { top: 0.85, bottom: 0 },
+    });
+    const volumeData = data
+      .filter((item) => item.volume != null)
+      .map((item) => ({
+        time: item.timestamp.split('T')[0] as Time,
+        value: item.volume as number,
+        color: Number(item.close) >= Number(item.open) ? '#22c55e50' : '#ef444450',
+      }));
+    volumeSeries.setData(volumeData);
+
+    // Add indicator overlays if technicals data available
+    if (technicals && technicals.timestamps.length > 0) {
+      const timestamps = technicals.timestamps.map(t => t.split('T')[0] as Time);
+
+      // SMA overlays
+      if (showSMA) {
+        addLineSeries(chart, timestamps, technicals.sma_20, INDICATOR_COLORS.sma20, 'SMA 20', 1);
+        addLineSeries(chart, timestamps, technicals.sma_50, INDICATOR_COLORS.sma50, 'SMA 50', 1);
+        addLineSeries(chart, timestamps, technicals.sma_200, INDICATOR_COLORS.sma200, 'SMA 200', 2);
+      }
+
+      // EMA overlays
+      if (showEMA) {
+        addLineSeries(chart, timestamps, technicals.ema_12, INDICATOR_COLORS.ema12, 'EMA 12', 1);
+        addLineSeries(chart, timestamps, technicals.ema_26, INDICATOR_COLORS.ema26, 'EMA 26', 1);
+      }
+
+      // Bollinger Bands
+      if (showBollingerBands) {
+        addLineSeries(chart, timestamps, technicals.bb_upper, INDICATOR_COLORS.bbUpper, 'BB Upper', 1, LineStyle.Dashed);
+        addLineSeries(chart, timestamps, technicals.bb_middle, INDICATOR_COLORS.bbMiddle, 'BB Middle', 1);
+        addLineSeries(chart, timestamps, technicals.bb_lower, INDICATOR_COLORS.bbLower, 'BB Lower', 1, LineStyle.Dashed);
+      }
+    }
+
+    chart.timeScale().fitContent();
+    mainChartRef.current = chart;
+
+    const handleResize = () => {
+      if (mainContainerRef.current) {
+        chart.applyOptions({ width: mainContainerRef.current.clientWidth });
+      }
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      chart.remove();
+    };
+  }, [data, technicals, height, showSMA, showEMA, showBollingerBands, resolvedTheme]);
+
+  // RSI sub-chart
+  useEffect(() => {
+    if (!rsiContainerRef.current || !technicals || !showRSI) return;
+
+    const colors = getColors();
+    const chart = createChart(rsiContainerRef.current, {
+      width: rsiContainerRef.current.clientWidth,
+      height: 120,
+      layout: {
+        background: { type: ColorType.Solid, color: colors.background },
+        textColor: colors.text,
+      },
+      grid: {
+        vertLines: { color: colors.grid },
+        horzLines: { color: colors.grid },
+      },
+      crosshair: { mode: 1 },
+      rightPriceScale: {
+        borderColor: colors.border,
+        scaleMargins: { top: 0.1, bottom: 0.1 },
+      },
+      timeScale: {
+        borderColor: colors.border,
+        timeVisible: true,
+        secondsVisible: false,
+        visible: !showMACD, // Only show time scale on bottom chart
+      },
+    });
+
+    const timestamps = technicals.timestamps.map(t => t.split('T')[0] as Time);
+
+    // RSI line
+    const rsiSeries = chart.addLineSeries({
+      color: INDICATOR_COLORS.rsi,
+      lineWidth: 2,
+      priceFormat: { type: 'custom', formatter: (price: number) => price.toFixed(1) },
+    });
+
+    const rsiData = timestamps.map((time, i) => ({
+      time,
+      value: technicals.rsi[i] ?? undefined,
+    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+    rsiSeries.setData(rsiData);
+
+    // Overbought/oversold lines
+    const overboughtLine = chart.addLineSeries({
+      color: '#ef4444',
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      crosshairMarkerVisible: false,
+      lastValueVisible: false,
+      priceLineVisible: false,
+    });
+    overboughtLine.setData(timestamps.map(time => ({ time, value: 70 })));
+
+    const oversoldLine = chart.addLineSeries({
+      color: '#22c55e',
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      crosshairMarkerVisible: false,
+      lastValueVisible: false,
+      priceLineVisible: false,
+    });
+    oversoldLine.setData(timestamps.map(time => ({ time, value: 30 })));
+
+    chart.timeScale().fitContent();
+    rsiChartRef.current = chart;
+
+    const handleResize = () => {
+      if (rsiContainerRef.current) {
+        chart.applyOptions({ width: rsiContainerRef.current.clientWidth });
+      }
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      chart.remove();
+    };
+  }, [technicals, showRSI, showMACD, resolvedTheme]);
+
+  // MACD sub-chart
+  useEffect(() => {
+    if (!macdContainerRef.current || !technicals || !showMACD) return;
+
+    const colors = getColors();
+    const chart = createChart(macdContainerRef.current, {
+      width: macdContainerRef.current.clientWidth,
+      height: 120,
+      layout: {
+        background: { type: ColorType.Solid, color: colors.background },
+        textColor: colors.text,
+      },
+      grid: {
+        vertLines: { color: colors.grid },
+        horzLines: { color: colors.grid },
+      },
+      crosshair: { mode: 1 },
+      rightPriceScale: {
+        borderColor: colors.border,
+        scaleMargins: { top: 0.1, bottom: 0.1 },
+      },
+      timeScale: {
+        borderColor: colors.border,
+        timeVisible: true,
+        secondsVisible: false,
+      },
+    });
+
+    const timestamps = technicals.timestamps.map(t => t.split('T')[0] as Time);
+
+    // MACD histogram
+    const histogramSeries = chart.addHistogramSeries({
+      priceFormat: { type: 'custom', formatter: (price: number) => price.toFixed(3) },
+      priceScaleId: 'macd',
+    });
+    const histogramData = timestamps.map((time, i) => {
+      const value = technicals.macd_histogram[i];
+      return {
+        time,
+        value: value ?? 0,
+        color: (value ?? 0) >= 0 ? INDICATOR_COLORS.macdHistogramPositive + '80' : INDICATOR_COLORS.macdHistogramNegative + '80',
+      };
+    }).filter(d => technicals.macd_histogram[timestamps.indexOf(d.time as string)] !== null);
+    histogramSeries.setData(histogramData);
+
+    // MACD line
+    const macdLine = chart.addLineSeries({
+      color: INDICATOR_COLORS.macdLine,
+      lineWidth: 2,
+      priceScaleId: 'macd',
+      priceFormat: { type: 'custom', formatter: (price: number) => price.toFixed(3) },
+    });
+    const macdData = timestamps.map((time, i) => ({
+      time,
+      value: technicals.macd[i] ?? undefined,
+    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+    macdLine.setData(macdData);
+
+    // Signal line
+    const signalLine = chart.addLineSeries({
+      color: INDICATOR_COLORS.macdSignal,
+      lineWidth: 2,
+      priceScaleId: 'macd',
+      priceFormat: { type: 'custom', formatter: (price: number) => price.toFixed(3) },
+    });
+    const signalData = timestamps.map((time, i) => ({
+      time,
+      value: technicals.macd_signal[i] ?? undefined,
+    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+    signalLine.setData(signalData);
+
+    chart.timeScale().fitContent();
+    macdChartRef.current = chart;
+
+    const handleResize = () => {
+      if (macdContainerRef.current) {
+        chart.applyOptions({ width: macdContainerRef.current.clientWidth });
+      }
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      chart.remove();
+    };
+  }, [technicals, showMACD, resolvedTheme]);
+
+  // Sync time scales
+  useEffect(() => {
+    const charts = [mainChartRef.current, rsiChartRef.current, macdChartRef.current].filter(Boolean) as IChartApi[];
+    if (charts.length < 2) return;
+
+    let isSyncing = false;
+
+    const syncTimeRange = (sourceChart: IChartApi) => {
+      if (isSyncing) return; // Prevent recursive sync
+
+      const timeRange = sourceChart.timeScale().getVisibleRange();
+      if (!timeRange) return; // Skip if range not yet available
+
+      isSyncing = true;
+      charts.forEach(chart => {
+        if (chart !== sourceChart) {
+          try {
+            chart.timeScale().setVisibleRange(timeRange);
+          } catch {
+            // Chart might be disposed or not ready
+          }
+        }
+      });
+      isSyncing = false;
+    };
+
+    const subscriptions = charts.map(chart => {
+      return chart.timeScale().subscribeVisibleTimeRangeChange(() => syncTimeRange(chart));
+    });
+
+    return () => {
+      subscriptions.forEach((unsub, i) => {
+        try {
+          if (charts[i]) {
+            charts[i].timeScale().unsubscribeVisibleTimeRangeChange(unsub);
+          }
+        } catch {
+          // Chart might already be disposed
+        }
+      });
+    };
+  }, [technicals, showRSI, showMACD]);
+
+  if (data.length === 0) {
+    return (
+      <div
+        className="flex items-center justify-center bg-neutral-100 dark:bg-neutral-800 rounded-lg"
+        style={{ height }}
+      >
+        <span className="text-neutral-500 dark:text-neutral-400">No data available</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      {/* Main chart */}
+      <div ref={mainContainerRef} className="w-full rounded-lg overflow-hidden" />
+
+      {/* RSI sub-chart */}
+      {showRSI && technicals && (
+        <div className="relative">
+          <div className="absolute left-2 top-1 text-xs text-neutral-500 dark:text-neutral-400 z-10">
+            RSI (14)
+          </div>
+          <div ref={rsiContainerRef} className="w-full rounded-lg overflow-hidden" />
+        </div>
+      )}
+
+      {/* MACD sub-chart */}
+      {showMACD && technicals && (
+        <div className="relative">
+          <div className="absolute left-2 top-1 text-xs text-neutral-500 dark:text-neutral-400 z-10">
+            MACD (12, 26, 9)
+          </div>
+          <div ref={macdContainerRef} className="w-full rounded-lg overflow-hidden" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Helper function to add line series
+function addLineSeries(
+  chart: IChartApi,
+  timestamps: Time[],
+  values: (number | null)[],
+  color: string,
+  title: string,
+  lineWidth: number = 1,
+  lineStyle: LineStyle = LineStyle.Solid
+) {
+  const series = chart.addLineSeries({
+    color,
+    lineWidth,
+    lineStyle,
+    crosshairMarkerVisible: true,
+    lastValueVisible: false,
+    priceLineVisible: false,
+    title,
+  });
+
+  const data = timestamps.map((time, i) => ({
+    time,
+    value: values[i] ?? undefined,
+  })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+
+  series.setData(data);
+  return series;
+}

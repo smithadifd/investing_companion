@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { SearchBar } from '@/components/search/SearchBar';
 
 export default function Home() {
@@ -23,11 +24,14 @@ export default function Home() {
         {/* Feature cards */}
         <h2 className="font-semibold text-neutral-900 dark:text-neutral-50 mb-4">Features</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <DashboardCard
-            title="Watchlists"
-            description="Track equities with notes and targets"
-            status="Phase 2"
-          />
+          <Link href="/watchlists">
+            <DashboardCard
+              title="Watchlists"
+              description="Track equities with notes and targets"
+              status="Available"
+              active
+            />
+          </Link>
           <DashboardCard
             title="Market Overview"
             description="Indices, sectors, and macro indicators"
@@ -64,16 +68,26 @@ function DashboardCard({
   title,
   description,
   status,
+  active,
 }: {
   title: string;
   description: string;
   status: string;
+  active?: boolean;
 }) {
   return (
-    <div className="p-5 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl hover:shadow-md transition-all">
+    <div className={`p-5 bg-white dark:bg-neutral-800 border rounded-xl hover:shadow-md transition-all ${
+      active
+        ? 'border-blue-500/50 hover:border-blue-500'
+        : 'border-neutral-200 dark:border-neutral-700'
+    }`}>
       <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-1.5">{title}</h3>
       <p className="text-neutral-500 dark:text-neutral-400 text-sm mb-3">{description}</p>
-      <span className="inline-block text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-full">
+      <span className={`inline-block text-xs font-medium px-2.5 py-1 rounded-full ${
+        active
+          ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10'
+          : 'text-amber-600 dark:text-amber-400 bg-amber-500/10'
+      }`}>
         {status}
       </span>
     </div>

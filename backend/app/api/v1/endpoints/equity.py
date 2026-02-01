@@ -15,6 +15,7 @@ from app.schemas.equity import (
     QuoteResponse,
 )
 from app.services.equity import EquityService
+from app.services.technical import TechnicalAnalysisService
 
 router = APIRouter()
 
@@ -98,3 +99,63 @@ async def get_history(
         )
 
     return DataResponse(data=history, meta=create_meta())
+
+
+@router.get("/{symbol}/technicals")
+async def get_technicals(
+    symbol: str,
+    period: str = Query(
+        "1y",
+        pattern="^(1d|5d|1mo|3mo|6mo|1y|2y|5y|10y|max)$",
+        description="Time period",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> DataResponse[dict]:
+    """Get technical indicators for an equity."""
+    equity_service = EquityService(db)
+    history = await equity_service.get_history(symbol, period, "1d")
+
+    if not history:
+        raise HTTPException(
+            status_code=404,
+            detail=f"History for '{symbol}' not found",
+        )
+
+    tech_service = TechnicalAnalysisService()
+    indicators = tech_service.calculate_all(history.history)
+
+    return DataResponse(data=indicators, meta=create_meta())
+
+
+@router.get("/{symbol}/technicals/summary")
+async def get_technicals_summary(
+    symbol: str,
+    db: AsyncSession = Depends(get_db),
+) -> DataResponse[dict]:
+    """Get summary of current technical indicator values."""
+    equity_service = EquityService(db)
+    history = await equity_service.get_history(symbol, "1y", "1d")
+
+    if not history:
+        raise HTTPException(
+            status_code=404,
+            detail=f"History for '{symbol}' not found",
+        )
+
+    tech_service = TechnicalAnalysisService()
+    summary = tech_service.get_summary(history.history)
+
+    return DataResponse(data=summary, meta=create_meta())
+
+
+@router.get("/{symbol}/peers", response_model=DataResponse[List[EquityDetailResponse]])
+async def get_peers(
+    symbol: str,
+    limit: int = Query(5, ge=1, le=10, description="Maximum number of peers"),
+    db: AsyncSession = Depends(get_db),
+) -> DataResponse[List[EquityDetailResponse]]:
+    """Get peer companies in the same sector for comparison."""
+    service = EquityService(db)
+    peers = await service.get_peers(symbol, limit)
+
+    return DataResponse(data=peers, meta=create_meta())

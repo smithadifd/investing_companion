@@ -92,13 +92,6 @@ const COMPARISON_METRICS: ComparisonMetric[] = [
     higherIsBetter: true,
   },
   {
-    label: 'ROE',
-    key: 'roe',
-    format: formatPercentValue,
-    getValue: (e) => e.fundamentals?.roe,
-    higherIsBetter: true,
-  },
-  {
     label: 'Beta',
     key: 'beta',
     format: formatRatio,

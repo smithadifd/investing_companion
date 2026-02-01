@@ -373,16 +373,16 @@ export function AdvancedChart({
       isSyncing = false;
     };
 
-    const subscriptions = charts.map(chart => {
-      return chart.timeScale().subscribeVisibleTimeRangeChange(() => syncTimeRange(chart));
+    const handlers: (() => void)[] = charts.map(chart => {
+      const handler = () => syncTimeRange(chart);
+      chart.timeScale().subscribeVisibleTimeRangeChange(handler);
+      return handler;
     });
 
     return () => {
-      subscriptions.forEach((unsub, i) => {
+      charts.forEach((chart, i) => {
         try {
-          if (charts[i]) {
-            charts[i].timeScale().unsubscribeVisibleTimeRangeChange(unsub);
-          }
+          chart.timeScale().unsubscribeVisibleTimeRangeChange(handlers[i]);
         } catch {
           // Chart might already be disposed
         }
@@ -436,7 +436,7 @@ function addLineSeries(
   values: (number | null)[],
   color: string,
   title: string,
-  lineWidth: number = 1,
+  lineWidth: 1 | 2 | 3 | 4 = 1,
   lineStyle: LineStyle = LineStyle.Solid
 ) {
   const series = chart.addLineSeries({

@@ -23,10 +23,10 @@ export function Header() {
             <NavLink href="/watchlists" active={pathname.startsWith('/watchlists')}>
               Watchlists
             </NavLink>
-            <NavLink href="/market" active={pathname.startsWith('/market')} disabled>
+            <NavLink href="/market" active={pathname.startsWith('/market')}>
               Market
             </NavLink>
-            <NavLink href="/ratios" active={pathname.startsWith('/ratios')} disabled>
+            <NavLink href="/ratios" active={pathname.startsWith('/ratios')}>
               Ratios
             </NavLink>
           </nav>

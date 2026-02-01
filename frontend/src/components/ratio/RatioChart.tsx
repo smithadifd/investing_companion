@@ -56,9 +56,14 @@ export function RatioChart({ ratio }: RatioChartProps) {
 
     const isDark = resolvedTheme === 'dark';
 
-    // Clear existing chart
+    // Clear existing chart safely
     if (chartRef.current) {
-      chartRef.current.remove();
+      try {
+        chartRef.current.remove();
+      } catch {
+        // Chart may already be disposed
+      }
+      chartRef.current = null;
     }
 
     const chart = createChart(chartContainerRef.current, {
@@ -129,7 +134,12 @@ export function RatioChart({ ratio }: RatioChartProps) {
 
     return () => {
       window.removeEventListener('resize', handleResize);
-      chart.remove();
+      try {
+        chart.remove();
+      } catch {
+        // Chart may already be disposed
+      }
+      chartRef.current = null;
     };
   }, [history, resolvedTheme]);
 

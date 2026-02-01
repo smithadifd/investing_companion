@@ -37,10 +37,10 @@ export default function WatchlistsPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[calc(100vh-4rem)] bg-background">
+      <div className="flex items-center justify-center min-h-[calc(100vh-4rem)] bg-neutral-50 dark:bg-neutral-900">
         <div className="flex flex-col items-center gap-4">
           <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
-          <span className="text-muted-foreground">Loading watchlists...</span>
+          <span className="text-neutral-500 dark:text-neutral-400">Loading watchlists...</span>
         </div>
       </div>
     );
@@ -48,10 +48,10 @@ export default function WatchlistsPage() {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center min-h-[calc(100vh-4rem)] bg-background">
+      <div className="flex items-center justify-center min-h-[calc(100vh-4rem)] bg-neutral-50 dark:bg-neutral-900">
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-foreground">Error Loading Watchlists</h1>
-          <p className="text-muted-foreground mt-2">
+          <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50">Error Loading Watchlists</h1>
+          <p className="text-neutral-500 dark:text-neutral-400 mt-2">
             Could not load your watchlists. Please try again later.
           </p>
         </div>
@@ -60,21 +60,21 @@ export default function WatchlistsPage() {
   }
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-background">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
+    <div className="min-h-[calc(100vh-4rem)] bg-neutral-50 dark:bg-neutral-900">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
+            <h1 className="text-2xl sm:text-3xl font-bold text-neutral-900 dark:text-neutral-50">
               Watchlists
             </h1>
-            <p className="text-muted-foreground mt-1">
+            <p className="text-neutral-500 dark:text-neutral-400 mt-1 text-sm">
               Track equities with notes and price targets
             </p>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowImportModal(true)}
-              className="flex items-center gap-2 px-4 py-2 border border-border hover:bg-muted text-foreground rounded-lg font-medium transition-colors"
+              className="flex items-center gap-2 px-4 py-2 border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-900 dark:text-neutral-50 rounded-lg font-medium transition-colors"
             >
               <Upload className="h-4 w-4" />
               <span className="hidden sm:inline">Import</span>
@@ -90,12 +90,12 @@ export default function WatchlistsPage() {
         </div>
 
         {!watchlists || watchlists.length === 0 ? (
-          <div className="bg-card border border-border rounded-xl shadow-sm p-12 text-center">
-            <List className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-            <h2 className="text-xl font-semibold text-foreground mb-2">
+          <div className="bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl p-12 text-center">
+            <List className="h-12 w-12 text-neutral-400 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold text-neutral-900 dark:text-neutral-50 mb-2">
               No Watchlists Yet
             </h2>
-            <p className="text-muted-foreground mb-6">
+            <p className="text-neutral-500 dark:text-neutral-400 mb-6">
               Create your first watchlist to start tracking equities.
             </p>
             <button
@@ -112,33 +112,33 @@ export default function WatchlistsPage() {
               <Link
                 key={watchlist.id}
                 href={`/watchlists/${watchlist.id}`}
-                className="block bg-card border border-border rounded-xl shadow-sm p-5 hover:shadow-md hover:border-blue-500/30 transition-all group"
+                className="block bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl p-5 hover:shadow-md hover:border-blue-500/30 transition-all group"
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <h2 className="text-lg font-semibold text-foreground truncate">
+                      <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50 truncate">
                         {watchlist.name}
                       </h2>
                       {watchlist.is_default && (
-                        <span className="px-2 py-0.5 text-xs font-medium bg-blue-500/10 text-blue-500 rounded-full">
+                        <span className="px-2 py-0.5 text-xs font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-full">
                           Default
                         </span>
                       )}
                     </div>
                     {watchlist.description && (
-                      <p className="text-muted-foreground text-sm mt-1 line-clamp-2">
+                      <p className="text-neutral-500 dark:text-neutral-400 text-sm mt-1 line-clamp-2">
                         {watchlist.description}
                       </p>
                     )}
-                    <div className="flex items-center gap-4 mt-3 text-sm text-muted-foreground">
+                    <div className="flex items-center gap-4 mt-3 text-sm text-neutral-500 dark:text-neutral-400">
                       <span>{watchlist.item_count} {watchlist.item_count === 1 ? 'item' : 'items'}</span>
                       <span>Updated {formatDate(watchlist.updated_at)}</span>
                     </div>
                   </div>
                   <button
                     onClick={(e) => handleDeleteClick(watchlist, e)}
-                    className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                    className="p-2 text-neutral-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
                     title="Delete watchlist"
                   >
                     <Trash2 className="h-4 w-4" />

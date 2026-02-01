@@ -22,7 +22,13 @@ import type {
   HistoryData,
   MarketOverview,
   NotificationStatus,
+  PaginatedMeta,
   PasswordChange,
+  PerformanceReport,
+  PortfolioSummary,
+  PositionSizeRequest,
+  PositionSizeResponse,
+  PositionSummary,
   Quote,
   Ratio,
   RatioCreate,
@@ -35,6 +41,11 @@ import type {
   TechnicalSummary,
   TokenRefresh,
   TokenResponse,
+  Trade,
+  TradeCreate,
+  TradePair,
+  TradeType,
+  TradeUpdate,
   User,
   UserCreate,
   UserLogin,
@@ -767,6 +778,126 @@ class ApiClient {
    */
   async getNotificationStatus(): Promise<NotificationStatus> {
     return this.fetch<NotificationStatus>('/alerts/notifications/status');
+  }
+
+  // Trade methods
+
+  /**
+   * Get all trades
+   */
+  async getTrades(params?: {
+    equity_id?: number;
+    trade_type?: TradeType;
+    start_date?: string;
+    end_date?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ trades: Trade[]; total: number }> {
+    const queryParams = new URLSearchParams();
+    if (params?.equity_id) queryParams.append('equity_id', params.equity_id.toString());
+    if (params?.trade_type) queryParams.append('trade_type', params.trade_type);
+    if (params?.start_date) queryParams.append('start_date', params.start_date);
+    if (params?.end_date) queryParams.append('end_date', params.end_date);
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.offset) queryParams.append('offset', params.offset.toString());
+
+    const queryString = queryParams.toString();
+    const url = queryString ? `/trades?${queryString}` : '/trades';
+
+    // This endpoint returns data with paginated meta
+    const response = await fetch(`${API_BASE}${url}`, {
+      headers: this.accessToken ? { Authorization: `Bearer ${this.accessToken}` } : {},
+    });
+
+    if (!response.ok) {
+      throw new ApiError('Failed to fetch trades', 'FETCH_ERROR', response.status);
+    }
+
+    const result = await response.json();
+    return {
+      trades: result.data,
+      total: result.meta?.total || result.data.length,
+    };
+  }
+
+  /**
+   * Get a single trade
+   */
+  async getTrade(id: number): Promise<Trade> {
+    return this.fetch<Trade>(`/trades/${id}`);
+  }
+
+  /**
+   * Create a new trade
+   */
+  async createTrade(data: TradeCreate): Promise<Trade> {
+    return this.fetch<Trade>('/trades', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Update a trade
+   */
+  async updateTrade(id: number, data: TradeUpdate): Promise<Trade> {
+    return this.fetch<Trade>(`/trades/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Delete a trade
+   */
+  async deleteTrade(id: number): Promise<void> {
+    await this.fetch(`/trades/${id}`, { method: 'DELETE' });
+  }
+
+  /**
+   * Get portfolio summary
+   */
+  async getPortfolio(): Promise<PortfolioSummary> {
+    return this.fetch<PortfolioSummary>('/trades/portfolio');
+  }
+
+  /**
+   * Get performance report
+   */
+  async getPerformance(startDate?: string, endDate?: string): Promise<PerformanceReport> {
+    const params = new URLSearchParams();
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
+    const queryString = params.toString();
+    const url = queryString ? `/trades/performance?${queryString}` : '/trades/performance';
+    return this.fetch<PerformanceReport>(url);
+  }
+
+  /**
+   * Get trade pairs (matched trades for P&L)
+   */
+  async getTradePairs(equityId?: number, limit = 100): Promise<TradePair[]> {
+    const params = new URLSearchParams();
+    if (equityId) params.append('equity_id', equityId.toString());
+    params.append('limit', limit.toString());
+    return this.fetch<TradePair[]>(`/trades/pairs?${params.toString()}`);
+  }
+
+  /**
+   * Get position for a specific equity
+   */
+  async getPosition(equityId: number): Promise<PositionSummary> {
+    return this.fetch<PositionSummary>(`/trades/positions/${equityId}`);
+  }
+
+  /**
+   * Calculate position size
+   */
+  async calculatePositionSize(data: PositionSizeRequest): Promise<PositionSizeResponse> {
+    return this.fetch<PositionSizeResponse>('/trades/position-size', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   }
 }
 

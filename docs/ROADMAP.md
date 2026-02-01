@@ -10,7 +10,8 @@
 | 3 | Intelligence | AI + Ratios + Indices | 1-2 weeks | AI-powered insights |
 | 4 | Alerts | Notifications | 3-5 days | Real-time alerts |
 | 5 | Polish | Auth + Settings | 3-5 days | Production-ready |
-| 6 | Advanced | Trade Tracker | Ongoing | Full trading companion |
+| 6 | Trade Tracker | Trades + P&L + Sizing | 1-2 weeks | Track performance |
+| 7 | Advanced AI | AI integrations | TBD | AI-powered automation |
 
 ---
 
@@ -390,37 +391,48 @@ sessions
 
 ---
 
-## Phase 6: Advanced (Future)
-**Goal**: Trade tracking, position sizing, advanced AI features
+## Phase 6: Trade Tracker ✅
+**Goal**: Trade tracking, position sizing, performance analytics
+**Status**: COMPLETE
 
-### Potential Features
+### Deliverables
 
-#### Trade Tracker
-- [ ] Trade model (entry, exit, quantity, fees)
-- [ ] Quick trade entry form
-- [ ] Trade journal with notes
-- [ ] P&L calculations (realized, unrealized)
-- [ ] Performance analytics
+#### Backend
+- [x] Trade model + CRUD endpoints
+- [x] Trade matching service (FIFO for P&L calculation)
+- [x] Performance analytics service
+- [x] Position sizing calculator service
+- [x] Portfolio summary endpoint
+
+#### Frontend
+- [x] Trades page with filterable list
+- [x] Quick trade entry form
+  - Select equity (with search)
+  - Trade type (buy, sell, short, cover)
+  - Quantity, price, fees
+  - Date/time picker
+  - Optional notes
+- [x] Trade detail/edit modal
+- [x] Quick add feature (Buy More/Sell buttons on positions)
+- [x] P&L dashboard
+  - Realized vs unrealized P&L
+  - P&L by equity, sector
+- [x] Performance analytics page
   - Win rate
   - Average gain/loss
   - Best/worst trades
-  - Performance by sector/thesis
-
-#### Position Sizer
-- [ ] Risk calculator
+  - Streak tracking
+  - Profit factor
+  - Performance by sector/equity
+- [x] Position sizer tool with tooltips
   - Account size input
   - Risk percentage
   - Stop loss level
   - → Suggested position size
-- [ ] Kelly Criterion option
-- [ ] Volatility-adjusted sizing
 
-#### Advanced AI
-- [ ] Auto-summarize market news
-- [ ] Thesis challenger (devil's advocate mode)
-- [ ] Portfolio review scheduling
-- [ ] Voice input for quick notes
-- [ ] Integration with Claude MCP (Claude Code can query your app)
+#### UI Improvements
+- [x] Hamburger slide-out menu for mobile navigation
+- [x] Responsive header with desktop horizontal nav
 
 #### Data Model Additions
 ```
@@ -428,23 +440,95 @@ trades
 ├── id (PK)
 ├── user_id (FK)
 ├── equity_id (FK)
-├── trade_type (buy, sell, short, cover)
-├── quantity
-├── price
-├── fees
-├── executed_at
-├── notes
-├── thesis_id (FK to watchlist_item, optional)
-└── created_at
+├── trade_type (enum: buy, sell, short, cover)
+├── quantity (decimal)
+├── price (decimal)
+├── fees (decimal, default 0)
+├── executed_at (timestamp)
+├── notes (text, nullable)
+├── watchlist_item_id (FK, nullable - links to thesis)
+├── created_at
+└── updated_at
 
 trade_pairs (for P&L matching)
 ├── id (PK)
+├── user_id (FK)
+├── equity_id (FK)
 ├── open_trade_id (FK)
 ├── close_trade_id (FK)
-├── quantity_matched
-├── realized_pnl
+├── quantity_matched (decimal)
+├── realized_pnl (decimal)
+├── holding_period_days (int)
 └── calculated_at
+
+positions (materialized view or calculated)
+├── user_id
+├── equity_id
+├── quantity (net shares held)
+├── avg_cost_basis
+├── current_value
+├── unrealized_pnl
+└── last_updated
 ```
+
+### Position Sizer Formulas
+| Method | Formula |
+|--------|---------|
+| Fixed Risk | Position Size = (Account × Risk%) / (Entry - Stop) |
+| Kelly Criterion | f* = (bp - q) / b where b=win/loss ratio, p=win rate, q=1-p |
+| ATR-based | Position Size = (Account × Risk%) / (ATR × Multiplier) |
+
+### Success Criteria
+- [x] Log a buy trade for CCJ at $52.50
+- [x] Log a sell trade for partial position
+- [x] View realized P&L for the closed portion
+- [x] View unrealized P&L for remaining position
+- [x] See win rate and average gain across all trades
+- [x] Calculate position size for a new trade with 2% risk
+
+---
+
+## Phase 7: Advanced AI (Future)
+**Goal**: AI-powered analysis, automation, and integrations
+**Depends on**: Resolving Claude OAuth/API access (see [Issue #001](./issues/001-claude-oauth-support.md))
+
+### Prerequisites
+Before starting Phase 7, one of the following must be completed:
+1. Set up a Claude API proxy (OpenClawd, CLIProxyAPI)
+2. Subscribe to standard Anthropic API billing
+3. Anthropic adds OAuth token support for third-party integrations
+
+### Potential Features
+
+#### AI Trade Analysis
+- [ ] Trade review (AI analyzes your entry/exit decisions)
+- [ ] Pattern recognition (common mistakes, strengths)
+- [ ] Trade journaling prompts (AI asks follow-up questions)
+
+#### Market Intelligence
+- [ ] Auto-summarize market news
+- [ ] Earnings call summarization
+- [ ] SEC filing analysis (10-K, 10-Q highlights)
+
+#### Thesis Challenger
+- [ ] Devil's advocate mode (challenges your investment thesis)
+- [ ] Counter-argument generation
+- [ ] Risk factor identification
+
+#### Automation
+- [ ] Scheduled portfolio reviews (weekly/monthly summaries)
+- [ ] Alert-triggered analysis (AI comments on triggered alerts)
+- [ ] Voice input for quick notes
+
+#### Integrations
+- [ ] Claude MCP server (Claude Code can query your portfolio)
+- [ ] Export to Obsidian/Notion (AI-formatted summaries)
+
+### Success Criteria
+- AI reviews a completed trade and provides feedback
+- Weekly portfolio summary generated automatically
+- Ask AI "What are the risks to my uranium thesis?"
+- Claude Code can query "What's my current exposure to energy sector?"
 
 ---
 
@@ -489,7 +573,8 @@ main (production)
 | **M3: "Intelligent"** | + 3 | AI analysis, ratios, market overview |
 | **M4: "Proactive"** | + 4 | Alerts and notifications |
 | **M5: "Production"** | + 5 | Auth, settings, hardened |
-| **M6: "Complete"** | + 6 | Trade tracking, position sizing |
+| **M6: "Trader"** | + 6 | Trade tracking, P&L, position sizing |
+| **M7: "Complete"** | + 7 | AI automation, integrations |
 
 ---
 

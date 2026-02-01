@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -9,11 +9,9 @@ import {
   Plus,
   Settings,
   Download,
-  Upload,
 } from 'lucide-react';
 import {
   useWatchlist,
-  useUpdateWatchlist,
   useRemoveWatchlistItem,
   useExportWatchlist,
 } from '@/lib/hooks/useWatchlist';
@@ -22,7 +20,15 @@ import { AddEquityModal } from '@/components/watchlist/AddEquityModal';
 import { EditWatchlistModal } from '@/components/watchlist/EditWatchlistModal';
 import { EditItemModal } from '@/components/watchlist/EditItemModal';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { SortableHeader, type SortConfig } from '@/components/ui/SortableHeader';
 import type { WatchlistItem } from '@/lib/api/types';
+
+type SortKey = 'symbol' | 'price' | 'change' | 'target';
+
+function parseNumber(value: number | string | null | undefined): number {
+  if (value === null || value === undefined) return 0;
+  return typeof value === 'string' ? parseFloat(value) : value;
+}
 
 export default function WatchlistDetailPage() {
   const params = useParams();
@@ -32,11 +38,77 @@ export default function WatchlistDetailPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingItem, setEditingItem] = useState<WatchlistItem | null>(null);
   const [removingItem, setRemovingItem] = useState<WatchlistItem | null>(null);
+  const [sortConfig, setSortConfig] = useState<SortConfig<SortKey>>({
+    key: 'change',
+    direction: 'desc',
+  });
 
   const { data: watchlist, isLoading, error } = useWatchlist(id);
-  const updateMutation = useUpdateWatchlist();
   const removeMutation = useRemoveWatchlistItem();
   const exportMutation = useExportWatchlist();
+
+  const handleSort = (key: SortKey) => {
+    setSortConfig((current) => {
+      if (current.key !== key) {
+        return { key, direction: 'desc' };
+      }
+      if (current.direction === 'desc') {
+        return { key, direction: 'asc' };
+      }
+      if (current.direction === 'asc') {
+        return { key, direction: null };
+      }
+      return { key, direction: 'desc' };
+    });
+  };
+
+  const sortedItems = useMemo(() => {
+    if (!watchlist?.items) return [];
+
+    const items = [...watchlist.items];
+
+    if (!sortConfig.direction) {
+      // Default: sort by absolute change (biggest movers first)
+      return items.sort((a, b) => {
+        const aChange = Math.abs(parseNumber(a.quote?.change_percent));
+        const bChange = Math.abs(parseNumber(b.quote?.change_percent));
+        return bChange - aChange;
+      });
+    }
+
+    return items.sort((a, b) => {
+      let aVal: number | string = 0;
+      let bVal: number | string = 0;
+
+      switch (sortConfig.key) {
+        case 'symbol':
+          aVal = a.equity.symbol;
+          bVal = b.equity.symbol;
+          break;
+        case 'price':
+          aVal = parseNumber(a.quote?.price);
+          bVal = parseNumber(b.quote?.price);
+          break;
+        case 'change':
+          aVal = parseNumber(a.quote?.change_percent);
+          bVal = parseNumber(b.quote?.change_percent);
+          break;
+        case 'target':
+          aVal = parseNumber(a.target_price);
+          bVal = parseNumber(b.target_price);
+          break;
+      }
+
+      if (typeof aVal === 'string' && typeof bVal === 'string') {
+        const comparison = aVal.localeCompare(bVal);
+        return sortConfig.direction === 'asc' ? comparison : -comparison;
+      }
+
+      const numA = typeof aVal === 'number' ? aVal : 0;
+      const numB = typeof bVal === 'number' ? bVal : 0;
+      return sortConfig.direction === 'asc' ? numA - numB : numB - numA;
+    });
+  }, [watchlist?.items, sortConfig]);
 
   const handleRemoveItem = async () => {
     if (!removingItem) return;
@@ -65,10 +137,10 @@ export default function WatchlistDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[calc(100vh-4rem)] bg-background">
+      <div className="flex items-center justify-center min-h-[calc(100vh-4rem)] bg-neutral-50 dark:bg-neutral-900">
         <div className="flex flex-col items-center gap-4">
           <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
-          <span className="text-muted-foreground">Loading watchlist...</span>
+          <span className="text-neutral-500 dark:text-neutral-400">Loading watchlist...</span>
         </div>
       </div>
     );
@@ -76,12 +148,12 @@ export default function WatchlistDetailPage() {
 
   if (error || !watchlist) {
     return (
-      <div className="flex items-center justify-center min-h-[calc(100vh-4rem)] bg-background">
+      <div className="flex items-center justify-center min-h-[calc(100vh-4rem)] bg-neutral-50 dark:bg-neutral-900">
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-foreground">
+          <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50">
             Watchlist Not Found
           </h1>
-          <p className="text-muted-foreground mt-2">
+          <p className="text-neutral-500 dark:text-neutral-400 mt-2">
             This watchlist does not exist or was deleted.
           </p>
           <Link
@@ -97,37 +169,37 @@ export default function WatchlistDetailPage() {
   }
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-background">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+    <div className="min-h-[calc(100vh-4rem)] bg-neutral-50 dark:bg-neutral-900">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {/* Back link */}
         <Link
           href="/watchlists"
-          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-6 transition-colors"
+          className="inline-flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-50 mb-6 transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Watchlists
         </Link>
 
         {/* Header */}
-        <div className="bg-card border border-border rounded-xl shadow-sm p-6 mb-6">
+        <div className="bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl p-6 mb-6">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
             <div className="flex-1">
               <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-bold text-foreground">
+                <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50">
                   {watchlist.name}
                 </h1>
                 {watchlist.is_default && (
-                  <span className="px-2 py-0.5 text-xs font-medium bg-blue-500/10 text-blue-500 rounded-full">
+                  <span className="px-2 py-0.5 text-xs font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-full">
                     Default
                   </span>
                 )}
               </div>
               {watchlist.description && (
-                <p className="text-muted-foreground mt-2">
+                <p className="text-neutral-500 dark:text-neutral-400 mt-2">
                   {watchlist.description}
                 </p>
               )}
-              <p className="text-sm text-muted-foreground mt-2">
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-2">
                 {watchlist.items.length}{' '}
                 {watchlist.items.length === 1 ? 'equity' : 'equities'}
               </p>
@@ -144,7 +216,7 @@ export default function WatchlistDetailPage() {
               <button
                 onClick={handleExport}
                 disabled={exportMutation.isPending}
-                className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
+                className="p-2 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-50 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-lg transition-colors"
                 title="Export watchlist"
               >
                 {exportMutation.isPending ? (
@@ -155,7 +227,7 @@ export default function WatchlistDetailPage() {
               </button>
               <button
                 onClick={() => setShowEditModal(true)}
-                className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
+                className="p-2 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-50 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-lg transition-colors"
                 title="Edit watchlist"
               >
                 <Settings className="h-5 w-5" />
@@ -166,8 +238,8 @@ export default function WatchlistDetailPage() {
 
         {/* Items */}
         {watchlist.items.length === 0 ? (
-          <div className="bg-card border border-border rounded-xl shadow-sm p-12 text-center">
-            <p className="text-muted-foreground mb-4">
+          <div className="bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl p-12 text-center">
+            <p className="text-neutral-500 dark:text-neutral-400 mb-4">
               This watchlist is empty. Add equities to start tracking.
             </p>
             <button
@@ -179,31 +251,58 @@ export default function WatchlistDetailPage() {
             </button>
           </div>
         ) : (
-          <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+          <div className="bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-border bg-muted/50">
-                    <th className="text-left p-4 font-medium text-muted-foreground">
-                      Symbol
+                  <tr className="border-b border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50">
+                    <th className="text-left p-4">
+                      <SortableHeader
+                        label="Symbol"
+                        sortKey="symbol"
+                        currentSort={sortConfig}
+                        onSort={handleSort}
+                        align="left"
+                      />
                     </th>
-                    <th className="text-right p-4 font-medium text-muted-foreground">
-                      Price
+                    <th className="text-right p-4">
+                      <SortableHeader
+                        label="Price"
+                        sortKey="price"
+                        currentSort={sortConfig}
+                        onSort={handleSort}
+                        align="right"
+                        className="w-full"
+                      />
                     </th>
-                    <th className="text-right p-4 font-medium text-muted-foreground">
-                      Change
+                    <th className="text-right p-4">
+                      <SortableHeader
+                        label="Change"
+                        sortKey="change"
+                        currentSort={sortConfig}
+                        onSort={handleSort}
+                        align="right"
+                        className="w-full"
+                      />
                     </th>
-                    <th className="text-right p-4 font-medium text-muted-foreground hidden sm:table-cell">
-                      Target
+                    <th className="text-right p-4 hidden sm:table-cell">
+                      <SortableHeader
+                        label="Target"
+                        sortKey="target"
+                        currentSort={sortConfig}
+                        onSort={handleSort}
+                        align="right"
+                        className="w-full"
+                      />
                     </th>
-                    <th className="text-left p-4 font-medium text-muted-foreground hidden md:table-cell">
+                    <th className="text-left p-4 font-medium text-neutral-500 dark:text-neutral-400 text-sm hidden md:table-cell">
                       Notes
                     </th>
                     <th className="p-4 w-20"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {watchlist.items.map((item) => (
+                  {sortedItems.map((item) => (
                     <WatchlistItemRow
                       key={item.id}
                       item={item}

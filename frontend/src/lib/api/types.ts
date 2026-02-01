@@ -516,3 +516,146 @@ export interface AppSettingsUpdate {
   default_watchlist_id?: number;
   theme?: string;
 }
+
+// Trade types
+export type TradeType = 'buy' | 'sell' | 'short' | 'cover';
+
+export interface TradeEquity {
+  id: number;
+  symbol: string;
+  name: string;
+  exchange: string | null;
+  sector: string | null;
+}
+
+export interface Trade {
+  id: number;
+  user_id: string;
+  equity_id: number;
+  trade_type: TradeType;
+  quantity: number | string;
+  price: number | string;
+  fees: number | string;
+  executed_at: string;
+  notes: string | null;
+  watchlist_item_id: number | null;
+  equity: TradeEquity;
+  total_value: number | string;
+  total_cost: number | string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TradeCreate {
+  equity_id?: number;
+  symbol?: string;
+  trade_type: TradeType;
+  quantity: number;
+  price: number;
+  fees?: number;
+  executed_at: string;
+  notes?: string;
+  watchlist_item_id?: number;
+}
+
+export interface TradeUpdate {
+  trade_type?: TradeType;
+  quantity?: number;
+  price?: number;
+  fees?: number;
+  executed_at?: string;
+  notes?: string;
+  watchlist_item_id?: number;
+}
+
+export interface TradePair {
+  id: number;
+  equity_id: number;
+  open_trade_id: number;
+  close_trade_id: number;
+  quantity_matched: number | string;
+  realized_pnl: number | string;
+  holding_period_days: number;
+  calculated_at: string;
+  equity: TradeEquity;
+}
+
+export interface PositionSummary {
+  equity_id: number;
+  equity: TradeEquity;
+  quantity: number | string;
+  avg_cost_basis: number | string;
+  total_cost: number | string;
+  current_price: number | string | null;
+  current_value: number | string | null;
+  unrealized_pnl: number | string | null;
+  unrealized_pnl_percent: number | string | null;
+  realized_pnl: number | string;
+  first_trade_at: string;
+  last_trade_at: string;
+}
+
+export interface PortfolioSummary {
+  total_invested: number | string;
+  current_value: number | string | null;
+  total_unrealized_pnl: number | string | null;
+  total_realized_pnl: number | string;
+  positions: PositionSummary[];
+  position_count: number;
+  total_trades: number;
+}
+
+export interface PerformanceMetrics {
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate: number | string;
+  total_realized_pnl: number | string;
+  average_win: number | string | null;
+  average_loss: number | string | null;
+  largest_win: number | string | null;
+  largest_loss: number | string | null;
+  profit_factor: number | string | null;
+  average_holding_days: number | string | null;
+  current_streak: number;
+  longest_winning_streak: number;
+  longest_losing_streak: number;
+}
+
+export interface PerformanceByCategory {
+  category: string;
+  total_trades: number;
+  realized_pnl: number | string;
+  win_rate: number | string;
+}
+
+export interface PerformanceReport {
+  metrics: PerformanceMetrics;
+  by_sector: PerformanceByCategory[];
+  by_equity: PerformanceByCategory[];
+  period_start: string | null;
+  period_end: string | null;
+}
+
+export interface PositionSizeRequest {
+  account_size: number;
+  risk_percent: number;
+  entry_price: number;
+  stop_loss: number;
+  method?: string;
+}
+
+export interface PositionSizeResponse {
+  shares: number;
+  position_value: number | string;
+  risk_amount: number | string;
+  risk_per_share: number | string;
+  method: string;
+  notes: string | null;
+}
+
+export interface PaginatedMeta extends ResponseMeta {
+  total: number;
+  limit: number;
+  offset: number;
+}

@@ -5,7 +5,7 @@
 Self-hosted investing companion web application providing equity analysis, watchlists, ratio tracking, market overviews, AI-powered insights, and real-time alerts.
 
 **Owner**: Andrew (drew4bucks@gmail.com)
-**Status**: Phase 1 complete - equity prototype functional
+**Status**: Phase 5 complete - authentication and settings functional
 
 ---
 
@@ -207,8 +207,9 @@ npm test
 - [x] Phase 2: MVP (watchlists, analysis, import) - COMPLETE
 - [x] Phase 3: Intelligence (AI, ratios, indices) - COMPLETE (AI pending OAuth - see docs/issues/)
 - [x] Phase 4: Alerts (notifications) - COMPLETE
-- [ ] Phase 5: Polish (auth, settings)
-- [ ] Phase 6: Advanced (trade tracker)
+- [x] Phase 5: Polish (auth, settings) - COMPLETE
+- [x] Phase 6: Trade Tracker (trades, P&L, position sizing) - COMPLETE
+- [ ] Phase 7: Advanced AI (AI integrations, automation) - blocked on OAuth/API resolution
 
 ---
 

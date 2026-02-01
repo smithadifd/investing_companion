@@ -103,6 +103,7 @@ export interface WatchlistItem {
   notes: string | null;
   target_price: number | string | null;
   thesis: string | null;
+  track_calendar: boolean;
   added_at: string;
   equity: WatchlistItemEquity;
   quote: Quote | null;
@@ -146,12 +147,14 @@ export interface WatchlistItemCreate {
   notes?: string;
   target_price?: number;
   thesis?: string;
+  track_calendar?: boolean;
 }
 
 export interface WatchlistItemUpdate {
   notes?: string;
   target_price?: number;
   thesis?: string;
+  track_calendar?: boolean;
 }
 
 export interface WatchlistExportItem {
@@ -658,4 +661,124 @@ export interface PaginatedMeta extends ResponseMeta {
   total: number;
   limit: number;
   offset: number;
+}
+
+// Event types
+export type EventType =
+  | 'earnings'
+  | 'ex_dividend'
+  | 'dividend_pay'
+  | 'stock_split'
+  | 'fomc'
+  | 'cpi'
+  | 'ppi'
+  | 'nfp'
+  | 'gdp'
+  | 'pce'
+  | 'retail_sales'
+  | 'unemployment'
+  | 'ism_manufacturing'
+  | 'ism_services'
+  | 'housing_starts'
+  | 'consumer_confidence'
+  | 'custom'
+  | 'ipo';
+
+export type EventImportance = 'low' | 'medium' | 'high';
+export type EventSource = 'yahoo' | 'manual' | 'seed' | 'alpha_vantage';
+
+export interface EventEquity {
+  id: number;
+  symbol: string;
+  name: string;
+}
+
+export interface EconomicEvent {
+  id: string;
+  event_type: EventType;
+  equity_id: number | null;
+  user_id: string | null;
+  event_date: string;
+  event_time: string | null;
+  all_day: boolean;
+  title: string;
+  description: string | null;
+  actual_value: number | string | null;
+  forecast_value: number | string | null;
+  previous_value: number | string | null;
+  importance: EventImportance;
+  source: EventSource;
+  is_confirmed: boolean;
+  recurrence_key: string | null;
+  created_at: string;
+  updated_at: string;
+  equity: EventEquity | null;
+}
+
+export interface EconomicEventCreate {
+  event_type: EventType;
+  event_date: string;
+  event_time?: string;
+  all_day?: boolean;
+  title: string;
+  description?: string;
+  equity_symbol?: string;
+  actual_value?: number;
+  forecast_value?: number;
+  previous_value?: number;
+  importance?: EventImportance;
+  is_confirmed?: boolean;
+}
+
+export interface EconomicEventUpdate {
+  event_date?: string;
+  event_time?: string;
+  all_day?: boolean;
+  title?: string;
+  description?: string;
+  actual_value?: number;
+  forecast_value?: number;
+  previous_value?: number;
+  importance?: EventImportance;
+  is_confirmed?: boolean;
+}
+
+export interface CalendarDay {
+  date: string;
+  events: EconomicEvent[];
+  has_earnings: boolean;
+  has_macro: boolean;
+  event_count: number;
+}
+
+export interface CalendarMonth {
+  year: number;
+  month: number;
+  days: CalendarDay[];
+  total_events: number;
+}
+
+export interface UpcomingEventsResponse {
+  events: EconomicEvent[];
+  total: number;
+  days_ahead: number;
+}
+
+export interface EventStats {
+  total_events: number;
+  earnings_this_week: number;
+  macro_events_this_week: number;
+  next_fomc_date: string | null;
+  watchlist_earnings_upcoming: number;
+}
+
+export interface EventFilters {
+  start_date?: string;
+  end_date?: string;
+  event_types?: EventType[];
+  equity_symbol?: string;
+  watchlist_id?: number;
+  watchlist_only?: boolean;
+  importance?: EventImportance;
+  include_past?: boolean;
 }

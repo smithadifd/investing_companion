@@ -11,6 +11,8 @@
 | 4 | Alerts | Notifications | 3-5 days | Real-time alerts |
 | 5 | Polish | Auth + Settings | 3-5 days | Production-ready |
 | 6 | Trade Tracker | Trades + P&L + Sizing | 1-2 weeks | Track performance |
+| 6.5 | Calendar & Events | Earnings, macro events | 1 week | Event-aware trading |
+| 6.6 | Deployment Prep | Security, Synology deploy | 1 week | Production-ready |
 | 7 | Advanced AI | AI integrations | TBD | AI-powered automation |
 
 ---
@@ -488,6 +490,113 @@ positions (materialized view or calculated)
 
 ---
 
+## Phase 6.5: Calendar & Events ✅
+**Goal**: Economic calendar, earnings tracking, and event-aware trading
+**Status**: COMPLETE
+
+### Deliverables
+
+#### Backend
+- [x] Economic event model + CRUD endpoints
+- [x] Earnings calendar service (via Yahoo Finance)
+- [x] Macro events data source integration
+- [x] Event aggregation endpoint (combines earnings + macro)
+- [x] Watchlist events aggregation endpoint
+- [x] Celery task for refreshing watchlist events (with rate limiting)
+
+#### Frontend
+- [x] Calendar page with month/week/list views
+- [x] Event type filters (earnings, FOMC, CPI, etc.)
+- [x] Watchlist events toggle (show only tracked equities)
+- [x] Dashboard upcoming events widget
+- [x] Equity detail events section
+- [x] Per-item calendar tracking toggle on watchlist items
+- [ ] (Stretch) Chart event markers
+
+#### Data Model
+```
+economic_events
+├── id (PK)
+├── event_type (enum: earnings, fomc, cpi, nfp, gdp, etc.)
+├── equity_id (FK, nullable - for earnings)
+├── event_date (date)
+├── event_time (time, nullable)
+├── title
+├── description (nullable)
+├── actual_value (nullable - filled after event)
+├── forecast_value (nullable)
+├── previous_value (nullable)
+├── importance (low, medium, high)
+├── source (yahoo, manual, api)
+├── created_at
+└── updated_at
+```
+
+#### Event Types
+| Type | Source | Frequency |
+|------|--------|-----------|
+| Earnings | Yahoo Finance | Per equity |
+| FOMC | Manual/API | 8x/year |
+| CPI | Manual/API | Monthly |
+| NFP (Jobs) | Manual/API | Monthly |
+| GDP | Manual/API | Quarterly |
+| Ex-Dividend | Yahoo Finance | Per equity |
+| Stock Split | Yahoo Finance | Per equity |
+
+### Success Criteria
+- [x] View calendar showing FOMC meetings for the year
+- [x] See CCJ earnings date on equity detail page
+- [x] Dashboard shows "Earnings this week" for watchlist items
+- [x] Filter calendar to show only watchlist earnings
+- [ ] (Stretch) See earnings marker on equity price chart
+
+---
+
+## Phase 6.6: Deployment Readiness
+**Goal**: Security hardening, production configuration, Synology deployment
+**Status**: PLANNED
+
+### Deliverables
+
+#### Security Hardening
+- [ ] Remove default secrets (fail if not configured)
+- [ ] Add login rate limiting
+- [ ] Add session cleanup task
+- [ ] Add security headers middleware
+- [ ] Fix resource leaks (ThreadPoolExecutor)
+
+#### Production Configuration
+- [ ] Create docker-compose.prod.yml
+- [ ] Add Traefik configuration for HTTPS
+- [ ] Add init container for migrations
+- [ ] Create .env.production.example
+
+#### Database Seeding
+- [ ] Create production seed script
+- [ ] Pre-load default ratios
+- [ ] Pre-load market indices
+- [ ] Pre-load major macro events calendar
+
+#### Backup & Monitoring
+- [ ] Add pg_dump backup script
+- [ ] Enhanced health endpoint (checks DB, Redis)
+- [ ] Document Uptime Kuma integration
+
+#### Documentation
+- [ ] Create DEPLOYMENT.md (Synology guide)
+- [ ] Create BACKUP.md
+- [ ] Create SECURITY.md
+- [ ] Create TROUBLESHOOTING.md
+
+### Success Criteria
+- [ ] Application starts with production configuration
+- [ ] No hardcoded secrets or weak defaults
+- [ ] HTTPS working with Let's Encrypt
+- [ ] Automated daily backups configured
+- [ ] Health endpoint reports accurate system status
+
+---
+
 ## Phase 7: Advanced AI (Future)
 **Goal**: AI-powered analysis, automation, and integrations
 **Depends on**: Resolving Claude OAuth/API access (see [Issue #001](./issues/001-claude-oauth-support.md))
@@ -574,6 +683,8 @@ main (production)
 | **M4: "Proactive"** | + 4 | Alerts and notifications |
 | **M5: "Production"** | + 5 | Auth, settings, hardened |
 | **M6: "Trader"** | + 6 | Trade tracking, P&L, position sizing |
+| **M6.5: "Event-Aware"** | + 6.5 | Calendar, earnings, macro events |
+| **M6.6: "Deployed"** | + 6.6 | Security hardened, Synology ready |
 | **M7: "Complete"** | + 7 | AI automation, integrations |
 
 ---

@@ -17,6 +17,14 @@ import type {
   ApiResponse,
   AppSettings,
   AppSettingsUpdate,
+  CalendarMonth,
+  EconomicEvent,
+  EconomicEventCreate,
+  EconomicEventUpdate,
+  EventFilters,
+  EventImportance,
+  EventStats,
+  EventType,
   EquityDetail,
   EquitySearchResult,
   HistoryData,
@@ -46,6 +54,7 @@ import type {
   TradePair,
   TradeType,
   TradeUpdate,
+  UpcomingEventsResponse,
   User,
   UserCreate,
   UserLogin,
@@ -898,6 +907,156 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  // =========================================================================
+  // Economic Events API
+  // =========================================================================
+
+  /**
+   * Get events with optional filtering
+   */
+  async getEvents(filters?: EventFilters & { limit?: number; offset?: number }): Promise<EconomicEvent[]> {
+    const params = new URLSearchParams();
+    if (filters) {
+      if (filters.start_date) params.append('start_date', filters.start_date);
+      if (filters.end_date) params.append('end_date', filters.end_date);
+      if (filters.event_types) {
+        filters.event_types.forEach(t => params.append('event_types', t));
+      }
+      if (filters.equity_symbol) params.append('equity_symbol', filters.equity_symbol);
+      if (filters.watchlist_id) params.append('watchlist_id', filters.watchlist_id.toString());
+      if (filters.watchlist_only) params.append('watchlist_only', 'true');
+      if (filters.importance) params.append('importance', filters.importance);
+      if (filters.include_past) params.append('include_past', 'true');
+      if (filters.limit) params.append('limit', filters.limit.toString());
+      if (filters.offset) params.append('offset', filters.offset.toString());
+    }
+    const queryString = params.toString();
+    const url = queryString ? `/events?${queryString}` : '/events';
+    return this.fetch<EconomicEvent[]>(url);
+  }
+
+  /**
+   * Get upcoming events
+   */
+  async getUpcomingEvents(
+    days = 7,
+    filters?: { event_types?: EventType[]; watchlist_only?: boolean; limit?: number }
+  ): Promise<UpcomingEventsResponse> {
+    const params = new URLSearchParams();
+    params.append('days', days.toString());
+    if (filters?.event_types) {
+      filters.event_types.forEach(t => params.append('event_types', t));
+    }
+    if (filters?.watchlist_only) params.append('watchlist_only', 'true');
+    if (filters?.limit) params.append('limit', filters.limit.toString());
+    return this.fetch<UpcomingEventsResponse>(`/events/upcoming?${params.toString()}`);
+  }
+
+  /**
+   * Get calendar month data
+   */
+  async getCalendarMonth(
+    year: number,
+    month: number,
+    filters?: { event_types?: EventType[]; watchlist_only?: boolean }
+  ): Promise<CalendarMonth> {
+    const params = new URLSearchParams();
+    if (filters?.event_types) {
+      filters.event_types.forEach(t => params.append('event_types', t));
+    }
+    if (filters?.watchlist_only) params.append('watchlist_only', 'true');
+    const queryString = params.toString();
+    const url = queryString
+      ? `/events/calendar/${year}/${month}?${queryString}`
+      : `/events/calendar/${year}/${month}`;
+    return this.fetch<CalendarMonth>(url);
+  }
+
+  /**
+   * Get events for watchlist equities
+   */
+  async getWatchlistEvents(watchlistId?: number, days = 14): Promise<EconomicEvent[]> {
+    const params = new URLSearchParams();
+    if (watchlistId) params.append('watchlist_id', watchlistId.toString());
+    params.append('days', days.toString());
+    return this.fetch<EconomicEvent[]>(`/events/watchlist?${params.toString()}`);
+  }
+
+  /**
+   * Get event statistics
+   */
+  async getEventStats(): Promise<EventStats> {
+    return this.fetch<EventStats>('/events/stats');
+  }
+
+  /**
+   * Get a single event
+   */
+  async getEvent(eventId: string): Promise<EconomicEvent> {
+    return this.fetch<EconomicEvent>(`/events/${eventId}`);
+  }
+
+  /**
+   * Create a custom event
+   */
+  async createEvent(data: EconomicEventCreate): Promise<EconomicEvent> {
+    return this.fetch<EconomicEvent>('/events', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Update an event
+   */
+  async updateEvent(eventId: string, data: EconomicEventUpdate): Promise<EconomicEvent> {
+    return this.fetch<EconomicEvent>(`/events/${eventId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Delete a custom event
+   */
+  async deleteEvent(eventId: string): Promise<void> {
+    await this.fetch<void>(`/events/${eventId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * Refresh events for a specific equity from Yahoo Finance
+   */
+  async refreshEquityEvents(symbol: string): Promise<EconomicEvent[]> {
+    return this.fetch<EconomicEvent[]>(`/events/refresh/${symbol}`, {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Refresh events for all watchlist equities
+   */
+  async refreshWatchlistEvents(watchlistId?: number): Promise<{ events_updated: number }> {
+    const params = new URLSearchParams();
+    if (watchlistId) params.append('watchlist_id', watchlistId.toString());
+    const queryString = params.toString();
+    const url = queryString ? `/events/refresh/watchlist?${queryString}` : '/events/refresh/watchlist';
+    return this.fetch<{ events_updated: number }>(url, {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Get events for a specific equity
+   */
+  async getEquityEvents(symbol: string, includePast = false, limit = 10): Promise<EconomicEvent[]> {
+    const params = new URLSearchParams();
+    if (includePast) params.append('include_past', 'true');
+    params.append('limit', limit.toString());
+    return this.fetch<EconomicEvent[]>(`/equity/${symbol}/events?${params.toString()}`);
   }
 }
 

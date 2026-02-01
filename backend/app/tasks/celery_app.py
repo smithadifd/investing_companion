@@ -36,6 +36,12 @@ celery_app.conf.beat_schedule = {
         "task": "alerts.send_daily_summary",
         "schedule": crontab(hour=18, minute=0),
     },
+    # Refresh earnings/dividend events daily at 5 PM ET (10 PM UTC)
+    # Runs after market close to get updated earnings dates
+    "refresh-watchlist-events-daily": {
+        "task": "events.refresh_all_watchlist_events",
+        "schedule": crontab(hour=22, minute=0),
+    },
 }
 
 # Auto-discover tasks from these modules

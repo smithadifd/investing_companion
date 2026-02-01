@@ -15,6 +15,7 @@ class WatchlistItemBase(BaseModel):
     notes: Optional[str] = Field(None, max_length=5000)
     target_price: Optional[Decimal] = Field(None, ge=0)
     thesis: Optional[str] = Field(None, max_length=10000)
+    track_calendar: Optional[bool] = Field(None, description="Track events for this equity on calendar")
 
 
 class WatchlistItemCreate(WatchlistItemBase):
@@ -42,12 +43,16 @@ class WatchlistItemEquity(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class WatchlistItemResponse(WatchlistItemBase):
+class WatchlistItemResponse(BaseModel):
     """Schema for watchlist item in responses."""
 
     id: int
     watchlist_id: int
     equity_id: int
+    notes: Optional[str] = None
+    target_price: Optional[Decimal] = None
+    thesis: Optional[str] = None
+    track_calendar: bool = True
     added_at: datetime
     equity: WatchlistItemEquity
     quote: Optional[QuoteResponse] = None

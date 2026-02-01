@@ -5,6 +5,7 @@ import {
   WatchlistMovers,
   NotificationsFeed,
   MarketSnapshot,
+  UpcomingEvents,
 } from '@/components/dashboard';
 
 export default function Dashboard() {
@@ -27,9 +28,12 @@ export default function Dashboard() {
         </div>
 
         {/* Main content grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
           {/* Watchlist Movers */}
           <WatchlistMovers />
+
+          {/* Upcoming Events */}
+          <UpcomingEvents />
 
           {/* Notifications Feed */}
           <NotificationsFeed />

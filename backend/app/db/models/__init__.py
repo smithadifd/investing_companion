@@ -1,6 +1,12 @@
 """Database models package."""
 
 from app.db.models.alert import Alert, AlertConditionType, AlertHistory
+from app.db.models.economic_event import (
+    EconomicEvent,
+    EventImportance,
+    EventSource,
+    EventType,
+)
 from app.db.models.equity import Equity
 from app.db.models.fundamentals import EquityFundamentals
 from app.db.models.price_history import PriceHistory
@@ -15,6 +21,10 @@ __all__ = [
     "Alert",
     "AlertConditionType",
     "AlertHistory",
+    "EconomicEvent",
+    "EventImportance",
+    "EventSource",
+    "EventType",
     "Equity",
     "EquityFundamentals",
     "PriceHistory",

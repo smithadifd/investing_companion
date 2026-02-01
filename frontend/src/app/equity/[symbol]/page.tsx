@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useParams } from 'next/navigation';
-import { Loader2, ArrowLeft, BarChart3, FileText, TrendingUp, Sparkles } from 'lucide-react';
+import { Loader2, ArrowLeft, BarChart3, FileText, TrendingUp, Sparkles, Calendar } from 'lucide-react';
 import Link from 'next/link';
 import { useEquity, useHistory, useTechnicals, useTechnicalsSummary } from '@/lib/hooks/useEquity';
 import { AdvancedChart } from '@/components/charts/AdvancedChart';
@@ -14,8 +14,9 @@ import { TechnicalSummaryCard } from '@/components/equity/TechnicalSummaryCard';
 import { PeerComparison } from '@/components/equity/PeerComparison';
 import { AddToWatchlistButton } from '@/components/watchlist/AddToWatchlistButton';
 import { AIAnalysisPanel } from '@/components/ai/AIAnalysisPanel';
+import { EquityEvents } from '@/components/equity/EquityEvents';
 
-type TabType = 'chart' | 'fundamentals' | 'ai';
+type TabType = 'chart' | 'fundamentals' | 'events' | 'ai';
 
 export default function EquityPage() {
   const params = useParams();
@@ -114,6 +115,17 @@ export default function EquityPage() {
           >
             <FileText className="h-4 w-4" />
             Fundamentals
+          </button>
+          <button
+            onClick={() => setActiveTab('events')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+              activeTab === 'events'
+                ? 'bg-blue-500 text-white'
+                : 'bg-white dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700'
+            }`}
+          >
+            <Calendar className="h-4 w-4" />
+            Events
           </button>
           <button
             onClick={() => setActiveTab('ai')}
@@ -266,6 +278,18 @@ export default function EquityPage() {
               <PeerComparison symbol={symbol} currentEquity={equity} />
             </div>
           </>
+        )}
+
+        {activeTab === 'events' && (
+          <div className="bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-sm p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Calendar className="h-5 w-5 text-blue-500" />
+              <h2 className="text-xl font-semibold text-neutral-900 dark:text-neutral-50">
+                Upcoming Events
+              </h2>
+            </div>
+            <EquityEvents symbol={symbol} />
+          </div>
         )}
 
         {activeTab === 'ai' && (

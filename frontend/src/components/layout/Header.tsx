@@ -19,6 +19,7 @@ import {
   Percent,
   Bell,
   LineChart,
+  Calendar,
 } from 'lucide-react';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useDebounce } from '@/lib/hooks/useDebounce';
@@ -29,6 +30,7 @@ const NAV_ITEMS = [
   { href: '/watchlists', label: 'Watchlists', icon: List },
   { href: '/market', label: 'Market', icon: BarChart3 },
   { href: '/ratios', label: 'Ratios', icon: Percent },
+  { href: '/calendar', label: 'Calendar', icon: Calendar },
   { href: '/alerts', label: 'Alerts', icon: Bell },
   { href: '/trades', label: 'Trades', icon: LineChart },
 ];

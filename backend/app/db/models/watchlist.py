@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -75,6 +76,7 @@ class WatchlistItem(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text)
     target_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2))
     thesis: Mapped[Optional[str]] = mapped_column(Text)
+    track_calendar: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     added_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

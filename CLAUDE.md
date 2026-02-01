@@ -5,7 +5,7 @@
 Self-hosted investing companion web application providing equity analysis, watchlists, ratio tracking, market overviews, AI-powered insights, and real-time alerts.
 
 **Owner**: Andrew (drew4bucks@gmail.com)
-**Status**: Phase 5 complete - authentication and settings functional
+**Status**: Phase 6.5 complete - calendar and events functional
 
 ---
 
@@ -209,6 +209,8 @@ npm test
 - [x] Phase 4: Alerts (notifications) - COMPLETE
 - [x] Phase 5: Polish (auth, settings) - COMPLETE
 - [x] Phase 6: Trade Tracker (trades, P&L, position sizing) - COMPLETE
+- [x] Phase 6.5: Calendar & Events (earnings, macro events) - COMPLETE
+- [ ] Phase 6.6: Deployment Prep (security, Synology) - PLANNED
 - [ ] Phase 7: Advanced AI (AI integrations, automation) - blocked on OAuth/API resolution
 
 ---

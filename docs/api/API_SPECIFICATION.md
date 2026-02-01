@@ -434,6 +434,8 @@ Response:
 
 ### Phase 5: Authentication
 
+#### Auth Endpoints
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/auth/register` | Create account |
@@ -441,39 +443,242 @@ Response:
 | POST | `/auth/refresh` | Refresh access token |
 | POST | `/auth/logout` | Revoke refresh token |
 | GET | `/auth/me` | Get current user |
+| PUT | `/auth/password` | Change password |
+| GET | `/auth/sessions` | List active sessions |
+| DELETE | `/auth/sessions/{id}` | Revoke session |
+
+**POST /auth/login**
+```
+Request:
+{
+  "email": "user@example.com",
+  "password": "securepassword"
+}
+
+Response:
+{
+  "data": {
+    "access_token": "eyJ...",
+    "refresh_token": "eyJ...",
+    "token_type": "bearer",
+    "expires_in": 1800
+  }
+}
+```
+
+**POST /auth/refresh**
+```
+Request:
+{
+  "refresh_token": "eyJ..."
+}
+
+Response:
+{
+  "data": {
+    "access_token": "eyJ...",
+    "token_type": "bearer",
+    "expires_in": 1800
+  }
+}
+```
+
+#### Settings Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/settings` | Get user settings |
 | PUT | `/settings` | Update settings |
-| PUT | `/settings/api-keys` | Update API keys (encrypted) |
+| GET | `/settings/ai` | Get AI-specific settings |
+| PUT | `/settings/ai` | Update AI settings |
+
+**PUT /settings/ai**
+```
+Request:
+{
+  "claude_api_key": "sk-...",
+  "discord_webhook_url": "https://discord.com/api/webhooks/..."
+}
+```
 
 ---
 
 ### Phase 6: Trades
 
+#### Trade Endpoints
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/trades` | List trades |
+| GET | `/trades` | List trades with filters |
 | POST | `/trades` | Record trade |
 | GET | `/trades/{id}` | Get trade details |
 | PUT | `/trades/{id}` | Update trade |
 | DELETE | `/trades/{id}` | Delete trade |
-| GET | `/trades/summary` | Get P&L summary |
-| GET | `/trades/equity/{symbol}` | Get trades for equity |
 
 **POST /trades**
 ```
 Request:
 {
   "symbol": "CCJ",
-  "trade_type": "BUY",
+  "trade_type": "BUY",  // BUY, SELL, SHORT, COVER
   "quantity": 100,
   "price": 52.30,
   "fees": 0.00,
   "executed_at": "2025-01-31T10:30:00Z",
-  "account": "Roth IRA",
   "notes": "Adding to uranium position"
+}
+
+Response:
+{
+  "data": {
+    "id": "uuid",
+    "equity": {"symbol": "CCJ", "name": "Cameco Corporation"},
+    "trade_type": "BUY",
+    "quantity": 100,
+    "price": 52.30,
+    "total_value": 5230.00,
+    "fees": 0.00,
+    "executed_at": "2025-01-31T10:30:00Z",
+    "notes": "Adding to uranium position",
+    "created_at": "2025-01-31T10:35:00Z"
+  }
+}
+```
+
+**GET /trades**
+```
+Query Params:
+  symbol: string - Filter by equity symbol
+  trade_type: string - Filter by type (BUY, SELL, etc.)
+  start_date: date - Filter from date
+  end_date: date - Filter to date
+  limit: int - Max results (default 50, max 500)
+  offset: int - Pagination offset
+```
+
+#### Portfolio Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/portfolio/positions` | Get current positions |
+| GET | `/portfolio/summary` | Get P&L summary |
+| GET | `/portfolio/performance` | Get performance metrics |
+
+**GET /portfolio/positions**
+```
+Response:
+{
+  "data": [
+    {
+      "equity": {"symbol": "CCJ", "name": "Cameco", "current_price": 55.20},
+      "quantity": 100,
+      "avg_cost_basis": 52.30,
+      "current_value": 5520.00,
+      "unrealized_pnl": 290.00,
+      "unrealized_pnl_percent": 5.54,
+      "first_purchase": "2025-01-15T10:30:00Z"
+    }
+  ],
+  "meta": {
+    "total_value": 15230.00,
+    "total_unrealized_pnl": 850.00
+  }
+}
+```
+
+**GET /portfolio/performance**
+```
+Response:
+{
+  "data": {
+    "total_trades": 45,
+    "winning_trades": 28,
+    "losing_trades": 17,
+    "win_rate": 0.622,
+    "avg_win": 450.00,
+    "avg_loss": -180.00,
+    "profit_factor": 2.50,
+    "total_realized_pnl": 4250.00,
+    "best_trade": {"symbol": "NVDA", "pnl": 1200.00},
+    "worst_trade": {"symbol": "COIN", "pnl": -350.00},
+    "current_streak": {"type": "win", "count": 3}
+  }
+}
+```
+
+#### Position Sizing
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/tools/position-size` | Calculate position size |
+
+**POST /tools/position-size**
+```
+Request:
+{
+  "account_size": 50000.00,
+  "risk_percent": 2.0,
+  "entry_price": 52.30,
+  "stop_loss_price": 48.00
+}
+
+Response:
+{
+  "data": {
+    "risk_amount": 1000.00,
+    "position_size": 232,
+    "position_value": 12133.60,
+    "potential_loss": 998.16,
+    "risk_reward_1_to_2": 60.60,
+    "risk_reward_1_to_3": 65.20
+  }
+}
+```
+
+---
+
+### Phase 6.5: Calendar & Events (Planned)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/events` | List events with filters |
+| POST | `/events` | Create custom event |
+| GET | `/events/{id}` | Get event details |
+| PUT | `/events/{id}` | Update event |
+| DELETE | `/events/{id}` | Delete custom event |
+| GET | `/events/calendar` | Calendar view by month/week |
+| GET | `/events/upcoming` | Next N days of events |
+| GET | `/events/watchlist` | Events for watchlist equities |
+| GET | `/equity/{symbol}/events` | Events for specific equity |
+
+**GET /events/upcoming**
+```
+Query Params:
+  days: int - Number of days ahead (default 7)
+  event_types: string[] - Filter by types
+  watchlist_only: bool - Only watchlist equities
+  importance: string - Filter by importance
+
+Response:
+{
+  "data": [
+    {
+      "id": "uuid",
+      "event_type": "earnings",
+      "equity": {"symbol": "CCJ", "name": "Cameco"},
+      "event_date": "2025-02-05",
+      "title": "Q4 2024 Earnings",
+      "importance": "high",
+      "is_confirmed": true
+    },
+    {
+      "id": "uuid",
+      "event_type": "fomc",
+      "event_date": "2025-01-29",
+      "title": "FOMC Meeting Day 2",
+      "importance": "high"
+    }
+  ]
 }
 ```
 

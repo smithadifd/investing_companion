@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Pencil, Trash2, Calendar } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils/format';
 import { PriceChange } from '@/components/ui/PriceChange';
 import type { WatchlistItem } from '@/lib/api/types';
@@ -37,8 +37,13 @@ export function WatchlistItemRow({ item, onEdit, onRemove }: WatchlistItemRowPro
           href={`/equity/${item.equity.symbol}`}
           className="hover:text-blue-500 transition-colors"
         >
-          <div className="font-semibold text-neutral-900 dark:text-neutral-50">
-            {item.equity.symbol}
+          <div className="flex items-center gap-1.5">
+            <span className="font-semibold text-neutral-900 dark:text-neutral-50">
+              {item.equity.symbol}
+            </span>
+            {item.track_calendar && (
+              <Calendar className="h-3.5 w-3.5 text-blue-400" title="Calendar tracking enabled" />
+            )}
           </div>
           <div className="text-sm text-neutral-500 dark:text-neutral-400 truncate max-w-[200px]">
             {item.equity.name}

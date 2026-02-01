@@ -8,12 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.common import DataResponse, ResponseMeta
+from app.schemas.economic_event import EconomicEventResponse
 from app.schemas.equity import (
     EquityDetailResponse,
     EquitySearchResult,
     HistoryResponse,
     QuoteResponse,
 )
+from app.services.economic_event import EconomicEventService
 from app.services.equity import EquityService
 from app.services.technical import TechnicalAnalysisService
 
@@ -159,3 +161,20 @@ async def get_peers(
     peers = await service.get_peers(symbol, limit)
 
     return DataResponse(data=peers, meta=create_meta())
+
+
+@router.get("/{symbol}/events", response_model=DataResponse[List[EconomicEventResponse]])
+async def get_equity_events(
+    symbol: str,
+    include_past: bool = Query(False, description="Include past events"),
+    limit: int = Query(10, ge=1, le=50, description="Maximum events"),
+    db: AsyncSession = Depends(get_db),
+) -> DataResponse[List[EconomicEventResponse]]:
+    """Get calendar events for an equity (earnings, dividends, splits)."""
+    service = EconomicEventService(db)
+    events = await service.get_events_for_symbol(
+        symbol=symbol.upper(),
+        include_past=include_past,
+        limit=limit,
+    )
+    return DataResponse(data=events, meta=create_meta())

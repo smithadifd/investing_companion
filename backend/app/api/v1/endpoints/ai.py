@@ -14,6 +14,7 @@ from app.schemas.ai import (
     AISettingsResponse,
     AISettingsUpdate,
 )
+from app.schemas.common import DataResponse
 from app.services.ai import AIService
 
 logger = logging.getLogger(__name__)
@@ -26,38 +27,41 @@ def get_ai_service(db: AsyncSession = Depends(get_db)) -> AIService:
     return AIService(db)
 
 
-@router.get("/settings", response_model=AISettingsResponse)
+@router.get("/settings", response_model=DataResponse[AISettingsResponse])
 async def get_ai_settings(
     service: AIService = Depends(get_ai_service),
-) -> AISettingsResponse:
+) -> DataResponse[AISettingsResponse]:
     """
     Get current AI settings.
     """
-    return await service.get_settings()
+    data = await service.get_settings()
+    return DataResponse(data=data)
 
 
-@router.put("/settings", response_model=AISettingsResponse)
+@router.put("/settings", response_model=DataResponse[AISettingsResponse])
 async def update_ai_settings(
     data: AISettingsUpdate,
     service: AIService = Depends(get_ai_service),
-) -> AISettingsResponse:
+) -> DataResponse[AISettingsResponse]:
     """
     Update AI settings including API key and custom instructions.
     """
-    return await service.update_settings(data)
+    result = await service.update_settings(data)
+    return DataResponse(data=result)
 
 
-@router.post("/analyze", response_model=AIAnalysisResponse)
+@router.post("/analyze", response_model=DataResponse[AIAnalysisResponse])
 async def analyze(
     request: AIAnalysisRequest,
     service: AIService = Depends(get_ai_service),
-) -> AIAnalysisResponse:
+) -> DataResponse[AIAnalysisResponse]:
     """
     Perform AI analysis on equity, ratio, or general topic.
     Returns complete response (non-streaming).
     """
     try:
-        return await service.analyze(request)
+        result = await service.analyze(request)
+        return DataResponse(data=result)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

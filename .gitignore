@@ -4,6 +4,7 @@
 .env
 .env.local
 .env.*.local
+.env.production
 *.local
 
 # ===========================================
@@ -87,3 +88,9 @@ Thumbs.db
 *.key
 secrets/
 tsconfig.tsbuildinfo
+
+# ===========================================
+# Backups
+# ===========================================
+backups/
+*.sql.gz

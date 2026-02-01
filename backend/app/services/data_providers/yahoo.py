@@ -1,6 +1,7 @@
 """Yahoo Finance data provider using yfinance library."""
 
 import asyncio
+import atexit
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
@@ -24,13 +25,35 @@ from app.schemas.equity import (
 logger = logging.getLogger(__name__)
 
 # Thread pool for running synchronous yfinance calls
-_executor = ThreadPoolExecutor(max_workers=4)
+# Limited to 4 workers to avoid overwhelming Yahoo Finance
+_executor: Optional[ThreadPoolExecutor] = None
+
+
+def _get_executor() -> ThreadPoolExecutor:
+    """Get or create the thread pool executor."""
+    global _executor
+    if _executor is None:
+        _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="yahoo_")
+    return _executor
+
+
+def shutdown_executor() -> None:
+    """Shutdown the thread pool executor cleanly."""
+    global _executor
+    if _executor is not None:
+        _executor.shutdown(wait=True)
+        _executor = None
+        logger.info("Yahoo Finance thread pool executor shut down")
+
+
+# Register cleanup on process exit
+atexit.register(shutdown_executor)
 
 
 async def run_in_executor(func, *args) -> Any:
     """Run a synchronous function in thread pool executor."""
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_executor, func, *args)
+    return await loop.run_in_executor(_get_executor(), func, *args)
 
 
 def _safe_decimal(value: Any) -> Optional[Decimal]:

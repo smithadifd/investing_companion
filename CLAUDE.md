@@ -210,7 +210,7 @@ npm test
 - [x] Phase 5: Polish (auth, settings) - COMPLETE
 - [x] Phase 6: Trade Tracker (trades, P&L, position sizing) - COMPLETE
 - [x] Phase 6.5: Calendar & Events (earnings, macro events) - COMPLETE
-- [ ] Phase 6.6: Deployment Prep (security, Synology) - PLANNED
+- [x] Phase 6.6: Deployment Prep (security, Synology) - COMPLETE
 - [ ] Phase 7: Advanced AI (AI integrations, automation) - blocked on OAuth/API resolution
 
 ---

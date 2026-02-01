@@ -12,6 +12,7 @@ from app.core.dependencies import (
     get_current_user,
     get_user_agent,
 )
+from app.core.rate_limit import check_login_rate_limit, reset_login_rate_limit
 from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.auth import (
@@ -80,6 +81,9 @@ async def login(
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[TokenResponse]:
     """Authenticate and get access/refresh tokens."""
+    # Check rate limit before attempting authentication
+    await check_login_rate_limit(request, email=credentials.email)
+
     auth_service = AuthService(db)
 
     user = await auth_service.authenticate(credentials.email, credentials.password)
@@ -88,6 +92,9 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
+
+    # Reset rate limit on successful login
+    await reset_login_rate_limit(request, credentials.email)
 
     tokens = await auth_service.create_session(
         user,

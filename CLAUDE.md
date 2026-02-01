@@ -211,6 +211,7 @@ npm test
 - [x] Phase 6: Trade Tracker (trades, P&L, position sizing) - COMPLETE
 - [x] Phase 6.5: Calendar & Events (earnings, macro events) - COMPLETE
 - [x] Phase 6.6: Deployment Prep (security, Synology) - COMPLETE
+- [x] Phase 6.6: Deployed to Synology NAS (192.168.50.88) - LIVE
 - [ ] Phase 7: Advanced AI (AI integrations, automation) - blocked on OAuth/API resolution
 
 ---

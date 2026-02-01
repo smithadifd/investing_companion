@@ -162,8 +162,9 @@ equity_fundamentals
 
 ---
 
-## Phase 3: Intelligence
+## Phase 3: Intelligence ✅
 **Goal**: AI analysis, ratio comparisons, market indices overview
+**Status**: COMPLETE (AI pending OAuth support - see [Issue #001](./issues/001-claude-oauth-support.md))
 
 ### Deliverables
 
@@ -192,6 +193,9 @@ equity_fundamentals
   - Sector heatmap
   - Top gainers/losers
   - Currency & commodity snapshot
+
+#### Known Limitations
+- AI features require standard API key or proxy setup (OAuth tokens not yet supported by Anthropic API)
 
 #### Data Model Additions
 ```

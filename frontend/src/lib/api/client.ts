@@ -7,11 +7,19 @@ import type {
   AIAnalysisResponse,
   AISettings,
   AISettingsUpdate,
+  Alert,
+  AlertCheckResult,
+  AlertCreate,
+  AlertHistory,
+  AlertStats,
+  AlertUpdate,
+  AlertWithHistory,
   ApiResponse,
   EquityDetail,
   EquitySearchResult,
   HistoryData,
   MarketOverview,
+  NotificationStatus,
   Quote,
   Ratio,
   RatioCreate,
@@ -410,6 +418,114 @@ class ApiClient {
         }
       }
     }
+  }
+
+  // Alert methods
+
+  /**
+   * Get all alerts
+   */
+  async getAlerts(activeOnly = false, equityId?: number, ratioId?: number): Promise<Alert[]> {
+    const params = new URLSearchParams();
+    if (activeOnly) params.append('active_only', 'true');
+    if (equityId) params.append('equity_id', equityId.toString());
+    if (ratioId) params.append('ratio_id', ratioId.toString());
+    const queryString = params.toString();
+    const url = queryString ? `/alerts?${queryString}` : '/alerts';
+    return this.fetch<Alert[]>(url);
+  }
+
+  /**
+   * Get a single alert with history
+   */
+  async getAlert(id: number): Promise<AlertWithHistory> {
+    return this.fetch<AlertWithHistory>(`/alerts/${id}`);
+  }
+
+  /**
+   * Create a new alert
+   */
+  async createAlert(data: AlertCreate): Promise<Alert> {
+    return this.fetch<Alert>('/alerts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Update an alert
+   */
+  async updateAlert(id: number, data: AlertUpdate): Promise<Alert> {
+    return this.fetch<Alert>(`/alerts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Delete an alert
+   */
+  async deleteAlert(id: number): Promise<void> {
+    await fetch(`${API_BASE}/alerts/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * Toggle an alert's active state
+   */
+  async toggleAlert(id: number): Promise<Alert> {
+    return this.fetch<Alert>(`/alerts/${id}/toggle`, {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Get alert statistics
+   */
+  async getAlertStats(): Promise<AlertStats> {
+    return this.fetch<AlertStats>('/alerts/stats');
+  }
+
+  /**
+   * Get all alert history
+   */
+  async getAllAlertHistory(limit = 100, offset = 0): Promise<AlertHistory[]> {
+    return this.fetch<AlertHistory[]>(`/alerts/history?limit=${limit}&offset=${offset}`);
+  }
+
+  /**
+   * Get history for a specific alert
+   */
+  async getAlertHistory(alertId: number, limit = 50): Promise<AlertHistory[]> {
+    return this.fetch<AlertHistory[]>(`/alerts/${alertId}/history?limit=${limit}`);
+  }
+
+  /**
+   * Manually check an alert's condition
+   * @param notify - If true and condition is met, sends a real notification
+   */
+  async checkAlert(alertId: number, notify = false): Promise<AlertCheckResult & { notification?: { sent: boolean; error: string | null } }> {
+    const url = notify ? `/alerts/${alertId}/check?notify=true` : `/alerts/${alertId}/check`;
+    return this.fetch<AlertCheckResult & { notification?: { sent: boolean; error: string | null } }>(url, {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Send a test Discord notification
+   */
+  async testDiscordNotification(): Promise<{ success: boolean; error: string | null }> {
+    return this.fetch<{ success: boolean; error: string | null }>('/alerts/notifications/test', {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Get notification service status
+   */
+  async getNotificationStatus(): Promise<NotificationStatus> {
+    return this.fetch<NotificationStatus>('/alerts/notifications/status');
   }
 }
 

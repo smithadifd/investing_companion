@@ -252,27 +252,28 @@ user_settings (prep for Phase 5)
 
 ## Phase 4: Alerts
 **Goal**: Real-time monitoring and Discord notifications
+**Status**: COMPLETE
 
 ### Deliverables
 
 #### Backend
-- [ ] Alert model + CRUD endpoints
-- [ ] Celery Beat scheduler (configurable interval)
-- [ ] Alert condition evaluator service
-- [ ] Discord webhook notification service
-- [ ] Alert history tracking
-- [ ] Cooldown logic (don't spam same alert)
+- [x] Alert model + CRUD endpoints
+- [x] Celery Beat scheduler (configurable interval)
+- [x] Alert condition evaluator service
+- [x] Discord webhook notification service
+- [x] Alert history tracking
+- [x] Cooldown logic (don't spam same alert)
 
 #### Frontend
-- [ ] Alerts management page
-- [ ] Create alert dialog
+- [x] Alerts management page
+- [x] Create alert dialog
   - Select equity or ratio
   - Condition type (above, below, crosses, % change)
   - Threshold value
   - Optional: timeframe, notes
-- [ ] Active alerts list with toggle
-- [ ] Alert history log
-- [ ] Discord integration settings
+- [x] Active alerts list with toggle
+- [x] Alert history log
+- [x] Discord integration settings
 
 #### Data Model Additions
 ```

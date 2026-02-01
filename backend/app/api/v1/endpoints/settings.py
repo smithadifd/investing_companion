@@ -10,6 +10,7 @@ from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.auth import AppSettings, AppSettingsUpdate
 from app.schemas.common import DataResponse, ResponseMeta
+from app.services.notifications.discord import discord_service
 from app.services.settings import SettingsService
 
 router = APIRouter()
@@ -43,4 +44,9 @@ async def update_settings(
     """
     settings_service = SettingsService(db)
     app_settings = await settings_service.update_app_settings(updates, current_user.id)
+
+    # Clear Discord service cache if webhook URL was updated
+    if updates.discord_webhook_url is not None:
+        discord_service.clear_cache()
+
     return DataResponse(data=app_settings, meta=create_meta())

@@ -16,7 +16,7 @@ from app.schemas.alert import (
 )
 from app.schemas.common import DataResponse
 from app.services.alert import AlertService
-from app.services.notifications.discord import discord_service
+from app.services.notifications.discord import discord_service, get_discord_service_configured
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -251,10 +251,13 @@ async def test_discord_notification() -> DataResponse[dict]:
     Send a test notification to Discord.
     Useful for verifying webhook configuration.
     """
-    if not discord_service.is_configured:
+    # Clear cache to pick up any recent settings changes
+    discord_service.clear_cache()
+
+    if not await get_discord_service_configured():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Discord webhook URL not configured",
+            detail="Discord webhook URL not configured. Set it in Settings or environment.",
         )
 
     success, error = await discord_service.send_test_notification()
@@ -271,10 +274,13 @@ async def get_notification_status() -> DataResponse[dict]:
     """
     Get notification service status.
     """
+    # Clear cache to get fresh status
+    discord_service.clear_cache()
+
     return DataResponse(
         data={
             "discord": {
-                "configured": discord_service.is_configured,
+                "configured": await get_discord_service_configured(),
             }
         }
     )

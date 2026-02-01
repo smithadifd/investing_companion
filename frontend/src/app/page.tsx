@@ -32,16 +32,22 @@ export default function Home() {
               active
             />
           </Link>
-          <DashboardCard
-            title="Market Overview"
-            description="Indices, sectors, and macro indicators"
-            status="Phase 3"
-          />
-          <DashboardCard
-            title="Ratios"
-            description="Compare assets and track key ratios"
-            status="Phase 3"
-          />
+          <Link href="/market">
+            <DashboardCard
+              title="Market Overview"
+              description="Indices, sectors, and macro indicators"
+              status="Available"
+              active
+            />
+          </Link>
+          <Link href="/ratios">
+            <DashboardCard
+              title="Ratios"
+              description="Compare assets and track key ratios"
+              status="Available"
+              active
+            />
+          </Link>
           <DashboardCard
             title="Alerts"
             description="Get notified on price movements"

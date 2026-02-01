@@ -168,26 +168,26 @@ equity_fundamentals
 ### Deliverables
 
 #### Backend
-- [ ] Claude API integration service
-- [ ] Configurable AI provider (API key from settings)
-- [ ] AI analysis endpoint (`POST /api/v1/ai/analyze`)
-- [ ] Streaming response support (SSE)
-- [ ] Ratio model + CRUD endpoints
-- [ ] Ratio calculation service
-- [ ] Pre-defined ratio library (Gold/Silver, SPY/QQQ, etc.)
-- [ ] Market indices aggregation
-- [ ] Sector performance ranking
+- [x] Claude API integration service
+- [x] Configurable AI provider (API key from settings)
+- [x] AI analysis endpoint (`POST /api/v1/ai/analyze`)
+- [x] Streaming response support (SSE)
+- [x] Ratio model + CRUD endpoints
+- [x] Ratio calculation service
+- [x] Pre-defined ratio library (Gold/Silver, SPY/QQQ, etc.)
+- [x] Market indices aggregation
+- [x] Sector performance ranking
 - [ ] Alpha Vantage integration (optional - for additional indicators, forex, economic data)
 
 #### Frontend
-- [ ] AI Analysis component (chat-like interface on equity page)
-- [ ] "Analyze This" button triggering AI review
-- [ ] AI settings (model selection, custom instructions)
-- [ ] Ratios page
+- [x] AI Analysis component (chat-like interface on equity page)
+- [x] "Analyze This" button triggering AI review
+- [x] AI settings (model selection, custom instructions)
+- [x] Ratios page
   - Favorites at top
   - Chart for each ratio
   - Configurable timeframes
-- [ ] Market Overview page
+- [x] Market Overview page
   - Major indices cards
   - Sector heatmap
   - Top gainers/losers

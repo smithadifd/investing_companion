@@ -214,3 +214,139 @@ export interface TechnicalSummary {
   above_sma_200: boolean | null;
   rsi_signal: 'overbought' | 'oversold' | 'neutral' | null;
 }
+
+// Market overview types
+export interface IndexQuote {
+  symbol: string;
+  name: string;
+  price: number | string;
+  change: number | string;
+  change_percent: number | string;
+  timestamp: string;
+}
+
+export interface SectorPerformance {
+  sector: string;
+  symbol: string;
+  change_percent: number | string;
+  price: number | string | null;
+  volume: number | null;
+}
+
+export interface MarketMover {
+  symbol: string;
+  name: string;
+  price: number | string;
+  change: number | string;
+  change_percent: number | string;
+  volume: number | null;
+}
+
+export interface CurrencyCommodity {
+  symbol: string;
+  name: string;
+  price: number | string;
+  change: number | string;
+  change_percent: number | string;
+  category: 'currency' | 'commodity' | 'crypto';
+}
+
+export interface MarketOverview {
+  indices: IndexQuote[];
+  sectors: SectorPerformance[];
+  gainers: MarketMover[];
+  losers: MarketMover[];
+  currencies_commodities: CurrencyCommodity[];
+  timestamp: string;
+}
+
+// Ratio types
+export interface Ratio {
+  id: number;
+  name: string;
+  numerator_symbol: string;
+  denominator_symbol: string;
+  description: string | null;
+  category: string;
+  is_system: boolean;
+  is_favorite: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RatioCreate {
+  name: string;
+  numerator_symbol: string;
+  denominator_symbol: string;
+  description?: string;
+  category?: string;
+  is_favorite?: boolean;
+}
+
+export interface RatioUpdate {
+  name?: string;
+  description?: string;
+  is_favorite?: boolean;
+}
+
+export interface RatioDataPoint {
+  timestamp: string;
+  numerator_close: number | string;
+  denominator_close: number | string;
+  ratio_value: number | string;
+}
+
+export interface RatioHistory {
+  ratio: Ratio;
+  history: RatioDataPoint[];
+  current_value: number | string | null;
+  change_1d: number | string | null;
+  change_1w: number | string | null;
+  change_1m: number | string | null;
+}
+
+export interface RatioQuote {
+  id: number;
+  name: string;
+  numerator_symbol: string;
+  denominator_symbol: string;
+  current_value: number | string;
+  change_1d: number | string | null;
+  change_percent_1d: number | string | null;
+  timestamp: string;
+}
+
+// AI types
+export type AnalysisType = 'equity' | 'ratio' | 'watchlist' | 'general';
+export type AIModel = 'claude-3-5-sonnet-20241022' | 'claude-3-5-haiku-20241022';
+
+export interface AIAnalysisRequest {
+  analysis_type: AnalysisType;
+  prompt: string;
+  symbol?: string;
+  ratio_id?: number;
+  watchlist_id?: number;
+  model?: AIModel;
+  include_context?: boolean;
+}
+
+export interface AIAnalysisResponse {
+  analysis_type: AnalysisType;
+  prompt: string;
+  response: string;
+  model: string;
+  context_summary: string | null;
+  timestamp: string;
+}
+
+export interface AISettings {
+  has_api_key: boolean;
+  default_model: string;
+  custom_instructions: string | null;
+}
+
+export interface AISettingsUpdate {
+  api_key?: string;
+  default_model?: string;
+  custom_instructions?: string;
+}

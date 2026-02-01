@@ -3,11 +3,21 @@
  */
 
 import type {
+  AIAnalysisRequest,
+  AIAnalysisResponse,
+  AISettings,
+  AISettingsUpdate,
   ApiResponse,
   EquityDetail,
   EquitySearchResult,
   HistoryData,
+  MarketOverview,
   Quote,
+  Ratio,
+  RatioCreate,
+  RatioHistory,
+  RatioQuote,
+  RatioUpdate,
   TechnicalIndicators,
   TechnicalSummary,
   Watchlist,
@@ -231,6 +241,175 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  // Market overview methods
+
+  /**
+   * Get market overview data (indices, sectors, movers, currencies/commodities)
+   */
+  async getMarketOverview(): Promise<MarketOverview> {
+    return this.fetch<MarketOverview>('/market/overview');
+  }
+
+  // Ratio methods
+
+  /**
+   * Get all ratios
+   */
+  async getRatios(favoritesOnly = false, category?: string): Promise<Ratio[]> {
+    let url = '/ratios';
+    const params = new URLSearchParams();
+    if (favoritesOnly) params.append('favorites_only', 'true');
+    if (category) params.append('category', category);
+    const queryString = params.toString();
+    if (queryString) url += `?${queryString}`;
+    return this.fetch<Ratio[]>(url);
+  }
+
+  /**
+   * Get a single ratio
+   */
+  async getRatio(id: number): Promise<Ratio> {
+    return this.fetch<Ratio>(`/ratios/${id}`);
+  }
+
+  /**
+   * Create a new ratio
+   */
+  async createRatio(data: RatioCreate): Promise<Ratio> {
+    return this.fetch<Ratio>('/ratios', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Update a ratio
+   */
+  async updateRatio(id: number, data: RatioUpdate): Promise<Ratio> {
+    return this.fetch<Ratio>(`/ratios/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Delete a ratio
+   */
+  async deleteRatio(id: number): Promise<void> {
+    await fetch(`${API_BASE}/ratios/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * Get all ratio quotes
+   */
+  async getRatioQuotes(): Promise<RatioQuote[]> {
+    return this.fetch<RatioQuote[]>('/ratios/quotes');
+  }
+
+  /**
+   * Get a single ratio quote
+   */
+  async getRatioQuote(id: number): Promise<RatioQuote> {
+    return this.fetch<RatioQuote>(`/ratios/${id}/quote`);
+  }
+
+  /**
+   * Get ratio history
+   */
+  async getRatioHistory(id: number, period = '1y'): Promise<RatioHistory> {
+    return this.fetch<RatioHistory>(`/ratios/${id}/history?period=${period}`);
+  }
+
+  /**
+   * Initialize system ratios
+   */
+  async initializeRatios(): Promise<void> {
+    await fetch(`${API_BASE}/ratios/initialize`, {
+      method: 'POST',
+    });
+  }
+
+  // AI methods
+
+  /**
+   * Get AI settings
+   */
+  async getAISettings(): Promise<AISettings> {
+    return this.fetch<AISettings>('/ai/settings');
+  }
+
+  /**
+   * Update AI settings
+   */
+  async updateAISettings(data: AISettingsUpdate): Promise<AISettings> {
+    return this.fetch<AISettings>('/ai/settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Perform AI analysis (non-streaming)
+   */
+  async analyzeAI(request: AIAnalysisRequest): Promise<AIAnalysisResponse> {
+    return this.fetch<AIAnalysisResponse>('/ai/analyze', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  /**
+   * Perform AI analysis with streaming response
+   * Returns an async generator that yields text chunks
+   */
+  async *analyzeAIStream(
+    request: AIAnalysisRequest
+  ): AsyncGenerator<string, void, unknown> {
+    const response = await fetch(`${API_BASE}/ai/analyze/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      throw new ApiError('AI analysis failed', 'AI_ERROR', response.status);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new ApiError('No response body', 'AI_ERROR', 500);
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') {
+            return;
+          }
+          if (data.startsWith('ERROR:')) {
+            throw new ApiError(data.slice(7), 'AI_ERROR', 500);
+          }
+          yield data;
+        }
+      }
+    }
   }
 }
 

@@ -595,6 +595,17 @@ economic_events
 - [x] Backup scripts ready for automated daily backups
 - [x] Health endpoint reports accurate system status
 
+### Deployment Execution (2026-02-01)
+- [x] Deployed to Synology NAS at your-nas-ip
+- [x] Created `docker-compose.local.yml` for local network (no Traefik)
+- [x] Resolved build issues (TypeScript, Docker Compose v1, Next.js env vars)
+- [x] Updated Next.js to 14.2.29 (security fix)
+- [x] Disabled registration after account creation
+- [ ] Set up automated backups via Task Scheduler
+- [ ] Configure Discord webhook for alerts
+
+See [Session Notes](./sessions/2026-02-01-synology-deployment.md) for details.
+
 ---
 
 ## Phase 7: Advanced AI (Future)

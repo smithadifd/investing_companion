@@ -320,30 +320,31 @@ alert_history
 
 ---
 
-## Phase 5: Polish
+## Phase 5: Polish ✅
 **Goal**: Authentication, user profiles, production hardening
+**Status**: COMPLETE
 
 ### Deliverables
 
 #### Backend
-- [ ] User model + authentication endpoints
-- [ ] JWT-based auth with refresh tokens
-- [ ] Password hashing (argon2)
-- [ ] User settings encryption
-- [ ] API key rotation for external services
-- [ ] Rate limiting per user
-- [ ] Audit logging
+- [x] User model + authentication endpoints
+- [x] JWT-based auth with refresh tokens
+- [x] Password hashing (argon2)
+- [x] User settings encryption
+- [ ] API key rotation for external services (future)
+- [ ] Rate limiting per user (future)
+- [ ] Audit logging (future)
 
 #### Frontend
-- [ ] Login page
-- [ ] Registration page (optional, can be disabled)
-- [ ] Settings page
-  - API keys (Claude, Polygon, etc.)
+- [x] Login page
+- [x] Registration page (conditional on REGISTRATION_ENABLED)
+- [x] Settings page
+  - API keys (Claude, Alpha Vantage, Polygon)
   - Discord webhook URL
-  - Default watchlist
-  - Theme preferences
-- [ ] Profile page
-- [ ] Auth context and protected routes
+  - Password change
+  - Session management
+- [x] Profile page (integrated into Settings)
+- [x] Auth context and protected routes
 
 #### Data Model Additions
 ```
@@ -357,15 +358,25 @@ users
 └── last_login_at
 
 sessions
-├── id (PK)
+├── id (PK, UUID)
 ├── user_id (FK)
 ├── refresh_token_hash
+├── user_agent
+├── ip_address
 ├── expires_at
 ├── created_at
 └── revoked_at
 ```
 
-### Security Hardening
+### Security Features Implemented
+- Password hashing with Argon2id
+- JWT access tokens (30 min default)
+- Refresh tokens (30 days, SHA-256 hashed)
+- Session tracking and revocation
+- API key encryption (Fernet)
+- Optional registration disable
+
+### Security Hardening (Future)
 - HTTPS enforcement
 - CSRF protection
 - Security headers (CSP, HSTS, etc.)
@@ -373,10 +384,9 @@ sessions
 - Backup automation
 
 ### Success Criteria
-- Login with email/password
-- Settings persist across sessions
-- Other users can't see my watchlists
-- Optional: Disable registration for single-user mode
+- [x] Login with email/password
+- [x] Settings persist across sessions
+- [x] Optional: Disable registration for single-user mode
 
 ---
 

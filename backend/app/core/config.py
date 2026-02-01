@@ -37,6 +37,12 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
 
+    # Authentication
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    REGISTRATION_ENABLED: bool = True  # Set to False for single-user mode
+
     # External APIs
     ALPHA_VANTAGE_API_KEY: str = ""
     POLYGON_API_KEY: str = ""

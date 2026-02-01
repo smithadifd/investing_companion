@@ -1,5 +1,6 @@
 """Watchlist models - collections of equities with notes and analysis."""
 
+import uuid
 from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, List, Optional
@@ -14,12 +15,14 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
     from app.db.models.equity import Equity
+    from app.db.models.user import User
 
 
 class Watchlist(Base, TimestampMixin):
@@ -31,8 +34,12 @@ class Watchlist(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
     is_default: Mapped[bool] = mapped_column(default=False, nullable=False)
-    # user_id will be added in Phase 5 when auth is implemented
-    # user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"))
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
 
     # Relationships
     items: Mapped[List["WatchlistItem"]] = relationship(
@@ -41,6 +48,7 @@ class Watchlist(Base, TimestampMixin):
         cascade="all, delete-orphan",
         order_by="WatchlistItem.added_at.desc()",
     )
+    user: Mapped[Optional["User"]] = relationship(back_populates="watchlists")
 
     __table_args__ = (
         Index("idx_watchlists_name", "name"),

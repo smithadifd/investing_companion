@@ -196,29 +196,51 @@ Guidelines:
 
         return base_prompt
 
+    def _format_value(
+        self, value, fmt: str = ".2f", prefix: str = "", suffix: str = ""
+    ) -> str:
+        """Format a value with proper null handling."""
+        if value is None:
+            return "N/A"
+        return f"{prefix}{value:{fmt}}{suffix}"
+
     def _build_equity_prompt(
         self, user_prompt: str, context: EquityContext
     ) -> str:
         """Build the full prompt for equity analysis."""
+        # Format values with proper null handling
+        price_str = self._format_value(context.price, ".2f", "$")
+        change_str = self._format_value(context.change_percent, ".2f", "", "%")
+        low_52_str = self._format_value(context.week_52_low, ".2f", "$")
+        high_52_str = self._format_value(context.week_52_high, ".2f", "$")
+        market_cap_str = self._format_value(context.market_cap, ",", "$") if context.market_cap else "N/A"
+        pe_str = self._format_value(context.pe_ratio, ".2f")
+        forward_pe_str = self._format_value(context.forward_pe, ".2f")
+        eps_str = self._format_value(context.eps_ttm, ".2f", "$")
+        beta_str = self._format_value(context.beta, ".2f")
+        div_yield_str = self._format_value(
+            context.dividend_yield * 100 if context.dividend_yield else None, ".2f", "", "%"
+        )
+
         context_str = f"""
 Analyzing: {context.symbol} - {context.name}
 Sector: {context.sector or 'N/A'}
 Industry: {context.industry or 'N/A'}
 
 Current Data:
-- Price: ${context.price:.2f if context.price else 'N/A'}
-- Day Change: {context.change_percent:.2f}% if context.change_percent else 'N/A'
-- 52-Week Range: ${context.week_52_low:.2f if context.week_52_low else 'N/A'} - ${context.week_52_high:.2f if context.week_52_high else 'N/A'}
+- Price: {price_str}
+- Day Change: {change_str}
+- 52-Week Range: {low_52_str} - {high_52_str}
 
 Valuation:
-- Market Cap: ${context.market_cap:,} if context.market_cap else 'N/A'
-- P/E Ratio: {context.pe_ratio:.2f if context.pe_ratio else 'N/A'}
-- Forward P/E: {context.forward_pe:.2f if context.forward_pe else 'N/A'}
-- EPS (TTM): ${context.eps_ttm:.2f if context.eps_ttm else 'N/A'}
+- Market Cap: {market_cap_str}
+- P/E Ratio: {pe_str}
+- Forward P/E: {forward_pe_str}
+- EPS (TTM): {eps_str}
 
 Risk Metrics:
-- Beta: {context.beta:.2f if context.beta else 'N/A'}
-- Dividend Yield: {(context.dividend_yield * 100):.2f}% if context.dividend_yield else 'N/A'
+- Beta: {beta_str}
+- Dividend Yield: {div_yield_str}
 """
 
         return f"""Here is the current data for {context.symbol}:
@@ -233,15 +255,20 @@ Please provide a thoughtful analysis addressing the user's question."""
         self, user_prompt: str, context: RatioContext
     ) -> str:
         """Build the full prompt for ratio analysis."""
+        # Format values with proper null handling
+        current_val_str = self._format_value(context.current_value, ".4f")
+        change_1d_str = self._format_value(context.change_1d, ".4f")
+        change_1m_str = self._format_value(context.change_1m, ".4f")
+
         context_str = f"""
 Ratio: {context.name}
 Formula: {context.numerator_symbol} / {context.denominator_symbol}
 Description: {context.description or 'N/A'}
 
 Current Data:
-- Current Value: {context.current_value:.4f if context.current_value else 'N/A'}
-- 1-Day Change: {context.change_1d:.4f if context.change_1d else 'N/A'}
-- 1-Month Change: {context.change_1m:.4f if context.change_1m else 'N/A'}
+- Current Value: {current_val_str}
+- 1-Day Change: {change_1d_str}
+- 1-Month Change: {change_1m_str}
 """
 
         return f"""Here is the current data for the {context.name} ratio:

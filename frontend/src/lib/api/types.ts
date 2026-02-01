@@ -445,3 +445,74 @@ export interface NotificationStatus {
     configured: boolean;
   };
 }
+
+// Auth types
+export interface User {
+  id: string;
+  email: string;
+  is_active: boolean;
+  is_admin: boolean;
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export interface UserCreate {
+  email: string;
+  password: string;
+  password_confirm: string;
+}
+
+export interface UserLogin {
+  email: string;
+  password: string;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  expires_in: number;
+}
+
+export interface TokenRefresh {
+  refresh_token: string;
+}
+
+export interface PasswordChange {
+  current_password: string;
+  new_password: string;
+  new_password_confirm: string;
+}
+
+export interface SessionInfo {
+  id: string;
+  user_agent: string | null;
+  ip_address: string | null;
+  created_at: string;
+  expires_at: string;
+  is_current: boolean;
+}
+
+export interface RegistrationStatus {
+  enabled: boolean;
+  message: string | null;
+}
+
+// Settings types
+export interface AppSettings {
+  claude_api_key: string | null;
+  alpha_vantage_api_key: string | null;
+  polygon_api_key: string | null;
+  discord_webhook_url: string | null;
+  default_watchlist_id: number | null;
+  theme: string;
+}
+
+export interface AppSettingsUpdate {
+  claude_api_key?: string;
+  alpha_vantage_api_key?: string;
+  polygon_api_key?: string;
+  discord_webhook_url?: string;
+  default_watchlist_id?: number;
+  theme?: string;
+}

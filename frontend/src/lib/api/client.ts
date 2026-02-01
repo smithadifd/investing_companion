@@ -15,19 +15,29 @@ import type {
   AlertUpdate,
   AlertWithHistory,
   ApiResponse,
+  AppSettings,
+  AppSettingsUpdate,
   EquityDetail,
   EquitySearchResult,
   HistoryData,
   MarketOverview,
   NotificationStatus,
+  PasswordChange,
   Quote,
   Ratio,
   RatioCreate,
   RatioHistory,
   RatioQuote,
   RatioUpdate,
+  RegistrationStatus,
+  SessionInfo,
   TechnicalIndicators,
   TechnicalSummary,
+  TokenRefresh,
+  TokenResponse,
+  User,
+  UserCreate,
+  UserLogin,
   Watchlist,
   WatchlistCreate,
   WatchlistExport,
@@ -41,6 +51,10 @@ import type {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
+// Token storage keys
+const ACCESS_TOKEN_KEY = 'investing_companion_access_token';
+const REFRESH_TOKEN_KEY = 'investing_companion_refresh_token';
+
 class ApiError extends Error {
   constructor(
     message: string,
@@ -53,14 +67,124 @@ class ApiError extends Error {
 }
 
 class ApiClient {
-  private async fetch<T>(path: string, options?: RequestInit): Promise<T> {
-    const response = await fetch(`${API_BASE}${path}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
+  private accessToken: string | null = null;
+  private refreshToken: string | null = null;
+  private refreshPromise: Promise<boolean> | null = null;
+
+  constructor() {
+    // Load tokens from localStorage if available (client-side only)
+    if (typeof window !== 'undefined') {
+      this.accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
+      this.refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+    }
+  }
+
+  /**
+   * Store tokens after login/refresh
+   */
+  private storeTokens(tokens: TokenResponse): void {
+    this.accessToken = tokens.access_token;
+    this.refreshToken = tokens.refresh_token;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
+      localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
+    }
+  }
+
+  /**
+   * Clear stored tokens on logout
+   */
+  private clearTokens(): void {
+    this.accessToken = null;
+    this.refreshToken = null;
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(ACCESS_TOKEN_KEY);
+      localStorage.removeItem(REFRESH_TOKEN_KEY);
+    }
+  }
+
+  /**
+   * Check if user is authenticated
+   */
+  isAuthenticated(): boolean {
+    return !!this.accessToken;
+  }
+
+  /**
+   * Get current access token
+   */
+  getAccessToken(): string | null {
+    return this.accessToken;
+  }
+
+  /**
+   * Attempt to refresh the access token
+   */
+  private async refreshAccessToken(): Promise<boolean> {
+    if (!this.refreshToken) {
+      return false;
+    }
+
+    // Prevent multiple simultaneous refresh attempts
+    if (this.refreshPromise) {
+      return this.refreshPromise;
+    }
+
+    this.refreshPromise = (async () => {
+      try {
+        const response = await fetch(`${API_BASE}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: this.refreshToken }),
+        });
+
+        if (!response.ok) {
+          this.clearTokens();
+          return false;
+        }
+
+        const result: ApiResponse<TokenResponse> = await response.json();
+        this.storeTokens(result.data);
+        return true;
+      } catch {
+        this.clearTokens();
+        return false;
+      } finally {
+        this.refreshPromise = null;
+      }
+    })();
+
+    return this.refreshPromise;
+  }
+
+  private async fetch<T>(path: string, options?: RequestInit & { requiresAuth?: boolean }): Promise<T> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(options?.headers as Record<string, string>),
+    };
+
+    // Add auth header if we have a token
+    if (this.accessToken) {
+      headers['Authorization'] = `Bearer ${this.accessToken}`;
+    }
+
+    let response = await fetch(`${API_BASE}${path}`, {
       ...options,
+      headers,
     });
+
+    // If 401 and we have a refresh token, try to refresh
+    if (response.status === 401 && this.refreshToken) {
+      const refreshed = await this.refreshAccessToken();
+      if (refreshed) {
+        // Retry the request with new token
+        headers['Authorization'] = `Bearer ${this.accessToken}`;
+        response = await fetch(`${API_BASE}${path}`, {
+          ...options,
+          headers,
+        });
+      }
+    }
 
     if (!response.ok) {
       let errorMessage = 'API request failed';
@@ -68,7 +192,7 @@ class ApiClient {
 
       try {
         const errorData = await response.json();
-        errorMessage = errorData.error?.message || errorMessage;
+        errorMessage = errorData.detail || errorData.error?.message || errorMessage;
         errorCode = errorData.error?.code || errorCode;
       } catch {
         // Response wasn't JSON
@@ -77,8 +201,125 @@ class ApiClient {
       throw new ApiError(errorMessage, errorCode, response.status);
     }
 
+    // Handle 204 No Content
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
     const result: ApiResponse<T> = await response.json();
     return result.data;
+  }
+
+  // ==================== Auth Methods ====================
+
+  /**
+   * Check if registration is enabled
+   */
+  async getRegistrationStatus(): Promise<RegistrationStatus> {
+    return this.fetch<RegistrationStatus>('/auth/registration-status');
+  }
+
+  /**
+   * Register a new user
+   */
+  async register(data: UserCreate): Promise<User> {
+    return this.fetch<User>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Login with email and password
+   */
+  async login(data: UserLogin): Promise<TokenResponse> {
+    const tokens = await this.fetch<TokenResponse>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    this.storeTokens(tokens);
+    return tokens;
+  }
+
+  /**
+   * Logout and revoke refresh token
+   */
+  async logout(): Promise<void> {
+    if (this.refreshToken) {
+      try {
+        await fetch(`${API_BASE}/auth/logout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: this.refreshToken }),
+        });
+      } catch {
+        // Ignore errors during logout
+      }
+    }
+    this.clearTokens();
+  }
+
+  /**
+   * Logout from all sessions
+   */
+  async logoutAll(): Promise<void> {
+    await this.fetch('/auth/logout-all', { method: 'POST' });
+    this.clearTokens();
+  }
+
+  /**
+   * Get current user profile
+   */
+  async getCurrentUser(): Promise<User> {
+    return this.fetch<User>('/auth/me');
+  }
+
+  /**
+   * Update current user email
+   */
+  async updateCurrentUser(email: string): Promise<User> {
+    return this.fetch<User>('/auth/me', {
+      method: 'PATCH',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  /**
+   * Change password
+   */
+  async changePassword(data: PasswordChange): Promise<void> {
+    await this.fetch('/auth/me/change-password', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    // Password change revokes all sessions, clear tokens
+    this.clearTokens();
+  }
+
+  /**
+   * Get all active sessions
+   */
+  async getSessions(): Promise<SessionInfo[]> {
+    return this.fetch<SessionInfo[]>('/auth/me/sessions');
+  }
+
+  // ==================== Settings Methods ====================
+
+  /**
+   * Get app settings
+   */
+  async getAppSettings(): Promise<AppSettings> {
+    return this.fetch<AppSettings>('/settings');
+  }
+
+  /**
+   * Update app settings
+   */
+  async updateAppSettings(data: AppSettingsUpdate): Promise<AppSettings> {
+    return this.fetch<AppSettings>('/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
   }
 
   /**

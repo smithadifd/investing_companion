@@ -1,5 +1,6 @@
 """Alert models for price and ratio monitoring."""
 
+import uuid
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Optional
@@ -15,6 +16,7 @@ from sqlalchemy import (
     Text,
     func,
 )
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
@@ -22,6 +24,7 @@ from app.db.base import Base, TimestampMixin
 if TYPE_CHECKING:
     from app.db.models.equity import Equity
     from app.db.models.ratio import Ratio
+    from app.db.models.user import User
 
 
 class AlertConditionType(str, Enum):
@@ -41,9 +44,12 @@ class Alert(Base, TimestampMixin):
     __tablename__ = "alerts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[Optional[int]] = mapped_column(
-        Integer, nullable=True
-    )  # For future auth support
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
 
     # Name and description
     name: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -83,6 +89,7 @@ class Alert(Base, TimestampMixin):
     )
 
     # Relationships
+    user: Mapped[Optional["User"]] = relationship(back_populates="alerts")
     equity: Mapped[Optional["Equity"]] = relationship(
         "Equity", lazy="selectin"
     )

@@ -14,6 +14,25 @@ Deployed the Investing Companion application to Synology NAS at 192.168.50.88. T
 
 ## What Was Accomplished
 
+### Discord Webhook Configuration (Post-Deployment)
+
+1. **Feature Enhancement**
+   - Modified Discord notification service to read webhook URL from user settings database
+   - Previously only checked environment variable; now falls back to database
+   - Allows users to configure Discord webhook via Settings UI without editing `.env`
+
+2. **Debugging Journey**
+   - Initial confusion: Mac Docker and Synology Docker both running with same container names
+   - Database queries from Mac were hitting wrong database
+   - Confirmed user data exists on Synology by testing login from phone
+   - Root cause: Updated code was on Mac but not deployed to Synology
+
+3. **Deployment Process**
+   - Copied updated files via SMB to `/Volumes/docker/investing_companion`
+   - SSH'd to Synology and ran rebuild: `docker-compose -f docker-compose.local.yml --env-file .env.production build api`
+   - Restarted API container with new code
+   - Test notification successful ✅
+
 ### Initial Setup
 
 1. **Repository Transfer**
@@ -67,6 +86,9 @@ Deployed the Investing Companion application to Synology NAS at 192.168.50.88. T
 
 ## Files Modified
 
+- `backend/app/services/notifications/discord.py` - Read webhook URL from database as fallback
+- `backend/app/api/v1/endpoints/alert.py` - Use async config check for Discord status
+- `backend/app/api/v1/endpoints/settings.py` - Clear Discord cache when settings updated
 - `backend/app/main.py` - Aliased settings import as `app_settings`
 - `frontend/tsconfig.json` - Added `downlevelIteration`, `target: ES2015`
 - `frontend/src/app/calendar/page.tsx` - Added EventStats import
@@ -128,6 +150,15 @@ Internal: PostgreSQL, Redis, Celery Worker, Celery Beat
    - SMB mounts have issues with git operations
    - SSH directly or use Synology's Git package
 
+5. **Docker Compose v1 vs v2 (Synology)**
+   - Synology uses `docker-compose` (hyphen) not `docker compose` (space)
+   - Commands like `docker compose -f` fail; use `docker-compose -f` instead
+
+6. **Mac vs Synology Docker Confusion**
+   - Running Docker on both Mac and Synology with same project causes confusion
+   - Container names are identical; docker commands go to local Docker daemon
+   - Stop Mac Docker when working on Synology deployment
+
 ---
 
 ## Future Synology Updates
@@ -135,7 +166,7 @@ Internal: PostgreSQL, Redis, Celery Worker, Celery Beat
 When git is working on Synology:
 
 ```bash
-cd /volume1/docker/investing_companion
+cd /volume3/docker/investing_companion
 
 # Backup first
 ./scripts/backup.sh ./backups
@@ -152,8 +183,8 @@ git pull origin main
 # Drop stash (files should match)
 git stash drop
 
-# Rebuild
-docker compose -f docker-compose.local.yml up -d --build
+# Rebuild (note: docker-compose with hyphen on Synology)
+docker-compose -f docker-compose.local.yml --env-file .env.production up -d --build
 ```
 
 ---
@@ -162,5 +193,5 @@ docker compose -f docker-compose.local.yml up -d --build
 
 1. Fix git on Synology for easier updates
 2. Set up automated backups via Task Scheduler
-3. Configure Discord webhook for alerts
+3. ~~Configure Discord webhook for alerts~~ ✅ DONE
 4. Add Claude API key when OAuth resolved (Issue 001)

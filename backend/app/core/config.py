@@ -1,9 +1,20 @@
 """
 Application configuration using Pydantic Settings
 """
+import sys
 from typing import List, Union
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# Insecure defaults that must not be used in production
+_INSECURE_SECRET_KEYS = {
+    "dev-secret-key-change-in-production",
+    "changeme",
+    "secret",
+    "password",
+    "",
+}
 
 
 class Settings(BaseSettings):
@@ -19,6 +30,39 @@ class Settings(BaseSettings):
     # Application
     ENVIRONMENT: str = "development"
     SECRET_KEY: str = "dev-secret-key-change-in-production"
+
+    @model_validator(mode="after")
+    def validate_production_settings(self) -> "Settings":
+        """Validate that production has secure configuration."""
+        if self.ENVIRONMENT == "production":
+            errors = []
+
+            # Check SECRET_KEY
+            if self.SECRET_KEY in _INSECURE_SECRET_KEYS:
+                errors.append(
+                    "SECRET_KEY must be set to a secure value in production. "
+                    "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                )
+            if len(self.SECRET_KEY) < 32:
+                errors.append("SECRET_KEY must be at least 32 characters in production")
+
+            # Check database password (extract from URL)
+            if "investing_dev" in self.DATABASE_URL or ":investing@" in self.DATABASE_URL:
+                errors.append(
+                    "DATABASE_URL contains default development credentials. "
+                    "Use strong credentials in production."
+                )
+
+            if errors:
+                print("\n" + "=" * 60, file=sys.stderr)
+                print("FATAL: Production configuration validation failed!", file=sys.stderr)
+                print("=" * 60, file=sys.stderr)
+                for error in errors:
+                    print(f"  - {error}", file=sys.stderr)
+                print("=" * 60 + "\n", file=sys.stderr)
+                sys.exit(1)
+
+        return self
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://investing:investing_dev@localhost:5432/investing_companion"

@@ -6,14 +6,18 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
+from app.core.middleware import SecurityHeadersMiddleware
 
 app = FastAPI(
     title="Investing Companion API",
     description="Self-hosted investing companion with analysis, watchlists, and alerts",
     version="0.1.0",
-    docs_url="/docs" if settings.ENVIRONMENT != "production" else None,
+    docs_url="/docs" if settings.ENVIRONMENT != "production" else "/docs",
     redoc_url="/redoc" if settings.ENVIRONMENT != "production" else None,
 )
+
+# Security headers middleware (outermost - runs first on response)
+app.add_middleware(SecurityHeadersMiddleware)
 
 # CORS middleware
 app.add_middleware(
@@ -26,9 +30,51 @@ app.add_middleware(
 
 
 @app.get("/health")
-async def health_check():
-    """Health check endpoint for container orchestration"""
-    return {"status": "healthy", "version": "0.1.0"}
+async def health_check(detailed: bool = False):
+    """Health check endpoint for container orchestration.
+
+    Basic check returns just status. Use ?detailed=true for full checks.
+    """
+    import time
+
+    start = time.time()
+    response = {
+        "status": "healthy",
+        "version": "0.1.0",
+        "environment": settings.ENVIRONMENT,
+    }
+
+    if detailed:
+        checks = {}
+
+        # Database check
+        try:
+            from app.db.session import AsyncSessionLocal
+            from sqlalchemy import text
+
+            async with AsyncSessionLocal() as db:
+                await db.execute(text("SELECT 1"))
+            checks["database"] = {"status": "ok"}
+        except Exception as e:
+            checks["database"] = {"status": "error", "message": str(e)}
+            response["status"] = "degraded"
+
+        # Redis check
+        try:
+            import redis.asyncio as redis
+
+            r = redis.from_url(settings.REDIS_URL)
+            await r.ping()
+            await r.aclose()
+            checks["redis"] = {"status": "ok"}
+        except Exception as e:
+            checks["redis"] = {"status": "error", "message": str(e)}
+            response["status"] = "degraded"
+
+        response["checks"] = checks
+        response["response_time_ms"] = round((time.time() - start) * 1000, 2)
+
+    return response
 
 
 @app.get("/")

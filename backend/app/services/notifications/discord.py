@@ -32,21 +32,28 @@ class DiscordNotificationService:
         if self._env_webhook_url:
             return self._env_webhook_url
 
-        # Check database for user setting (single-user app, so user_id=None)
+        # Check database for user setting
         if not self._cache_checked:
             try:
+                from sqlalchemy import select
                 from app.db.session import AsyncSessionLocal
-                from app.services.settings import SettingsService
+                from app.db.models.user_settings import UserSetting
 
                 async with AsyncSessionLocal() as session:
-                    settings_service = SettingsService(session)
-                    self._cached_db_url = await settings_service.get_unmasked_setting(
-                        SettingsService.DISCORD_WEBHOOK_URL,
-                        user_id=None,
+                    # Find any Discord webhook setting (single-user app)
+                    stmt = select(UserSetting).where(
+                        UserSetting.key == "DISCORD_WEBHOOK_URL",
+                        UserSetting.value.isnot(None),
                     )
+                    result = await session.execute(stmt)
+                    setting = result.scalar_one_or_none()
+
+                    if setting and setting.value:
+                        # Discord webhook URLs are not encrypted, use directly
+                        self._cached_db_url = setting.value
+                        logger.info("Discord webhook URL loaded from user settings")
+
                 self._cache_checked = True
-                if self._cached_db_url:
-                    logger.info("Discord webhook URL loaded from user settings")
             except Exception as e:
                 logger.warning(f"Could not load Discord webhook from database: {e}")
                 self._cache_checked = True

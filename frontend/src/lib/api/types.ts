@@ -350,3 +350,98 @@ export interface AISettingsUpdate {
   default_model?: string;
   custom_instructions?: string;
 }
+
+// Alert types
+export type AlertConditionType =
+  | 'above'
+  | 'below'
+  | 'crosses_above'
+  | 'crosses_below'
+  | 'percent_up'
+  | 'percent_down';
+
+export type AlertTargetType = 'equity' | 'ratio';
+
+export interface AlertTargetInfo {
+  type: AlertTargetType;
+  id: number;
+  symbol: string;
+  name: string;
+}
+
+export interface Alert {
+  id: number;
+  name: string;
+  notes: string | null;
+  equity_id: number | null;
+  ratio_id: number | null;
+  condition_type: AlertConditionType;
+  threshold_value: number | string;
+  comparison_period: string | null;
+  cooldown_minutes: number;
+  is_active: boolean;
+  last_triggered_at: string | null;
+  last_checked_value: number | string | null;
+  created_at: string;
+  updated_at: string;
+  target: AlertTargetInfo | null;
+}
+
+export interface AlertCreate {
+  name: string;
+  notes?: string;
+  equity_symbol?: string;
+  ratio_id?: number;
+  condition_type: AlertConditionType;
+  threshold_value: number;
+  comparison_period?: string;
+  cooldown_minutes?: number;
+  is_active?: boolean;
+}
+
+export interface AlertUpdate {
+  name?: string;
+  notes?: string;
+  condition_type?: AlertConditionType;
+  threshold_value?: number;
+  comparison_period?: string;
+  cooldown_minutes?: number;
+  is_active?: boolean;
+}
+
+export interface AlertHistory {
+  id: number;
+  alert_id: number;
+  triggered_at: string;
+  triggered_value: number | string;
+  threshold_value: number | string;
+  notification_sent: boolean;
+  notification_channel: string | null;
+  notification_error: string | null;
+}
+
+export interface AlertWithHistory extends Alert {
+  recent_history: AlertHistory[];
+}
+
+export interface AlertStats {
+  total_alerts: number;
+  active_alerts: number;
+  triggered_today: number;
+  triggered_this_week: number;
+}
+
+export interface AlertCheckResult {
+  alert_id: number;
+  is_triggered: boolean;
+  current_value: number | string;
+  threshold_value: number | string;
+  condition_met: string;
+  should_notify: boolean;
+}
+
+export interface NotificationStatus {
+  discord: {
+    configured: boolean;
+  };
+}

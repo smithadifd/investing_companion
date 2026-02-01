@@ -206,7 +206,7 @@ npm test
 - [x] Phase 1: Prototype (equity display, charts) - COMPLETE
 - [x] Phase 2: MVP (watchlists, analysis, import) - COMPLETE
 - [x] Phase 3: Intelligence (AI, ratios, indices) - COMPLETE (AI pending OAuth - see docs/issues/)
-- [ ] Phase 4: Alerts (notifications)
+- [x] Phase 4: Alerts (notifications) - COMPLETE
 - [ ] Phase 5: Polish (auth, settings)
 - [ ] Phase 6: Advanced (trade tracker)
 

@@ -57,6 +57,8 @@ services:
       # External API Keys (optional)
       - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}
       - POLYGON_API_KEY=${POLYGON_API_KEY:-}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
     volumes:
       - ./backend:/app
     ports:
@@ -81,6 +83,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-investing}:${POSTGRES_PASSWORD:-investing_dev}@db:5432/${POSTGRES_DB:-investing_companion}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
     volumes:
       - ./backend:/app
     depends_on:
@@ -103,6 +106,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-investing}:${POSTGRES_PASSWORD:-investing_dev}@db:5432/${POSTGRES_DB:-investing_companion}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
     volumes:
       - ./backend:/app
     depends_on:

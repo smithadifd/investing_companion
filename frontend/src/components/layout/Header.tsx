@@ -29,6 +29,9 @@ export function Header() {
             <NavLink href="/ratios" active={pathname.startsWith('/ratios')}>
               Ratios
             </NavLink>
+            <NavLink href="/alerts" active={pathname.startsWith('/alerts')}>
+              Alerts
+            </NavLink>
           </nav>
         </div>
         <ThemeToggle />

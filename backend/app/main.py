@@ -42,15 +42,11 @@ async def root():
 
 
 # Include routers
-from app.api.v1.endpoints import ai, equity, market, ratio, watchlist
+from app.api.v1.endpoints import ai, alert, equity, market, ratio, watchlist
 
 app.include_router(equity.router, prefix="/api/v1/equity", tags=["equity"])
 app.include_router(watchlist.router, prefix="/api/v1/watchlists", tags=["watchlists"])
 app.include_router(market.router, prefix="/api/v1", tags=["market"])
 app.include_router(ratio.router, prefix="/api/v1", tags=["ratios"])
 app.include_router(ai.router, prefix="/api/v1", tags=["ai"])
-
-# TODO: Include additional routers as they are developed
-# from app.api.v1.endpoints import alert, ai
-# app.include_router(alert.router, prefix="/api/v1/alerts", tags=["alerts"])
-# app.include_router(ai.router, prefix="/api/v1/ai", tags=["ai"])
+app.include_router(alert.router, prefix="/api/v1", tags=["alerts"])

@@ -2,14 +2,15 @@
 
 from fastapi import APIRouter
 
+from app.schemas.common import DataResponse
 from app.schemas.market import MarketOverviewResponse
 from app.services.market import market_service
 
 router = APIRouter(prefix="/market", tags=["market"])
 
 
-@router.get("/overview", response_model=MarketOverviewResponse)
-async def get_market_overview() -> MarketOverviewResponse:
+@router.get("/overview", response_model=DataResponse[MarketOverviewResponse])
+async def get_market_overview() -> DataResponse[MarketOverviewResponse]:
     """
     Get complete market overview including:
     - Major indices (S&P 500, Dow, Nasdaq, etc.)
@@ -17,4 +18,5 @@ async def get_market_overview() -> MarketOverviewResponse:
     - Top gainers and losers
     - Currencies and commodities
     """
-    return await market_service.get_market_overview()
+    data = await market_service.get_market_overview()
+    return DataResponse(data=data)

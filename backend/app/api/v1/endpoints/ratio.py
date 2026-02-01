@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.schemas.common import DataResponse
 from app.schemas.ratio import (
     RatioCreate,
     RatioHistoryResponse,
@@ -23,40 +24,43 @@ def get_ratio_service(db: AsyncSession = Depends(get_db)) -> RatioService:
     return RatioService(db)
 
 
-@router.get("", response_model=List[RatioResponse])
+@router.get("", response_model=DataResponse[List[RatioResponse]])
 async def list_ratios(
     favorites_only: bool = False,
     category: Optional[str] = None,
     service: RatioService = Depends(get_ratio_service),
-) -> List[RatioResponse]:
+) -> DataResponse[List[RatioResponse]]:
     """
     List all ratios.
 
     - **favorites_only**: Only return favorited ratios
     - **category**: Filter by category (commodity, equity, macro, crypto, custom)
     """
-    return await service.list_ratios(favorites_only=favorites_only, category=category)
+    data = await service.list_ratios(favorites_only=favorites_only, category=category)
+    return DataResponse(data=data)
 
 
-@router.post("", response_model=RatioResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=DataResponse[RatioResponse], status_code=status.HTTP_201_CREATED)
 async def create_ratio(
     data: RatioCreate,
     service: RatioService = Depends(get_ratio_service),
-) -> RatioResponse:
+) -> DataResponse[RatioResponse]:
     """
     Create a new custom ratio.
     """
-    return await service.create_ratio(data)
+    ratio = await service.create_ratio(data)
+    return DataResponse(data=ratio)
 
 
-@router.get("/quotes", response_model=List[RatioQuoteResponse])
+@router.get("/quotes", response_model=DataResponse[List[RatioQuoteResponse]])
 async def get_all_ratio_quotes(
     service: RatioService = Depends(get_ratio_service),
-) -> List[RatioQuoteResponse]:
+) -> DataResponse[List[RatioQuoteResponse]]:
     """
     Get current quotes for all ratios.
     """
-    return await service.get_all_ratio_quotes()
+    data = await service.get_all_ratio_quotes()
+    return DataResponse(data=data)
 
 
 @router.post("/initialize", status_code=status.HTTP_204_NO_CONTENT)
@@ -69,11 +73,11 @@ async def initialize_system_ratios(
     await service.initialize_system_ratios()
 
 
-@router.get("/{ratio_id}", response_model=RatioResponse)
+@router.get("/{ratio_id}", response_model=DataResponse[RatioResponse])
 async def get_ratio(
     ratio_id: int,
     service: RatioService = Depends(get_ratio_service),
-) -> RatioResponse:
+) -> DataResponse[RatioResponse]:
     """
     Get a single ratio by ID.
     """
@@ -83,15 +87,15 @@ async def get_ratio(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Ratio with id {ratio_id} not found",
         )
-    return ratio
+    return DataResponse(data=ratio)
 
 
-@router.put("/{ratio_id}", response_model=RatioResponse)
+@router.put("/{ratio_id}", response_model=DataResponse[RatioResponse])
 async def update_ratio(
     ratio_id: int,
     data: RatioUpdate,
     service: RatioService = Depends(get_ratio_service),
-) -> RatioResponse:
+) -> DataResponse[RatioResponse]:
     """
     Update a ratio. For system ratios, only is_favorite can be changed.
     """
@@ -101,7 +105,7 @@ async def update_ratio(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Ratio with id {ratio_id} not found",
         )
-    return ratio
+    return DataResponse(data=ratio)
 
 
 @router.delete("/{ratio_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -120,11 +124,11 @@ async def delete_ratio(
         )
 
 
-@router.get("/{ratio_id}/quote", response_model=RatioQuoteResponse)
+@router.get("/{ratio_id}/quote", response_model=DataResponse[RatioQuoteResponse])
 async def get_ratio_quote(
     ratio_id: int,
     service: RatioService = Depends(get_ratio_service),
-) -> RatioQuoteResponse:
+) -> DataResponse[RatioQuoteResponse]:
     """
     Get current quote for a ratio.
     """
@@ -134,15 +138,15 @@ async def get_ratio_quote(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Could not get quote for ratio {ratio_id}",
         )
-    return quote
+    return DataResponse(data=quote)
 
 
-@router.get("/{ratio_id}/history", response_model=RatioHistoryResponse)
+@router.get("/{ratio_id}/history", response_model=DataResponse[RatioHistoryResponse])
 async def get_ratio_history(
     ratio_id: int,
     period: str = "1y",
     service: RatioService = Depends(get_ratio_service),
-) -> RatioHistoryResponse:
+) -> DataResponse[RatioHistoryResponse]:
     """
     Get historical data for a ratio.
 
@@ -154,4 +158,4 @@ async def get_ratio_history(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Ratio with id {ratio_id} not found",
         )
-    return history
+    return DataResponse(data=history)

@@ -1,0 +1,154 @@
+# Local Network Docker Compose for Investing Companion
+# No HTTPS/Traefik - access via http://synology-ip:3000
+#
+# Usage:
+#   docker-compose -f docker-compose.local.yml --env-file .env.production up -d
+
+version: '3.8'
+
+services:
+  # ===========================================
+  # Database
+  # ===========================================
+  db:
+    image: timescale/timescaledb:latest-pg15
+    container_name: investing_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - investing_network
+    restart: unless-stopped
+
+  # ===========================================
+  # Redis (Cache + Celery Broker)
+  # ===========================================
+  redis:
+    image: redis:7-alpine
+    container_name: investing_redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - investing_network
+    restart: unless-stopped
+
+  # ===========================================
+  # Backend API
+  # ===========================================
+  api:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend.prod
+    container_name: investing_api
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - ENVIRONMENT=production
+      - CORS_ORIGINS=http://localhost:3000,http://${SYNOLOGY_IP:-192.168.1.100}:3000
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}
+      - REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-true}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - investing_network
+    restart: unless-stopped
+
+  # ===========================================
+  # Celery Worker (Background Tasks)
+  # ===========================================
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend.prod
+    container_name: investing_celery_worker
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - ENVIRONMENT=production
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+    command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info", "--concurrency=2"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - investing_network
+    restart: unless-stopped
+
+  # ===========================================
+  # Celery Beat (Scheduler)
+  # ===========================================
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend.prod
+    container_name: investing_celery_beat
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - ENVIRONMENT=production
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+    command: ["celery", "-A", "app.tasks.celery_app", "beat", "--loglevel=info"]
+    depends_on:
+      celery_worker:
+        condition: service_started
+    networks:
+      - investing_network
+    restart: unless-stopped
+
+  # ===========================================
+  # Frontend
+  # ===========================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/Dockerfile.frontend.prod
+      args:
+        - NEXT_PUBLIC_API_URL=http://${SYNOLOGY_IP:-192.168.1.100}:8000/api/v1
+    container_name: investing_frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://${SYNOLOGY_IP:-192.168.1.100}:8000/api/v1
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - investing_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    name: investing_postgres_data
+  redis_data:
+    name: investing_redis_data
+
+networks:
+  investing_network:
+    name: investing_network

@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { useCalendarMonth, useEventStats, useRefreshWatchlistEvents } from '@/lib/hooks/useEvents';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import type { EconomicEvent, EventType, CalendarDay } from '@/lib/api/types';
+import type { EconomicEvent, EventType, CalendarDay, EventStats } from '@/lib/api/types';
 import { CreateEventModal } from '@/components/event/CreateEventModal';
 import { EventDetailModal } from '@/components/event/EventDetailModal';
 

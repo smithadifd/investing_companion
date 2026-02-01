@@ -5,14 +5,17 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 
-# Install dependencies based on the preferred package manager
+# Install ALL dependencies (including devDependencies needed for build)
 COPY package.json package-lock.json* ./
-RUN npm ci --only=production
+RUN npm ci
 
 
 # Stage 2: Build
 FROM node:20-alpine AS builder
 WORKDIR /app
+
+# Build argument for API URL (baked into the build)
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 
 # Copy dependencies
 COPY --from=deps /app/node_modules ./node_modules
@@ -21,6 +24,7 @@ COPY . .
 # Set build-time environment variables
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
 # Build the application
 RUN npm run build

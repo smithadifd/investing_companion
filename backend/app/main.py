@@ -5,15 +5,15 @@ Main FastAPI application entry point
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.core.config import settings
+from app.core.config import settings as app_settings
 from app.core.middleware import SecurityHeadersMiddleware
 
 app = FastAPI(
     title="Investing Companion API",
     description="Self-hosted investing companion with analysis, watchlists, and alerts",
     version="0.1.0",
-    docs_url="/docs" if settings.ENVIRONMENT != "production" else "/docs",
-    redoc_url="/redoc" if settings.ENVIRONMENT != "production" else None,
+    docs_url="/docs" if app_settings.ENVIRONMENT != "production" else "/docs",
+    redoc_url="/redoc" if app_settings.ENVIRONMENT != "production" else None,
 )
 
 # Security headers middleware (outermost - runs first on response)
@@ -22,7 +22,7 @@ app.add_middleware(SecurityHeadersMiddleware)
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=app_settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -41,7 +41,7 @@ async def health_check(detailed: bool = False):
     response = {
         "status": "healthy",
         "version": "0.1.0",
-        "environment": settings.ENVIRONMENT,
+        "environment": app_settings.ENVIRONMENT,
     }
 
     if detailed:
@@ -63,7 +63,7 @@ async def health_check(detailed: bool = False):
         try:
             import redis.asyncio as redis
 
-            r = redis.from_url(settings.REDIS_URL)
+            r = redis.from_url(app_settings.REDIS_URL)
             await r.ping()
             await r.aclose()
             checks["redis"] = {"status": "ok"}

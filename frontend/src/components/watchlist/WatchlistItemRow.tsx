@@ -42,7 +42,7 @@ export function WatchlistItemRow({ item, onEdit, onRemove }: WatchlistItemRowPro
               {item.equity.symbol}
             </span>
             {item.track_calendar && (
-              <Calendar className="h-3.5 w-3.5 text-blue-400" title="Calendar tracking enabled" />
+              <span title="Calendar tracking enabled"><Calendar className="h-3.5 w-3.5 text-blue-400" /></span>
             )}
           </div>
           <div className="text-sm text-neutral-500 dark:text-neutral-400 truncate max-w-[200px]">

@@ -93,7 +93,7 @@ export default function EquityPage() {
         </div>
 
         {/* Tab navigation */}
-        <div className="flex gap-2 mb-4">
+        <div className="flex flex-wrap gap-2 mb-4">
           <button
             onClick={() => setActiveTab('chart')}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${

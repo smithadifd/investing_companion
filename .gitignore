@@ -5,6 +5,7 @@
 .env.local
 .env.*.local
 .env.production
+.env.synology
 *.local
 
 # ===========================================

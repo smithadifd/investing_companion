@@ -21,8 +21,14 @@ from app.schemas.equity import (
     OHLCVData,
     QuoteResponse,
 )
+from app.services.cache import cache_service
 
 logger = logging.getLogger(__name__)
+
+# Cache TTLs in seconds
+QUOTE_CACHE_TTL = 300  # 5 minutes for quotes
+FUNDAMENTALS_CACHE_TTL = 3600  # 1 hour for fundamentals
+HISTORY_CACHE_TTL = 900  # 15 minutes for historical data
 
 # Thread pool for running synchronous yfinance calls
 # Limited to 4 workers to avoid overwhelming Yahoo Finance
@@ -80,8 +86,19 @@ class YahooFinanceProvider:
     """Yahoo Finance data provider using yfinance library."""
 
     async def get_quote(self, symbol: str) -> Optional[QuoteResponse]:
-        """Fetch current quote for a symbol."""
+        """Fetch current quote for a symbol. Uses 5-minute cache."""
+        cache_key = cache_service.quote_key(symbol)
 
+        # Try cache first
+        try:
+            cached = await cache_service.get(cache_key)
+            if cached:
+                logger.debug(f"Cache hit for quote: {symbol}")
+                return QuoteResponse(**cached)
+        except Exception as e:
+            logger.warning(f"Cache read error for {symbol}: {e}")
+
+        # Fetch from Yahoo
         def _fetch_quote() -> Optional[dict]:
             ticker = yf.Ticker(symbol)
             info = ticker.info
@@ -101,7 +118,7 @@ class YahooFinanceProvider:
         change = _safe_decimal(info.get("regularMarketChange")) or Decimal("0")
         change_percent = _safe_decimal(info.get("regularMarketChangePercent")) or Decimal("0")
 
-        return QuoteResponse(
+        quote = QuoteResponse(
             symbol=symbol.upper(),
             price=price,
             change=change,
@@ -114,6 +131,15 @@ class YahooFinanceProvider:
             market_cap=_safe_int(info.get("marketCap")),
             timestamp=datetime.utcnow(),
         )
+
+        # Cache the result
+        try:
+            await cache_service.set(cache_key, quote.model_dump(mode="json"), QUOTE_CACHE_TTL)
+            logger.debug(f"Cached quote for {symbol} (TTL: {QUOTE_CACHE_TTL}s)")
+        except Exception as e:
+            logger.warning(f"Cache write error for {symbol}: {e}")
+
+        return quote
 
     async def get_history(
         self,
@@ -192,12 +218,24 @@ class YahooFinanceProvider:
         return await run_in_executor(_fetch_info)
 
     async def get_fundamentals(self, symbol: str) -> Optional[FundamentalsResponse]:
-        """Get fundamental data for a symbol."""
+        """Get fundamental data for a symbol. Uses 1-hour cache."""
+        cache_key = cache_service.fundamentals_key(symbol)
+
+        # Try cache first
+        try:
+            cached = await cache_service.get(cache_key)
+            if cached:
+                logger.debug(f"Cache hit for fundamentals: {symbol}")
+                return FundamentalsResponse(**cached)
+        except Exception as e:
+            logger.warning(f"Cache read error for fundamentals {symbol}: {e}")
+
+        # Fetch from Yahoo
         info = await self.get_info(symbol)
         if not info:
             return None
 
-        return FundamentalsResponse(
+        fundamentals = FundamentalsResponse(
             market_cap=_safe_int(info.get("marketCap")),
             enterprise_value=_safe_int(info.get("enterpriseValue")),
             pe_ratio=_safe_decimal(info.get("trailingPE")),
@@ -213,6 +251,15 @@ class YahooFinanceProvider:
             avg_volume=_safe_int(info.get("averageVolume")),
             profit_margin=_safe_decimal(info.get("profitMargins")),
         )
+
+        # Cache the result
+        try:
+            await cache_service.set(cache_key, fundamentals.model_dump(mode="json"), FUNDAMENTALS_CACHE_TTL)
+            logger.debug(f"Cached fundamentals for {symbol} (TTL: {FUNDAMENTALS_CACHE_TTL}s)")
+        except Exception as e:
+            logger.warning(f"Cache write error for fundamentals {symbol}: {e}")
+
+        return fundamentals
 
     async def get_calendar(self, symbol: str) -> Optional[EquityCalendarInfo]:
         """Get calendar info (earnings, dividends) for a symbol.

@@ -14,13 +14,12 @@ Tracked issues and limitations that don't block development but need future reso
 | [008](./008-cross-watchlist-movers.md) | Cross-Watchlist Top Movers | Open | Medium | Dashboard |
 | [009](./009-calendar-event-management.md) | Calendar Event Auto-Add and Management | Open | Medium | Calendar |
 | [010](./010-mobile-responsive-fixes.md) | Mobile Responsive Design Fixes | Open | Medium | Mobile UI |
-| [011](./011-alert-crosses-detection-bug.md) | Alert "Crosses Above/Below" Detection Bug | Open | High | Alerts |
+| [011](./011-alert-crosses-detection-bug.md) | Alert "Crosses Above/Below" Detection Bug | Resolved | High | Alerts |
 
 ## Quick Reference
 
 ### High Priority
 - **006**: Data caching - affects load times and API reliability
-- **011**: Alert crosses detection bug - alerts may not trigger correctly
 
 ### Medium Priority
 - **004**: Chart timeframes and line chart toggle
@@ -35,3 +34,4 @@ Tracked issues and limitations that don't block development but need future reso
 ### Resolved
 - **002**: Local build testing - scripts added
 - **003**: Git sync on Synology - SSH configured
+- **011**: Alert crosses detection bug - fixed with `was_above_threshold` tracking

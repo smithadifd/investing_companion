@@ -122,8 +122,9 @@ services:
       context: ./frontend
       dockerfile: ../docker/Dockerfile.frontend
     container_name: investing_frontend
+    user: root
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
     volumes:
       - ./frontend:/app
       - /app/node_modules

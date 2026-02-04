@@ -43,8 +43,10 @@ Created formal issue documentation (004-011) in `/docs/issues/`.
 |-----------|-----|
 | `EditItemModal.tsx` | Calendar toggle default: `true` → `false` |
 | `AddToWatchlistButton.tsx` | Fixed transparent dropdown background |
-| `FundamentalsCard.tsx` | Fixed dividend yield % display (values >1) |
+| `FundamentalsCard.tsx` | Fixed dividend yield % display (removed incorrect *100 multiplication) |
 | `calendar/page.tsx` | Added `flex-wrap` for mobile button overflow |
+
+**Note**: Initial dividend yield fix was incorrect (still showed 39% instead of 0.39%). Second fix removed the multiplication entirely - Yahoo returns values ready to display as percentages.
 
 ### 4. Issue 011: Alert Crosses Detection Bug (HIGH PRIORITY)
 
@@ -78,12 +80,23 @@ Implemented simple Redis caching directly in `YahooFinanceProvider`:
 4. `fix: alert crosses detection using was_above_threshold`
 5. `feat: add Redis caching to Yahoo Finance provider`
 6. `docs: update Issue 006 - basic caching implemented`
+7. `docs: add session log for 2026-02-04`
+8. `fix: correct dividend yield display - no multiplication needed`
 
 ## Deployment Notes
 
 - Synology uses `docker-compose.local.yml` (not default `docker-compose.yml`)
 - Native PostgreSQL on Synology uses port 5432 - local compose doesn't expose db port
 - Deploy command: `docker-compose -f docker-compose.local.yml --env-file .env.production up -d`
+- **IMPORTANT**: Must rebuild containers after code changes! Images don't auto-update.
+  ```bash
+  # Full rebuild and deploy:
+  git pull origin main
+  docker-compose -f docker-compose.local.yml --env-file .env.production build --no-cache <service>
+  docker-compose -f docker-compose.local.yml --env-file .env.production up -d
+  ```
+- Git path: `/var/packages/Git/target/bin`
+- Docker path: `/usr/local/bin/docker-compose`
 
 ## Remaining Open Issues
 

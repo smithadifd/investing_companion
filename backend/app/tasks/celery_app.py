@@ -31,10 +31,20 @@ celery_app.conf.beat_schedule = {
         "task": "alerts.check_all_alerts",
         "schedule": 300.0,  # 5 minutes in seconds
     },
-    # Send daily summary at 6 PM UTC
+    # Send daily alert summary at 6 PM UTC
     "send-daily-summary": {
         "task": "alerts.send_daily_summary",
         "schedule": crontab(hour=18, minute=0),
+    },
+    # Send daily movers summary at 4:30 PM ET (9:30 PM UTC) after market close
+    "send-daily-movers-summary": {
+        "task": "alerts.send_daily_movers_summary",
+        "schedule": crontab(hour=21, minute=30),
+    },
+    # Send morning events notification at 7 AM ET (12 PM UTC) before market open
+    "send-morning-events": {
+        "task": "alerts.send_morning_events",
+        "schedule": crontab(hour=12, minute=0),
     },
     # Refresh earnings/dividend events daily at 5 PM ET (10 PM UTC)
     # Runs after market close to get updated earnings dates

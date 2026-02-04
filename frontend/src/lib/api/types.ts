@@ -186,6 +186,23 @@ export interface WatchlistImport {
   items: WatchlistImportItem[];
 }
 
+export interface MoverItem {
+  symbol: string;
+  name: string;
+  price: number;
+  change: number;
+  change_percent: number;
+  watchlist_id: number;
+  watchlist_name: string;
+}
+
+export interface AllWatchlistMovers {
+  gainers: MoverItem[];
+  losers: MoverItem[];
+  total_items: number;
+  watchlist_count: number;
+}
+
 // Technical indicators types
 export interface TechnicalIndicators {
   timestamps: string[];

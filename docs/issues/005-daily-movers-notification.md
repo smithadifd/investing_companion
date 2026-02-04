@@ -1,7 +1,8 @@
 # Issue 005: Daily Movers Notification Summary
 
-**Status:** Open
+**Status:** Resolved
 **Created:** 2026-02-04
+**Resolved:** 2026-02-04
 **Priority:** Medium
 **Affects:** Notifications, Alerts system
 
@@ -9,73 +10,69 @@
 
 Create a daily summary notification that reports watchlist equities that moved more than 5% (up or down). This should be a scheduled notification at a configurable time, not spam throughout the day.
 
-## Current Behavior
+## Resolution
 
-- Individual alerts trigger immediately when conditions are met
-- No aggregation or summary of daily activity
-- No way to see "who moved the most today" at a glance
+Implemented daily movers summary notification via Discord webhook.
 
-## Proposed Solution
+### Implementation Details
 
-### Backend Changes
+#### 1. Discord Service - New Method (`backend/app/services/notifications/discord.py`)
 
-1. **New Celery task: `send_daily_movers_summary`**
-   ```python
-   @celery_app.task
-   def send_daily_movers_summary():
-       # Get all watchlist items for authenticated users
-       # Calculate daily change for each
-       # Filter to those with |change| > 5%
-       # Group by up/down
-       # Send Discord notification
-   ```
+Added `send_movers_summary()` method that:
+- Takes gainers, losers, threshold, and summary stats
+- Filters movers above the threshold (default 5%)
+- Skips notification if no big movers (to avoid noise)
+- Formats a rich Discord embed with:
+  - Gainers section with symbol, change %, price, watchlist name
+  - Losers section with symbol, change %, price, watchlist name
+  - Summary showing total movers vs total items
 
-2. **Schedule task in Celery Beat:**
-   ```python
-   'daily-movers-summary': {
-       'task': 'app.tasks.alerts.send_daily_movers_summary',
-       'schedule': crontab(hour=16, minute=30),  # 4:30 PM market close
-   },
-   ```
+#### 2. Celery Task (`backend/app/tasks/alerts.py`)
 
-3. **Add user setting for notification preference:**
-   - Enable/disable daily summary
-   - Threshold percentage (default 5%)
-   - Notification time preference
+Added `send_daily_movers_summary` task that:
+- Uses existing `WatchlistService.get_all_movers()` from Issue 008
+- Converts Pydantic models to dicts for Discord service
+- Accepts configurable `threshold_percent` parameter (default 5%)
+- Logs results for monitoring
 
-### Notification Format
+#### 3. Celery Beat Schedule (`backend/app/tasks/celery_app.py`)
+
+Added schedule entry:
+```python
+"send-daily-movers-summary": {
+    "task": "alerts.send_daily_movers_summary",
+    "schedule": crontab(hour=21, minute=30),  # 4:30 PM ET
+},
+```
+
+### Discord Message Format
 
 ```
 📊 Daily Movers Summary - Feb 4, 2026
 
-🚀 Big Gainers:
-• NVDA +8.2% ($892.50)
-• TSLA +6.1% ($245.30)
+🚀 Big Gainers (>5%):
+• NVDA +8.2% ($892.50) - Tech Watchlist
+• TSLA +6.1% ($245.30) - My Watchlist
 
-📉 Big Losers:
-• INTC -7.3% ($42.15)
-• META -5.5% ($485.20)
+📉 Big Losers (<-5%):
+• INTC -7.3% ($42.15) - Value Picks
+• META -5.5% ($485.20) - My Watchlist
 
-📊 Your watchlist: 4 of 25 moved >5%
+📈 Summary
+4 of 25 equities moved >5% across 3 watchlists
 ```
 
-## Files Affected
+### Schedule
 
-- `backend/app/tasks/alerts.py` - New task
-- `backend/app/tasks/celery_app.py` - Schedule configuration
-- `backend/app/services/notifications/discord.py` - Message formatting
-- `backend/app/db/models/user_settings.py` - New preferences
-- `frontend/src/components/alert/NotificationSettings.tsx` - UI for preferences
+- **Time**: 9:30 PM UTC (4:30 PM Eastern Time)
+- **Frequency**: Daily (weekdays and weekends, though weekends will have no movers)
+- **Threshold**: 5% (configurable via task argument)
 
-## Effort Estimate
+### Files Changed
 
-- Backend task: 2-3 hours
-- User settings: 1-2 hours
-- Discord formatting: 1 hour
-- Frontend settings UI: 1-2 hours
-- Testing: 1-2 hours
-
-**Total: ~7-10 hours (1-1.5 days)**
+- `backend/app/services/notifications/discord.py` - Added `send_movers_summary()` method
+- `backend/app/tasks/alerts.py` - Added `send_daily_movers_summary` task
+- `backend/app/tasks/celery_app.py` - Added schedule entry
 
 ## Future Enhancements
 
@@ -83,3 +80,4 @@ Create a daily summary notification that reports watchlist equities that moved m
 - Sector-based grouping
 - Performance vs indices comparison
 - Email notification option
+- User setting to enable/disable and customize threshold

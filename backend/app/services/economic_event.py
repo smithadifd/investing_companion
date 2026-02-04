@@ -5,7 +5,7 @@ import uuid
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.economic_event import EconomicEvent, EventSource, EventType
@@ -76,16 +76,22 @@ class EconomicEventService:
                     user_id, filters.watchlist_id
                 )
                 if watchlist_equity_ids:
-                    # Show macro events + equity events for watchlist items
-                    stmt = stmt.where(
-                        or_(
-                            EconomicEvent.equity_id.in_(watchlist_equity_ids),
-                            EconomicEvent.equity_id.is_(None),  # Macro events
+                    if filters.watchlist_only:
+                        # Only show equity events for watchlist items (no macro)
+                        stmt = stmt.where(
+                            EconomicEvent.equity_id.in_(watchlist_equity_ids)
                         )
-                    )
+                    else:
+                        # Show macro events + equity events for watchlist items
+                        stmt = stmt.where(
+                            or_(
+                                EconomicEvent.equity_id.in_(watchlist_equity_ids),
+                                EconomicEvent.equity_id.is_(None),  # Macro events
+                            )
+                        )
                 elif filters.watchlist_only:
-                    # No watchlist items, only show macro events
-                    stmt = stmt.where(EconomicEvent.equity_id.is_(None))
+                    # No watchlist items, show nothing (no macro, no equities)
+                    stmt = stmt.where(EconomicEvent.equity_id == -1)  # Impossible condition
 
         # Custom events are user-specific
         stmt = stmt.where(
@@ -201,6 +207,28 @@ class EconomicEventService:
         await self.db.delete(event)
         await self.db.commit()
         return True
+
+    async def delete_events_for_symbol(self, symbol: str) -> int:
+        """Delete all events for a specific equity symbol.
+
+        This removes all auto-fetched events (earnings, dividends, etc.)
+        for an equity. Used when a user wants to stop tracking an equity.
+
+        Returns the number of events deleted.
+        """
+        equity = await self._get_equity_by_symbol(symbol)
+        if not equity:
+            return 0
+
+        # Only delete system events (source != 'manual'), not user custom events
+        stmt = delete(EconomicEvent).where(
+            EconomicEvent.equity_id == equity.id,
+            EconomicEvent.source != 'manual',  # Preserve user's custom events
+        )
+        result = await self.db.execute(stmt)
+        await self.db.commit()
+
+        return result.rowcount
 
     # -------------------------------------------------------------------------
     # Calendar Views

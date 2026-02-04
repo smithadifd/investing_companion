@@ -13,6 +13,9 @@ module.exports = {
         gain: '#22c55e',
         loss: '#ef4444',
       },
+      screens: {
+        'xs': '475px',
+      },
     },
   },
   plugins: [],

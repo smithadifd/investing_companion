@@ -142,3 +142,24 @@ class WatchlistImport(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = Field(None, max_length=1000)
     items: List[WatchlistImportItem] = []
+
+
+class MoverItem(BaseModel):
+    """A single mover item with quote data."""
+
+    symbol: str
+    name: str
+    price: Decimal
+    change: Decimal
+    change_percent: Decimal
+    watchlist_id: int
+    watchlist_name: str
+
+
+class AllWatchlistMovers(BaseModel):
+    """Aggregated movers across all watchlists."""
+
+    gainers: List[MoverItem] = []
+    losers: List[MoverItem] = []
+    total_items: int = 0
+    watchlist_count: int = 0

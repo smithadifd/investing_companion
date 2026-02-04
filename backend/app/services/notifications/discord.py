@@ -284,6 +284,201 @@ class DiscordNotificationService:
             logger.error(error, exc_info=True)
             return False, error
 
+    async def send_movers_summary(
+        self,
+        gainers: list[dict],
+        losers: list[dict],
+        threshold_percent: float,
+        total_items: int,
+        watchlist_count: int,
+    ) -> tuple[bool, Optional[str]]:
+        """Send a daily movers summary to Discord.
+
+        Args:
+            gainers: List of top gainers with symbol, name, price, change_percent, watchlist_name
+            losers: List of top losers with symbol, name, price, change_percent, watchlist_name
+            threshold_percent: The threshold used to filter movers
+            total_items: Total number of items across all watchlists
+            watchlist_count: Number of watchlists
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        webhook_url = await self._get_webhook_url()
+        if not webhook_url:
+            return False, "Discord webhook URL not configured"
+
+        # Filter to only those above threshold
+        big_gainers = [g for g in gainers if float(g.get("change_percent", 0)) >= threshold_percent]
+        big_losers = [l for l in losers if float(l.get("change_percent", 0)) <= -threshold_percent]
+
+        # If no big movers, don't send notification
+        total_movers = len(big_gainers) + len(big_losers)
+        if total_movers == 0:
+            logger.info(f"No movers above {threshold_percent}% threshold, skipping notification")
+            return True, None
+
+        try:
+            today = datetime.utcnow().strftime("%b %d, %Y")
+            fields = []
+
+            # Gainers section
+            if big_gainers:
+                gainers_text = "\n".join(
+                    f"• **{g['symbol']}** {self._format_percent(g['change_percent'])} ({self._format_price(g['price'])}) - {g.get('watchlist_name', 'Watchlist')}"
+                    for g in big_gainers[:5]
+                )
+                fields.append({
+                    "name": f"🚀 Big Gainers (>{threshold_percent}%)",
+                    "value": gainers_text,
+                    "inline": False,
+                })
+
+            # Losers section
+            if big_losers:
+                losers_text = "\n".join(
+                    f"• **{l['symbol']}** {self._format_percent(l['change_percent'])} ({self._format_price(l['price'])}) - {l.get('watchlist_name', 'Watchlist')}"
+                    for l in big_losers[:5]
+                )
+                fields.append({
+                    "name": f"📉 Big Losers (<-{threshold_percent}%)",
+                    "value": losers_text,
+                    "inline": False,
+                })
+
+            # Summary
+            fields.append({
+                "name": "📈 Summary",
+                "value": f"{total_movers} of {total_items} equities moved >{threshold_percent}% across {watchlist_count} watchlist{'s' if watchlist_count != 1 else ''}",
+                "inline": False,
+            })
+
+            embed = {
+                "title": f"📊 Daily Movers Summary - {today}",
+                "color": 0x5865F2,  # Discord blurple
+                "fields": fields,
+                "timestamp": datetime.utcnow().isoformat(),
+                "footer": {
+                    "text": "Investing Companion",
+                },
+            }
+
+            payload = {"embeds": [embed]}
+
+            client = await self._get_client()
+            response = await client.post(webhook_url, json=payload)
+
+            if response.status_code == 204:
+                logger.info(f"Discord movers summary sent: {len(big_gainers)} gainers, {len(big_losers)} losers")
+                return True, None
+            else:
+                return False, f"Discord API returned status {response.status_code}"
+
+        except Exception as e:
+            error = f"Failed to send movers summary: {str(e)}"
+            logger.error(error, exc_info=True)
+            return False, error
+
+    async def send_upcoming_events(
+        self,
+        events: list[dict],
+        days_label: str = "Today & Tomorrow",
+    ) -> tuple[bool, Optional[str]]:
+        """Send an upcoming events notification to Discord.
+
+        Args:
+            events: List of events with event_date, title, event_type, symbol (optional)
+            days_label: Label for the time period (e.g., "Today", "This Week")
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        webhook_url = await self._get_webhook_url()
+        if not webhook_url:
+            return False, "Discord webhook URL not configured"
+
+        if not events:
+            logger.info("No upcoming events to send")
+            return True, None
+
+        try:
+            # Group by date
+            events_by_date: dict[str, list[dict]] = {}
+            for event in events:
+                date_str = event.get("event_date", "Unknown")
+                if date_str not in events_by_date:
+                    events_by_date[date_str] = []
+                events_by_date[date_str].append(event)
+
+            fields = []
+            event_type_icons = {
+                "earnings": "💰",
+                "ex_dividend": "💵",
+                "dividend_pay": "💵",
+                "fomc": "🏛️",
+                "cpi": "📊",
+                "ppi": "📊",
+                "nfp": "👔",
+                "gdp": "📈",
+            }
+
+            for date_str in sorted(events_by_date.keys()):
+                date_events = events_by_date[date_str]
+                try:
+                    from datetime import datetime as dt
+                    date_obj = dt.strptime(date_str, "%Y-%m-%d")
+                    formatted_date = date_obj.strftime("%a, %b %d")
+                except Exception:
+                    formatted_date = date_str
+
+                event_lines = []
+                for evt in date_events[:8]:  # Max 8 per day
+                    icon = event_type_icons.get(evt.get("event_type", ""), "📅")
+                    symbol = evt.get("symbol")
+                    title = evt.get("title", "Event")
+                    time_str = evt.get("event_time", "")
+                    time_part = f" at {time_str}" if time_str else ""
+
+                    if symbol:
+                        event_lines.append(f"{icon} **{symbol}**: {title}{time_part}")
+                    else:
+                        event_lines.append(f"{icon} {title}{time_part}")
+
+                if date_events and len(date_events) > 8:
+                    event_lines.append(f"... and {len(date_events) - 8} more")
+
+                fields.append({
+                    "name": formatted_date,
+                    "value": "\n".join(event_lines) or "No events",
+                    "inline": False,
+                })
+
+            embed = {
+                "title": f"📅 Upcoming Events - {days_label}",
+                "color": 0x5865F2,  # Discord blurple
+                "fields": fields[:6],  # Max 6 date sections
+                "timestamp": datetime.utcnow().isoformat(),
+                "footer": {
+                    "text": "Investing Companion",
+                },
+            }
+
+            payload = {"embeds": [embed]}
+
+            client = await self._get_client()
+            response = await client.post(webhook_url, json=payload)
+
+            if response.status_code == 204:
+                logger.info(f"Discord upcoming events sent: {len(events)} events")
+                return True, None
+            else:
+                return False, f"Discord API returned status {response.status_code}"
+
+        except Exception as e:
+            error = f"Failed to send upcoming events: {str(e)}"
+            logger.error(error, exc_info=True)
+            return False, error
+
     async def send_daily_summary(
         self,
         alerts_triggered: int,

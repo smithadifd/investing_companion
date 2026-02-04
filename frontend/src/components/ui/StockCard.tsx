@@ -16,6 +16,8 @@ interface StockCardProps {
   linkToEquity?: boolean;
   /** Additional class names */
   className?: string;
+  /** Optional subtitle text (e.g., watchlist name) */
+  subtitle?: string;
 }
 
 /**
@@ -31,6 +33,7 @@ export function StockCard({
   highlightThreshold = 3,
   linkToEquity = true,
   className = '',
+  subtitle,
 }: StockCardProps) {
   const bgClass = getChangeBackgroundClass(changePercent, highlightThreshold);
   const hoverClass = getChangeHoverClass(changePercent, highlightThreshold);
@@ -50,6 +53,11 @@ export function StockCard({
           <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate max-w-[120px]">
             {name}
           </p>
+          {subtitle && (
+            <p className="text-[10px] text-neutral-400 dark:text-neutral-500 truncate max-w-[120px]">
+              {subtitle}
+            </p>
+          )}
         </div>
       </div>
       <div className="text-right">

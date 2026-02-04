@@ -446,11 +446,11 @@ export default function CalendarPage() {
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth() + 1;
 
-  // Fetch calendar data
-  const filters = {
+  // Fetch calendar data - memoize filters to ensure React Query detects changes
+  const filters = useMemo(() => ({
     event_types: selectedTypes.length > 0 ? selectedTypes : undefined,
     watchlist_only: watchlistOnly,
-  };
+  }), [selectedTypes, watchlistOnly]);
 
   const { data: calendarData, isLoading, refetch } = useCalendarMonth(year, month, filters);
   const { data: stats } = useEventStats();

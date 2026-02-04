@@ -1,7 +1,10 @@
 'use client';
 
-import { X, Calendar, Clock, TrendingUp, Landmark, DollarSign, ExternalLink } from 'lucide-react';
+import { useState } from 'react';
+import { X, Calendar, Clock, Trash2, ExternalLink, Loader2, EyeOff } from 'lucide-react';
 import type { EconomicEvent, EventType } from '@/lib/api/types';
+import { useDeleteEvent, useDeleteEquityEvents } from '@/lib/hooks/useEvents';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
 
 // Event type configuration
 const EVENT_TYPE_CONFIG: Record<EventType, { label: string; color: string }> = {
@@ -28,11 +31,46 @@ const EVENT_TYPE_CONFIG: Record<EventType, { label: string; color: string }> = {
 interface Props {
   event: EconomicEvent;
   onClose: () => void;
+  onDeleted?: () => void;
 }
 
-export function EventDetailModal({ event, onClose }: Props) {
+export function EventDetailModal({ event, onClose, onDeleted }: Props) {
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showUntrackConfirm, setShowUntrackConfirm] = useState(false);
+  const deleteMutation = useDeleteEvent();
+  const untrackMutation = useDeleteEquityEvents();
+
   const config = EVENT_TYPE_CONFIG[event.event_type] || EVENT_TYPE_CONFIG.custom;
   const eventDate = new Date(event.event_date + 'T00:00:00');
+
+  // Only allow delete for custom events (user-created)
+  const canDelete = event.source === 'manual' && event.user_id !== null;
+
+  // Allow untracking for equity events that aren't custom
+  const canUntrack = event.equity && event.source !== 'manual';
+
+  const handleDelete = async () => {
+    try {
+      await deleteMutation.mutateAsync(event.id);
+      setShowDeleteConfirm(false);
+      onDeleted?.();
+      onClose();
+    } catch (error) {
+      console.error('Failed to delete event:', error);
+    }
+  };
+
+  const handleUntrack = async () => {
+    if (!event.equity) return;
+    try {
+      await untrackMutation.mutateAsync(event.equity.symbol);
+      setShowUntrackConfirm(false);
+      onDeleted?.();
+      onClose();
+    } catch (error) {
+      console.error('Failed to untrack equity:', error);
+    }
+  };
 
   // Format value for display
   const formatValue = (value: number | string | null | undefined) => {
@@ -181,7 +219,37 @@ export function EventDetailModal({ event, onClose }: Props) {
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 bg-neutral-50 dark:bg-neutral-900/50 flex justify-end">
+        <div className="px-6 py-4 bg-neutral-50 dark:bg-neutral-900/50 flex justify-between">
+          <div className="flex gap-2">
+            {canDelete && (
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                disabled={deleteMutation.isPending}
+                className="flex items-center gap-2 px-4 py-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {deleteMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+                Delete
+              </button>
+            )}
+            {canUntrack && (
+              <button
+                onClick={() => setShowUntrackConfirm(true)}
+                disabled={untrackMutation.isPending}
+                className="flex items-center gap-2 px-4 py-2 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {untrackMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <EyeOff className="h-4 w-4" />
+                )}
+                Untrack {event.equity?.symbol}
+              </button>
+            )}
+          </div>
           <button
             onClick={onClose}
             className="px-4 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
@@ -190,6 +258,32 @@ export function EventDetailModal({ event, onClose }: Props) {
           </button>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <ConfirmModal
+          title="Delete Event"
+          message={`Are you sure you want to delete "${event.title}"? This cannot be undone.`}
+          confirmLabel="Delete"
+          variant="danger"
+          isLoading={deleteMutation.isPending}
+          onConfirm={handleDelete}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
+
+      {/* Untrack Confirmation Modal */}
+      {showUntrackConfirm && event.equity && (
+        <ConfirmModal
+          title={`Stop Tracking ${event.equity.symbol}`}
+          message={`Are you sure you want to stop tracking ${event.equity.symbol}? This will remove all earnings, dividend, and other auto-fetched events for this equity from the calendar.`}
+          confirmLabel="Untrack"
+          variant="danger"
+          isLoading={untrackMutation.isPending}
+          onConfirm={handleUntrack}
+          onCancel={() => setShowUntrackConfirm(false)}
+        />
+      )}
     </div>
   );
 }

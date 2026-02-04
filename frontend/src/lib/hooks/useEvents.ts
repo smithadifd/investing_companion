@@ -178,3 +178,17 @@ export function useRefreshWatchlistEvents() {
     },
   });
 }
+
+/**
+ * Hook to delete all auto-fetched events for an equity (untrack)
+ */
+export function useDeleteEquityEvents() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (symbol: string) => api.deleteEquityEvents(symbol),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: eventKeys.all });
+    },
+  });
+}

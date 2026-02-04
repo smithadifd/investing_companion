@@ -11,6 +11,8 @@ from sqlalchemy.orm import selectinload
 from app.db.models.equity import Equity
 from app.db.models.watchlist import Watchlist, WatchlistItem
 from app.schemas.watchlist import (
+    AllWatchlistMovers,
+    MoverItem,
     WatchlistCreate,
     WatchlistExport,
     WatchlistExportItem,
@@ -352,3 +354,65 @@ class WatchlistService:
         for watchlist in result.scalars():
             watchlist.is_default = False
         await self.db.commit()
+
+    async def get_all_movers(self, limit: int = 10) -> AllWatchlistMovers:
+        """Get top gainers and losers across all watchlists."""
+        from decimal import Decimal
+
+        # Get all watchlists with their items
+        stmt = (
+            select(Watchlist)
+            .options(selectinload(Watchlist.items).selectinload(WatchlistItem.equity))
+        )
+        result = await self.db.execute(stmt)
+        watchlists = result.scalars().all()
+
+        if not watchlists:
+            return AllWatchlistMovers()
+
+        # Collect all unique symbols and their watchlist info
+        # Use dict to deduplicate by symbol (keep first occurrence)
+        symbol_to_info: dict[str, tuple[str, int, str]] = {}  # symbol -> (name, watchlist_id, watchlist_name)
+        for watchlist in watchlists:
+            for item in watchlist.items:
+                if item.equity.symbol not in symbol_to_info:
+                    symbol_to_info[item.equity.symbol] = (
+                        item.equity.name,
+                        watchlist.id,
+                        watchlist.name,
+                    )
+
+        # Fetch quotes for all unique symbols
+        movers_data = []
+        for symbol, (name, wl_id, wl_name) in symbol_to_info.items():
+            quote = await self.equity_service.get_quote(symbol)
+            if quote and quote.change_percent is not None:
+                movers_data.append(
+                    MoverItem(
+                        symbol=symbol,
+                        name=name,
+                        price=Decimal(str(quote.price)) if quote.price else Decimal("0"),
+                        change=Decimal(str(quote.change)) if quote.change else Decimal("0"),
+                        change_percent=Decimal(str(quote.change_percent)),
+                        watchlist_id=wl_id,
+                        watchlist_name=wl_name,
+                    )
+                )
+
+        # Sort by change percent
+        sorted_by_change = sorted(
+            movers_data,
+            key=lambda x: float(x.change_percent),
+            reverse=True,
+        )
+
+        # Get top gainers and losers
+        gainers = [m for m in sorted_by_change if m.change_percent > 0][:limit]
+        losers = [m for m in reversed(sorted_by_change) if m.change_percent < 0][:limit]
+
+        return AllWatchlistMovers(
+            gainers=gainers,
+            losers=losers,
+            total_items=len(symbol_to_info),
+            watchlist_count=len(watchlists),
+        )

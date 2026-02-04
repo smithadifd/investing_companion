@@ -1,22 +1,27 @@
 # Issue 006: Data Caching and Background Updates
 
-**Status:** Open
+**Status:** Partially Resolved
 **Created:** 2026-02-04
-**Priority:** High
+**Updated:** 2026-02-04
+**Priority:** Medium (downgraded - basic caching implemented)
 **Affects:** Performance, Data freshness
 
 ## Summary
 
 Implement Redis caching for market data to improve load times and reduce Yahoo Finance API calls. Data should update in the background to keep cached values fresh.
 
-## Current Behavior
+## What's Been Done (2026-02-04)
 
-- Every page load fetches fresh data from Yahoo Finance
-- Yahoo Finance (unofficial API) has no SLA and can be slow or rate-limited
-- No indication of when data was last updated
-- Users see loading spinners frequently
+Basic Redis caching implemented directly in `YahooFinanceProvider`:
 
-## Proposed Solution
+- **Quotes**: 5-minute TTL (cache key: `quote:{symbol}`)
+- **Fundamentals**: 1-hour TTL (cache key: `fundamentals:{symbol}`)
+
+Performance improvement: ~22x faster for cached requests (440ms → 20ms).
+
+## What Remains (Optional Enhancements)
+
+## Proposed Enhancements
 
 ### Cache Strategy
 
@@ -86,15 +91,15 @@ Implement Redis caching for market data to improve load times and reduce Yahoo F
 - Frontend display: 1-2 hours
 - Testing: 2-3 hours
 
-**Total: ~10-14 hours (1.5-2 days)**
+**Total: ~6-10 hours (remaining work)**
 
 ## Considerations
 
 - Memory usage: Monitor Redis memory with many symbols
 - Cache invalidation: How to force refresh if needed
-- Error handling: What to return if cache and API both fail
+- Error handling: What to return if cache and API both fail (currently falls back to API)
 - Rate limiting: Still need to respect Yahoo's unofficial limits
 
 ## Related Issues
 
-- Issue 017 (last updated timestamp - will be addressed by this)
+- Issue 017 (last updated timestamp - optional enhancement)

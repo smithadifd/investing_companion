@@ -9,7 +9,7 @@ Tracked issues and limitations that don't block development but need future reso
 | [003](./003-synology-git-sync.md) | Synology Git Repository Sync | Resolved | Medium | Deployment |
 | [004](./004-chart-enhancements.md) | Chart Timeframe and Type Enhancements | Open | Medium | Charts |
 | [005](./005-daily-movers-notification.md) | Daily Movers Notification Summary | Open | Medium | Notifications |
-| [006](./006-data-caching.md) | Data Caching and Background Updates | Open | High | Performance |
+| [006](./006-data-caching.md) | Data Caching and Background Updates | Partial | Medium | Performance |
 | [007](./007-news-integration.md) | News Integration | Open | Low | Equity Page |
 | [008](./008-cross-watchlist-movers.md) | Cross-Watchlist Top Movers | Open | Medium | Dashboard |
 | [009](./009-calendar-event-management.md) | Calendar Event Auto-Add and Management | Open | Medium | Calendar |
@@ -18,8 +18,11 @@ Tracked issues and limitations that don't block development but need future reso
 
 ## Quick Reference
 
+### Partial (Basic Implementation Done)
+- **006**: Data caching - basic Redis caching implemented (5-min quotes, 1-hr fundamentals)
+
 ### High Priority
-- **006**: Data caching - affects load times and API reliability
+- None currently
 
 ### Medium Priority
 - **004**: Chart timeframes and line chart toggle

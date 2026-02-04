@@ -373,8 +373,19 @@ export default function RatiosPage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Chart - Show first on mobile for immediate feedback when selecting */}
+          <div className="lg:col-span-2 lg:order-2">
+            {selectedRatio ? (
+              <RatioChart ratio={selectedRatio} />
+            ) : (
+              <div className="bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 p-8 text-center">
+                <p className="text-neutral-500">Select a ratio to view its chart</p>
+              </div>
+            )}
+          </div>
+
           {/* Ratio List */}
-          <div className="lg:col-span-1 space-y-4">
+          <div className="lg:col-span-1 lg:order-1 space-y-4">
             {favoriteRatios.length > 0 && (
               <div>
                 <h2 className="text-sm font-medium text-neutral-500 mb-2 flex items-center gap-1">
@@ -433,17 +444,6 @@ export default function RatiosPage() {
                 >
                   Initialize system ratios
                 </button>
-              </div>
-            )}
-          </div>
-
-          {/* Chart */}
-          <div className="lg:col-span-2">
-            {selectedRatio ? (
-              <RatioChart ratio={selectedRatio} />
-            ) : (
-              <div className="bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 p-8 text-center">
-                <p className="text-neutral-500">Select a ratio to view its chart</p>
               </div>
             )}
           </div>

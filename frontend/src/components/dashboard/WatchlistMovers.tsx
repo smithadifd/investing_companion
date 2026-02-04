@@ -1,55 +1,28 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
-import { useWatchlists, useWatchlist } from '@/lib/hooks/useWatchlist';
+import { TrendingUp, TrendingDown } from 'lucide-react';
+import { useAllWatchlistMovers } from '@/lib/hooks/useWatchlist';
 import { StockCard } from '@/components/ui/StockCard';
-import type { WatchlistItem } from '@/lib/api/types';
 
-interface MoverItem {
-  symbol: string;
-  name: string;
-  price: number;
-  changePercent: number;
-}
+type ViewMode = 'all' | 'gainers' | 'losers';
 
 function parseNumber(value: number | string | null | undefined): number {
   if (value === null || value === undefined) return 0;
   return typeof value === 'string' ? parseFloat(value) : value;
 }
 
-function getMovers(items: WatchlistItem[]): MoverItem[] {
-  return items
-    .filter((item) => item.quote)
-    .map((item) => ({
-      symbol: item.equity.symbol,
-      name: item.equity.name,
-      price: parseNumber(item.quote?.price),
-      changePercent: parseNumber(item.quote?.change_percent),
-    }))
-    .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
-}
-
 export function WatchlistMovers() {
-  const { data: watchlists, isLoading: watchlistsLoading } = useWatchlists();
-
-  // Find the default watchlist
-  const defaultWatchlist = watchlists?.find((w) => w.is_default);
-  const watchlistId = defaultWatchlist?.id ?? null;
-
-  const {
-    data: watchlist,
-    isLoading: watchlistLoading,
-    error,
-  } = useWatchlist(watchlistId, true);
-
-  const isLoading = watchlistsLoading || watchlistLoading;
+  const [viewMode, setViewMode] = useState<ViewMode>('all');
+  const { data: moversData, isLoading, error } = useAllWatchlistMovers(6);
 
   if (isLoading) {
     return (
       <div className="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-neutral-900 dark:text-neutral-50">
-            Watchlist Movers
+            Today&apos;s Movers
           </h2>
         </div>
         <div className="space-y-3">
@@ -64,19 +37,17 @@ export function WatchlistMovers() {
     );
   }
 
-  if (error || !watchlist) {
+  if (error || !moversData) {
     return (
       <div className="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-neutral-900 dark:text-neutral-50">
-            Watchlist Movers
+            Today&apos;s Movers
           </h2>
         </div>
         <div className="text-center py-8">
           <p className="text-neutral-500 dark:text-neutral-400 mb-3">
-            {!defaultWatchlist
-              ? 'No default watchlist set'
-              : 'Could not load watchlist'}
+            Could not load movers data
           </p>
           <Link
             href="/watchlists"
@@ -89,28 +60,22 @@ export function WatchlistMovers() {
     );
   }
 
-  const movers = getMovers(watchlist.items);
+  const { gainers, losers, total_items, watchlist_count } = moversData;
 
-  if (movers.length === 0) {
+  if (total_items === 0) {
     return (
       <div className="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-neutral-900 dark:text-neutral-50">
-            Watchlist Movers
+            Today&apos;s Movers
           </h2>
-          <Link
-            href={`/watchlists/${watchlist.id}`}
-            className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-          >
-            View All
-          </Link>
         </div>
         <div className="text-center py-8">
           <p className="text-neutral-500 dark:text-neutral-400 mb-3">
-            No items in watchlist
+            No items in any watchlist
           </p>
           <Link
-            href={`/watchlists/${watchlist.id}`}
+            href="/watchlists"
             className="text-blue-600 dark:text-blue-400 hover:underline text-sm"
           >
             Add some equities
@@ -120,39 +85,97 @@ export function WatchlistMovers() {
     );
   }
 
-  // Show top 6 movers
-  const topMovers = movers.slice(0, 6);
+  // Get movers based on view mode
+  const getDisplayedMovers = () => {
+    if (viewMode === 'gainers') return gainers;
+    if (viewMode === 'losers') return losers;
+    // 'all' - interleave top 3 gainers and top 3 losers
+    const combined = [];
+    const maxLen = Math.max(gainers.length, losers.length);
+    for (let i = 0; i < maxLen && combined.length < 6; i++) {
+      if (i < gainers.length && combined.length < 6) combined.push(gainers[i]);
+      if (i < losers.length && combined.length < 6) combined.push(losers[i]);
+    }
+    return combined;
+  };
+
+  const displayedMovers = getDisplayedMovers();
 
   return (
     <div className="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 p-5">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="font-semibold text-neutral-900 dark:text-neutral-50">
-            Watchlist Movers
+            Today&apos;s Movers
           </h2>
           <p className="text-xs text-neutral-500 dark:text-neutral-400">
-            {watchlist.name}
+            Across {watchlist_count} watchlist{watchlist_count !== 1 ? 's' : ''} ({total_items} equities)
           </p>
         </div>
         <Link
-          href={`/watchlists/${watchlist.id}`}
+          href="/watchlists"
           className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
         >
-          View All ({watchlist.items.length})
+          View All
         </Link>
       </div>
+
+      {/* View mode tabs */}
+      <div className="flex gap-1 mb-4 bg-neutral-100 dark:bg-neutral-700 rounded-lg p-1">
+        <button
+          onClick={() => setViewMode('all')}
+          className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+            viewMode === 'all'
+              ? 'bg-white dark:bg-neutral-600 shadow-sm text-neutral-900 dark:text-neutral-50'
+              : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
+          }`}
+        >
+          All
+        </button>
+        <button
+          onClick={() => setViewMode('gainers')}
+          className={`flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+            viewMode === 'gainers'
+              ? 'bg-white dark:bg-neutral-600 shadow-sm text-emerald-600 dark:text-emerald-400'
+              : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
+          }`}
+        >
+          <TrendingUp className="h-3 w-3" />
+          Gainers
+        </button>
+        <button
+          onClick={() => setViewMode('losers')}
+          className={`flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+            viewMode === 'losers'
+              ? 'bg-white dark:bg-neutral-600 shadow-sm text-red-600 dark:text-red-400'
+              : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
+          }`}
+        >
+          <TrendingDown className="h-3 w-3" />
+          Losers
+        </button>
+      </div>
+
+      {/* Movers list */}
       <div className="space-y-2">
-        {topMovers.map((mover, index) => (
-          <StockCard
-            key={mover.symbol}
-            symbol={mover.symbol}
-            name={mover.name}
-            price={mover.price}
-            changePercent={mover.changePercent}
-            rank={index + 1}
-            highlightThreshold={3}
-          />
-        ))}
+        {displayedMovers.length === 0 ? (
+          <p className="text-center text-neutral-500 dark:text-neutral-400 py-4 text-sm">
+            No {viewMode === 'gainers' ? 'gainers' : viewMode === 'losers' ? 'losers' : 'movers'} today
+          </p>
+        ) : (
+          displayedMovers.map((mover, index) => (
+            <StockCard
+              key={mover.symbol}
+              symbol={mover.symbol}
+              name={mover.name}
+              price={parseNumber(mover.price)}
+              changePercent={parseNumber(mover.change_percent)}
+              rank={index + 1}
+              highlightThreshold={3}
+              subtitle={mover.watchlist_name}
+            />
+          ))
+        )}
       </div>
     </div>
   );

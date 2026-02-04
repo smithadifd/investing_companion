@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.common import DataResponse, ResponseMeta
 from app.schemas.watchlist import (
+    AllWatchlistMovers,
     WatchlistCreate,
     WatchlistExport,
     WatchlistImport,
@@ -38,6 +39,17 @@ async def list_watchlists(
     service = WatchlistService(db)
     watchlists = await service.list_watchlists()
     return DataResponse(data=watchlists, meta=create_meta())
+
+
+@router.get("/movers", response_model=DataResponse[AllWatchlistMovers])
+async def get_all_movers(
+    limit: int = Query(10, ge=1, le=50, description="Max movers per category"),
+    db: AsyncSession = Depends(get_db),
+) -> DataResponse[AllWatchlistMovers]:
+    """Get top gainers and losers across all watchlists."""
+    service = WatchlistService(db)
+    movers = await service.get_all_movers(limit)
+    return DataResponse(data=movers, meta=create_meta())
 
 
 @router.post("", response_model=DataResponse[WatchlistResponse], status_code=201)

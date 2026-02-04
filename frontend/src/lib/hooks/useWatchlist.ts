@@ -24,6 +24,17 @@ export function useWatchlists() {
 }
 
 /**
+ * Get top movers across all watchlists
+ */
+export function useAllWatchlistMovers(limit = 10) {
+  return useQuery({
+    queryKey: ['watchlists', 'movers', limit],
+    queryFn: () => api.getAllWatchlistMovers(limit),
+    staleTime: 60 * 1000, // 1 minute
+  });
+}
+
+/**
  * Get a single watchlist with items
  */
 export function useWatchlist(id: number | null, includeQuotes = true) {

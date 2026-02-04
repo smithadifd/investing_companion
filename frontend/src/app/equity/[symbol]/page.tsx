@@ -6,7 +6,7 @@ import { Loader2, ArrowLeft, BarChart3, FileText, TrendingUp, Sparkles, Calendar
 import Link from 'next/link';
 import { useEquity, useHistory, useTechnicals, useTechnicalsSummary } from '@/lib/hooks/useEquity';
 import { AdvancedChart } from '@/components/charts/AdvancedChart';
-import { ChartControls } from '@/components/charts/ChartControls';
+import { ChartControls, type ChartType, type ChartInterval } from '@/components/charts/ChartControls';
 import { QuoteHeader } from '@/components/equity/QuoteHeader';
 import { FundamentalsCard } from '@/components/equity/FundamentalsCard';
 import { PeriodSelector } from '@/components/equity/PeriodSelector';
@@ -18,11 +18,35 @@ import { EquityEvents } from '@/components/equity/EquityEvents';
 
 type TabType = 'chart' | 'fundamentals' | 'events' | 'ai';
 
+// Mapping of periods to recommended intervals
+const PERIOD_INTERVAL_DEFAULTS: Record<string, ChartInterval> = {
+  '1d': '5m',
+  '5d': '15m',
+  '1mo': '1h',
+  '3mo': '1d',
+  '6mo': '1d',
+  '1y': '1d',
+  '2y': '1d',
+  '5y': '1d',
+};
+
 export default function EquityPage() {
   const params = useParams();
   const symbol = decodeURIComponent(params.symbol as string).toUpperCase();
   const [period, setPeriod] = useState('1y');
   const [activeTab, setActiveTab] = useState<TabType>('chart');
+
+  // Chart type and interval
+  const [chartType, setChartType] = useState<ChartType>('candlestick');
+  const [interval, setInterval] = useState<ChartInterval>('1d');
+
+  // Handle period change with automatic interval adjustment
+  const handlePeriodChange = (newPeriod: string) => {
+    setPeriod(newPeriod);
+    // Set recommended interval for the new period
+    const recommendedInterval = PERIOD_INTERVAL_DEFAULTS[newPeriod] || '1d';
+    setInterval(recommendedInterval);
+  };
 
   // Chart indicator toggles
   const [showSMA, setShowSMA] = useState(true);
@@ -37,7 +61,7 @@ export default function EquityPage() {
     error: equityError,
   } = useEquity(symbol);
 
-  const { data: history, isLoading: historyLoading } = useHistory(symbol, period);
+  const { data: history, isLoading: historyLoading } = useHistory(symbol, period, interval);
   const { data: technicals } = useTechnicals(symbol, period);
   const { data: technicalsSummary } = useTechnicalsSummary(symbol);
 
@@ -96,47 +120,49 @@ export default function EquityPage() {
         <div className="flex flex-wrap gap-2 mb-4">
           <button
             onClick={() => setActiveTab('chart')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+            className={`flex items-center gap-1.5 px-3 py-2 sm:px-4 rounded-lg font-medium transition-colors text-sm sm:text-base ${
               activeTab === 'chart'
                 ? 'bg-blue-500 text-white'
                 : 'bg-white dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700'
             }`}
           >
             <BarChart3 className="h-4 w-4" />
-            Technical Analysis
+            <span className="hidden xs:inline sm:inline">Technical</span>
+            <span className="hidden sm:inline"> Analysis</span>
           </button>
           <button
             onClick={() => setActiveTab('fundamentals')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+            className={`flex items-center gap-1.5 px-3 py-2 sm:px-4 rounded-lg font-medium transition-colors text-sm sm:text-base ${
               activeTab === 'fundamentals'
                 ? 'bg-blue-500 text-white'
                 : 'bg-white dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700'
             }`}
           >
             <FileText className="h-4 w-4" />
-            Fundamentals
+            <span className="hidden xs:inline">Fundamentals</span>
           </button>
           <button
             onClick={() => setActiveTab('events')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+            className={`flex items-center gap-1.5 px-3 py-2 sm:px-4 rounded-lg font-medium transition-colors text-sm sm:text-base ${
               activeTab === 'events'
                 ? 'bg-blue-500 text-white'
                 : 'bg-white dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700'
             }`}
           >
             <Calendar className="h-4 w-4" />
-            Events
+            <span className="hidden xs:inline">Events</span>
           </button>
           <button
             onClick={() => setActiveTab('ai')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+            className={`flex items-center gap-1.5 px-3 py-2 sm:px-4 rounded-lg font-medium transition-colors text-sm sm:text-base ${
               activeTab === 'ai'
                 ? 'bg-blue-500 text-white'
                 : 'bg-white dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700'
             }`}
           >
             <Sparkles className="h-4 w-4" />
-            AI Analysis
+            <span className="hidden xs:inline">AI</span>
+            <span className="hidden sm:inline"> Analysis</span>
           </button>
         </div>
 
@@ -150,16 +176,20 @@ export default function EquityPage() {
                   <h2 className="text-xl font-semibold text-neutral-900 dark:text-neutral-50">
                     Price Chart
                   </h2>
-                  <PeriodSelector value={period} onChange={setPeriod} />
+                  <PeriodSelector value={period} onChange={handlePeriodChange} />
                 </div>
 
                 {/* Chart controls */}
                 <ChartControls
+                  chartType={chartType}
+                  interval={interval}
                   showSMA={showSMA}
                   showEMA={showEMA}
                   showBollingerBands={showBollingerBands}
                   showRSI={showRSI}
                   showMACD={showMACD}
+                  onChartTypeChange={setChartType}
+                  onIntervalChange={setInterval}
                   onToggleSMA={() => setShowSMA(!showSMA)}
                   onToggleEMA={() => setShowEMA(!showEMA)}
                   onToggleBollingerBands={() => setShowBollingerBands(!showBollingerBands)}
@@ -173,15 +203,24 @@ export default function EquityPage() {
                   <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
                 </div>
               ) : history ? (
-                <AdvancedChart
-                  data={history.history}
-                  technicals={technicals}
-                  showSMA={showSMA}
-                  showEMA={showEMA}
-                  showBollingerBands={showBollingerBands}
-                  showRSI={showRSI}
-                  showMACD={showMACD}
-                />
+                <>
+                  <AdvancedChart
+                    key={`${symbol}-${period}-${interval}-${chartType}`}
+                    data={history.history}
+                    technicals={interval === '1d' ? technicals : undefined}
+                    chartType={chartType}
+                    showSMA={showSMA}
+                    showEMA={showEMA}
+                    showBollingerBands={showBollingerBands}
+                    showRSI={showRSI}
+                    showMACD={showMACD}
+                  />
+                  {interval !== '1d' && (
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-2">
+                      Technical indicators (SMA, EMA, BB, RSI, MACD) are only available with daily (1D) interval.
+                    </p>
+                  )}
+                </>
               ) : (
                 <div className="h-[400px] flex items-center justify-center bg-neutral-100 dark:bg-neutral-700 rounded-lg">
                   <span className="text-neutral-500 dark:text-neutral-400">No chart data available</span>

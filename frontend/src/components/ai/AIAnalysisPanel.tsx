@@ -152,7 +152,7 @@ export function AIAnalysisPanel({
   }
 
   return (
-    <div className="bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 flex flex-col h-[500px]">
+    <div className="bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 flex flex-col h-[60vh] min-h-[300px] max-h-[500px] sm:h-[500px]">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-200 dark:border-neutral-700">
         <div className="flex items-center gap-2">

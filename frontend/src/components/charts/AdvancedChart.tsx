@@ -1,21 +1,49 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useTheme } from 'next-themes';
 import {
   createChart,
   IChartApi,
-  ISeriesApi,
   ColorType,
   Time,
   LineStyle,
+  UTCTimestamp,
 } from 'lightweight-charts';
 import type { OHLCVData, TechnicalIndicators } from '@/lib/api/types';
+import type { ChartType } from './ChartControls';
+
+/**
+ * Convert timestamp string to TradingView Time format.
+ * For intraday data (contains 'T'), use Unix timestamp.
+ * For daily data, use date string.
+ */
+function toChartTime(timestamp: string): Time {
+  if (timestamp.includes('T')) {
+    // Intraday: use Unix timestamp (seconds since epoch)
+    return Math.floor(new Date(timestamp).getTime() / 1000) as UTCTimestamp;
+  }
+  // Daily: use date string
+  return timestamp as Time;
+}
+
+/**
+ * Deduplicate chart data by timestamp, keeping the last occurrence.
+ * TradingView requires unique, ascending timestamps.
+ */
+function deduplicateByTime<T extends { time: Time }>(data: T[]): T[] {
+  const seen = new Map<string | number, T>();
+  for (const item of data) {
+    seen.set(item.time as string | number, item);
+  }
+  return Array.from(seen.values());
+}
 
 interface AdvancedChartProps {
   data: OHLCVData[];
   technicals?: TechnicalIndicators;
   height?: number;
+  chartType?: ChartType;
   showSMA?: boolean;
   showEMA?: boolean;
   showBollingerBands?: boolean;
@@ -50,6 +78,7 @@ export function AdvancedChart({
   data,
   technicals,
   height = 400,
+  chartType = 'candlestick',
   showSMA = true,
   showEMA = false,
   showBollingerBands = false,
@@ -98,27 +127,61 @@ export function AdvancedChart({
         borderColor: colors.border,
         timeVisible: true,
         secondsVisible: false,
+        tickMarkFormatter: (time: UTCTimestamp) => {
+          const date = new Date(time * 1000);
+          const hours = date.getHours();
+          const minutes = date.getMinutes();
+          // For intraday data, show 12-hour time
+          if (hours !== 0 || minutes !== 0) {
+            const hour12 = hours % 12 || 12;
+            const ampm = hours < 12 ? 'AM' : 'PM';
+            const minStr = minutes.toString().padStart(2, '0');
+            return `${hour12}:${minStr} ${ampm}`;
+          }
+          // For daily data, show date
+          return `${date.getMonth() + 1}/${date.getDate()}`;
+        },
       },
     });
 
-    // Candlestick series
-    const candlestickSeries = chart.addCandlestickSeries({
-      upColor: '#22c55e',
-      downColor: '#ef4444',
-      borderDownColor: '#ef4444',
-      borderUpColor: '#22c55e',
-      wickDownColor: '#ef4444',
-      wickUpColor: '#22c55e',
-    });
+    // Price series - candlestick or line based on chartType
+    if (chartType === 'line') {
+      const lineSeries = chart.addLineSeries({
+        color: '#3b82f6',
+        lineWidth: 2,
+        crosshairMarkerVisible: true,
+        lastValueVisible: true,
+        priceLineVisible: true,
+      });
 
-    const chartData = data.map((item) => ({
-      time: item.timestamp.split('T')[0] as Time,
-      open: Number(item.open),
-      high: Number(item.high),
-      low: Number(item.low),
-      close: Number(item.close),
-    }));
-    candlestickSeries.setData(chartData);
+      const lineData = deduplicateByTime(
+        data.map((item) => ({
+          time: toChartTime(item.timestamp),
+          value: Number(item.close),
+        }))
+      );
+      lineSeries.setData(lineData);
+    } else {
+      const candlestickSeries = chart.addCandlestickSeries({
+        upColor: '#22c55e',
+        downColor: '#ef4444',
+        borderDownColor: '#ef4444',
+        borderUpColor: '#22c55e',
+        wickDownColor: '#ef4444',
+        wickUpColor: '#22c55e',
+      });
+
+      const chartData = deduplicateByTime(
+        data.map((item) => ({
+          time: toChartTime(item.timestamp),
+          open: Number(item.open),
+          high: Number(item.high),
+          low: Number(item.low),
+          close: Number(item.close),
+        }))
+      );
+      candlestickSeries.setData(chartData);
+    }
 
     // Volume series
     const volumeSeries = chart.addHistogramSeries({
@@ -129,18 +192,20 @@ export function AdvancedChart({
     volumeSeries.priceScale().applyOptions({
       scaleMargins: { top: 0.85, bottom: 0 },
     });
-    const volumeData = data
-      .filter((item) => item.volume != null)
-      .map((item) => ({
-        time: item.timestamp.split('T')[0] as Time,
-        value: item.volume as number,
-        color: Number(item.close) >= Number(item.open) ? '#22c55e50' : '#ef444450',
-      }));
+    const volumeData = deduplicateByTime(
+      data
+        .filter((item) => item.volume != null)
+        .map((item) => ({
+          time: toChartTime(item.timestamp),
+          value: item.volume as number,
+          color: Number(item.close) >= Number(item.open) ? '#22c55e50' : '#ef444450',
+        }))
+    );
     volumeSeries.setData(volumeData);
 
     // Add indicator overlays if technicals data available
     if (technicals && technicals.timestamps.length > 0) {
-      const timestamps = technicals.timestamps.map(t => t.split('T')[0] as Time);
+      const timestamps = technicals.timestamps.map(t => toChartTime(t));
 
       // SMA overlays
       if (showSMA) {
@@ -177,7 +242,7 @@ export function AdvancedChart({
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, [data, technicals, height, showSMA, showEMA, showBollingerBands, resolvedTheme]);
+  }, [data, technicals, height, chartType, showSMA, showEMA, showBollingerBands, resolvedTheme]);
 
   // RSI sub-chart
   useEffect(() => {
@@ -208,7 +273,7 @@ export function AdvancedChart({
       },
     });
 
-    const timestamps = technicals.timestamps.map(t => t.split('T')[0] as Time);
+    const timestamps = technicals.timestamps.map(t => toChartTime(t));
 
     // RSI line
     const rsiSeries = chart.addLineSeries({
@@ -217,10 +282,12 @@ export function AdvancedChart({
       priceFormat: { type: 'custom', formatter: (price: number) => price.toFixed(1) },
     });
 
-    const rsiData = timestamps.map((time, i) => ({
-      time,
-      value: technicals.rsi[i] ?? undefined,
-    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+    const rsiData = deduplicateByTime(
+      timestamps.map((time, i) => ({
+        time,
+        value: technicals.rsi[i] ?? undefined,
+      })).filter(d => d.value !== undefined) as { time: Time; value: number }[]
+    );
     rsiSeries.setData(rsiData);
 
     // Overbought/oversold lines
@@ -232,7 +299,7 @@ export function AdvancedChart({
       lastValueVisible: false,
       priceLineVisible: false,
     });
-    overboughtLine.setData(timestamps.map(time => ({ time, value: 70 })));
+    overboughtLine.setData(deduplicateByTime(timestamps.map(time => ({ time, value: 70 }))));
 
     const oversoldLine = chart.addLineSeries({
       color: '#22c55e',
@@ -242,7 +309,7 @@ export function AdvancedChart({
       lastValueVisible: false,
       priceLineVisible: false,
     });
-    oversoldLine.setData(timestamps.map(time => ({ time, value: 30 })));
+    oversoldLine.setData(deduplicateByTime(timestamps.map(time => ({ time, value: 30 }))));
 
     chart.timeScale().fitContent();
     rsiChartRef.current = chart;
@@ -288,21 +355,23 @@ export function AdvancedChart({
       },
     });
 
-    const timestamps = technicals.timestamps.map(t => t.split('T')[0] as Time);
+    const timestamps = technicals.timestamps.map(t => toChartTime(t));
 
     // MACD histogram
     const histogramSeries = chart.addHistogramSeries({
       priceFormat: { type: 'custom', formatter: (price: number) => price.toFixed(3) },
       priceScaleId: 'macd',
     });
-    const histogramData = timestamps.map((time, i) => {
-      const value = technicals.macd_histogram[i];
-      return {
-        time,
-        value: value ?? 0,
-        color: (value ?? 0) >= 0 ? INDICATOR_COLORS.macdHistogramPositive + '80' : INDICATOR_COLORS.macdHistogramNegative + '80',
-      };
-    }).filter(d => technicals.macd_histogram[timestamps.indexOf(d.time as string)] !== null);
+    const histogramData = deduplicateByTime(
+      timestamps.map((time, i) => {
+        const value = technicals.macd_histogram[i];
+        return {
+          time,
+          value: value ?? 0,
+          color: (value ?? 0) >= 0 ? INDICATOR_COLORS.macdHistogramPositive + '80' : INDICATOR_COLORS.macdHistogramNegative + '80',
+        };
+      }).filter((_, i) => technicals.macd_histogram[i] !== null)
+    );
     histogramSeries.setData(histogramData);
 
     // MACD line
@@ -312,10 +381,12 @@ export function AdvancedChart({
       priceScaleId: 'macd',
       priceFormat: { type: 'custom', formatter: (price: number) => price.toFixed(3) },
     });
-    const macdData = timestamps.map((time, i) => ({
-      time,
-      value: technicals.macd[i] ?? undefined,
-    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+    const macdData = deduplicateByTime(
+      timestamps.map((time, i) => ({
+        time,
+        value: technicals.macd[i] ?? undefined,
+      })).filter(d => d.value !== undefined) as { time: Time; value: number }[]
+    );
     macdLine.setData(macdData);
 
     // Signal line
@@ -325,10 +396,12 @@ export function AdvancedChart({
       priceScaleId: 'macd',
       priceFormat: { type: 'custom', formatter: (price: number) => price.toFixed(3) },
     });
-    const signalData = timestamps.map((time, i) => ({
-      time,
-      value: technicals.macd_signal[i] ?? undefined,
-    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+    const signalData = deduplicateByTime(
+      timestamps.map((time, i) => ({
+        time,
+        value: technicals.macd_signal[i] ?? undefined,
+      })).filter(d => d.value !== undefined) as { time: Time; value: number }[]
+    );
     signalLine.setData(signalData);
 
     chart.timeScale().fitContent();
@@ -449,10 +522,12 @@ function addLineSeries(
     title,
   });
 
-  const data = timestamps.map((time, i) => ({
-    time,
-    value: values[i] ?? undefined,
-  })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+  const data = deduplicateByTime(
+    timestamps.map((time, i) => ({
+      time,
+      value: values[i] ?? undefined,
+    })).filter(d => d.value !== undefined) as { time: Time; value: number }[]
+  );
 
   series.setData(data);
   return series;

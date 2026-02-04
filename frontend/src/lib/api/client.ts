@@ -58,6 +58,7 @@ import type {
   User,
   UserCreate,
   UserLogin,
+  AllWatchlistMovers,
   Watchlist,
   WatchlistCreate,
   WatchlistExport,
@@ -412,6 +413,13 @@ class ApiClient {
    */
   async getWatchlists(): Promise<WatchlistSummary[]> {
     return this.fetch<WatchlistSummary[]>('/watchlists');
+  }
+
+  /**
+   * Get top movers across all watchlists
+   */
+  async getAllWatchlistMovers(limit = 10): Promise<AllWatchlistMovers> {
+    return this.fetch<AllWatchlistMovers>(`/watchlists/movers?limit=${limit}`);
   }
 
   /**
@@ -1057,6 +1065,15 @@ class ApiClient {
     if (includePast) params.append('include_past', 'true');
     params.append('limit', limit.toString());
     return this.fetch<EconomicEvent[]>(`/equity/${symbol}/events?${params.toString()}`);
+  }
+
+  /**
+   * Delete all auto-fetched events for an equity (untrack)
+   */
+  async deleteEquityEvents(symbol: string): Promise<{ symbol: string; events_deleted: number }> {
+    return this.fetch<{ symbol: string; events_deleted: number }>(`/events/equity/${symbol}`, {
+      method: 'DELETE',
+    });
   }
 }
 

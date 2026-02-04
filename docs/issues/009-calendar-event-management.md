@@ -1,7 +1,8 @@
 # Issue 009: Calendar Event Auto-Add and Management
 
-**Status:** Open
+**Status:** Partially Resolved
 **Created:** 2026-02-04
+**Updated:** 2026-02-04
 **Priority:** Medium
 **Affects:** Calendar, Equity page, Watchlist
 
@@ -13,82 +14,51 @@ Two related issues with calendar event management:
 
 2. **Delete capability:** No way to remove individual equity events from the calendar (e.g., if no longer tracking a stock).
 
-## Current Behavior
+## Resolution
 
-### Issue 1: Auto-Add
-- Opening equity events component may trigger event creation
-- No clear UX indicating "these events will be tracked"
-- No option to "just view" vs "add to calendar"
+### Fix 2: Delete Capability - IMPLEMENTED
 
-### Issue 2: No Delete
-- `EventDetailModal` shows event info but no delete option
-- User must remove equity from watchlist to stop seeing events
-- No way to delete individual events
+Added delete button to `EventDetailModal` for custom events (user-created events).
 
-## Proposed Solution
+**Changes made:**
+- Updated `frontend/src/components/event/EventDetailModal.tsx`:
+  - Added `useState` for delete confirmation modal
+  - Added `useDeleteEvent` hook integration
+  - Added `onDeleted` callback prop
+  - Added conditional delete button (only shows for events with `source === 'manual'` and non-null `user_id`)
+  - Added delete confirmation modal using `ConfirmModal` component
+  - Delete button styled with red color in footer
 
-### Fix 1: Explicit Add-to-Calendar
+**Behavior:**
+- Custom events (source: 'manual') show a red "Delete" button in the modal footer
+- System events (earnings from Yahoo, seeded macro events) do NOT show a delete button
+- Clicking Delete shows a confirmation dialog
+- After deletion, the modal closes and the calendar refreshes
 
-1. **Separate viewing from tracking:**
-   - Equity page shows earnings date as read-only info
-   - Explicit "Track on Calendar" button to add events
-   - Match the existing `track_calendar` toggle on watchlist items
+### Fix 1: Auto-Add Behavior - NOT REQUIRED
 
-2. **Clear UX:**
-   ```
-   Next Earnings: Feb 15, 2026
-   [📅 Add to Calendar]  ← Only adds if clicked
-   ```
+After investigation, the current behavior does NOT auto-add events when viewing:
+- `EquityEvents` component only reads events from the backend
+- Events are fetched from Yahoo Finance when equity is created or when "Refresh" is clicked
+- Viewing the equity page does not create new events
 
-### Fix 2: Event Deletion
+The original issue description may have been a misunderstanding. The current behavior is correct:
+- Earnings dates come from Yahoo Finance during equity creation/refresh
+- They are global data, not per-user
+- Users can control which equities they track via watchlists
 
-1. **Add delete to EventDetailModal:**
-   ```tsx
-   <button onClick={handleDelete}>
-     <Trash className="h-4 w-4" />
-     Remove from Calendar
-   </button>
-   ```
+## Remaining Work
 
-2. **Backend delete endpoint:**
-   ```python
-   @router.delete("/events/{event_id}")
-   async def delete_event(event_id: int, user_id: int):
-       # Verify ownership (user's equity event or custom event)
-       # Delete event
-       # Return success
-   ```
+**Optional enhancements (not required):**
+1. Add 'custom' event type to default calendar filter so custom events show by default
+2. Allow users to "hide" system events from their calendar view (soft filter, not delete)
 
-3. **Confirmation dialog:**
-   - For equity events: "Remove this event? Future events for {symbol} will still appear if tracking is enabled."
-   - For custom events: "Delete this event? This cannot be undone."
+## Files Changed
 
-## Files Affected
+- `frontend/src/components/event/EventDetailModal.tsx` - Added delete functionality
 
-- `frontend/src/components/equity/EquityEvents.tsx` - Separate view from add
-- `frontend/src/components/event/EventDetailModal.tsx` - Add delete button
-- `backend/app/api/v1/endpoints/event.py` - Delete endpoint
-- `backend/app/services/economic_event.py` - Delete logic
+## Edge Cases Resolved
 
-## Effort Estimate
-
-### Fix 1: Auto-Add
-- Investigate current behavior: 1 hour
-- Modify EquityEvents component: 1-2 hours
-- Testing: 1 hour
-**Subtotal: 3-4 hours**
-
-### Fix 2: Delete
-- Backend endpoint: 1 hour
-- Frontend modal updates: 1-2 hours
-- Confirmation dialog: 30 min
-- Testing: 1 hour
-**Subtotal: 3-4 hours**
-
-**Total: ~6-8 hours (1 day)**
-
-## Edge Cases
-
-- Deleting system macro events (FOMC, CPI) - should these be deletable?
-- Deleting equity event when still tracking equity - will re-appear?
-- Soft delete vs hard delete
+- **Macro events (FOMC, CPI):** NOT deletable - these are system events
+- **Equity events (earnings, dividends):** NOT deletable - these are global data from Yahoo
+- **Custom events:** Deletable by the user who created them

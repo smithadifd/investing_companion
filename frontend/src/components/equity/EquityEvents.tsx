@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
   Calendar,
@@ -10,10 +10,12 @@ import {
   ChevronRight,
   RefreshCw,
   AlertCircle,
+  Trash2,
 } from 'lucide-react';
-import { useEquityEvents, useRefreshEquityEvents } from '@/lib/hooks/useEvents';
+import { useEquityEvents, useRefreshEquityEvents, useDeleteEquityEvents } from '@/lib/hooks/useEvents';
 import { formatDistanceToNow, format } from 'date-fns';
 import type { EconomicEvent, EventType } from '@/lib/api/types';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
 
 interface Props {
   symbol: string;
@@ -42,12 +44,44 @@ const EVENT_TYPE_CONFIG: Record<EventType, { icon: typeof Calendar; label: strin
 
 export function EquityEvents({ symbol }: Props) {
   const [includePast, setIncludePast] = useState(false);
+  const [showUntrackConfirm, setShowUntrackConfirm] = useState(false);
+  const [hasAutoFetched, setHasAutoFetched] = useState(false);
   const { data: events, isLoading, error, refetch } = useEquityEvents(symbol, includePast);
   const refreshMutation = useRefreshEquityEvents();
+  const deleteMutation = useDeleteEquityEvents();
+
+  const hasEvents = events && events.length > 0;
+
+  // Auto-fetch events when component mounts if no events exist
+  useEffect(() => {
+    if (!isLoading && !hasEvents && !hasAutoFetched && !error) {
+      setHasAutoFetched(true);
+      refreshMutation.mutateAsync(symbol).then(() => {
+        refetch();
+      }).catch(() => {
+        // Silently fail - user can manually refresh
+      });
+    }
+  }, [isLoading, hasEvents, hasAutoFetched, error, symbol, refreshMutation, refetch]);
+
+  // Reset auto-fetch flag when symbol changes
+  useEffect(() => {
+    setHasAutoFetched(false);
+  }, [symbol]);
 
   const handleRefresh = async () => {
     try {
       await refreshMutation.mutateAsync(symbol);
+      refetch();
+    } catch (err) {
+      // Error handled by mutation
+    }
+  };
+
+  const handleUntrack = async () => {
+    try {
+      await deleteMutation.mutateAsync(symbol);
+      setShowUntrackConfirm(false);
       refetch();
     } catch (err) {
       // Error handled by mutation
@@ -74,7 +108,7 @@ export function EquityEvents({ symbol }: Props) {
   return (
     <div>
       {/* Header with controls */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 cursor-pointer text-sm text-neutral-600 dark:text-neutral-400">
             <input
@@ -86,18 +120,35 @@ export function EquityEvents({ symbol }: Props) {
             Show past events
           </label>
         </div>
-        <button
-          onClick={handleRefresh}
-          disabled={refreshMutation.isPending}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-neutral-100 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-600 transition-colors disabled:opacity-50"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshMutation.isPending ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefresh}
+            disabled={refreshMutation.isPending}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-neutral-100 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-600 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshMutation.isPending ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+          {hasEvents && (
+            <button
+              onClick={() => setShowUntrackConfirm(true)}
+              disabled={deleteMutation.isPending}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Untrack
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Events list */}
-      {events && events.length > 0 ? (
+      {refreshMutation.isPending && !hasEvents ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin text-blue-500 mr-2" />
+          <span className="text-neutral-500 dark:text-neutral-400">Loading events...</span>
+        </div>
+      ) : events && events.length > 0 ? (
         <div className="space-y-2">
           {events.map((event) => (
             <EventRow key={event.id} event={event} />
@@ -107,7 +158,7 @@ export function EquityEvents({ symbol }: Props) {
         <div className="text-center py-8 text-neutral-500 dark:text-neutral-400">
           <Calendar className="h-8 w-8 mx-auto mb-2 opacity-50" />
           <p className="text-sm">No upcoming events for {symbol}</p>
-          <p className="text-xs mt-1">Events like earnings and dividends will appear here</p>
+          <p className="text-xs mt-1">Click Refresh to check for earnings and dividend dates</p>
         </div>
       )}
 
@@ -121,6 +172,19 @@ export function EquityEvents({ symbol }: Props) {
           <ChevronRight className="h-4 w-4" />
         </Link>
       </div>
+
+      {/* Untrack confirmation modal */}
+      {showUntrackConfirm && (
+        <ConfirmModal
+          title="Stop Tracking Events"
+          message={`Are you sure you want to stop tracking events for ${symbol}? This will remove all earnings, dividend, and other auto-fetched events for this equity.`}
+          confirmLabel="Untrack"
+          variant="danger"
+          isLoading={deleteMutation.isPending}
+          onConfirm={handleUntrack}
+          onCancel={() => setShowUntrackConfirm(false)}
+        />
+      )}
     </div>
   );
 }

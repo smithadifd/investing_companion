@@ -156,6 +156,132 @@ def send_daily_summary():
         raise
 
 
+@celery_app.task(name="alerts.send_daily_movers_summary")
+def send_daily_movers_summary(threshold_percent: float = 5.0):
+    """
+    Send daily summary of watchlist equities that moved more than threshold%.
+
+    Args:
+        threshold_percent: Minimum absolute percent change to include (default 5%)
+
+    Scheduled to run once per day after market close.
+    """
+    logger.info(f"Sending daily movers summary (threshold: {threshold_percent}%)")
+
+    async def _send():
+        from app.services.watchlist import WatchlistService
+
+        async with AsyncSessionLocal() as session:
+            service = WatchlistService(session)
+            # Use the get_all_movers method we created for Issue 008
+            movers = await service.get_all_movers(limit=10)
+
+            # Convert Pydantic models to dicts for Discord service
+            gainers = [
+                {
+                    "symbol": g.symbol,
+                    "name": g.name,
+                    "price": float(g.price),
+                    "change_percent": float(g.change_percent),
+                    "watchlist_name": g.watchlist_name,
+                }
+                for g in movers.gainers
+            ]
+            losers = [
+                {
+                    "symbol": l.symbol,
+                    "name": l.name,
+                    "price": float(l.price),
+                    "change_percent": float(l.change_percent),
+                    "watchlist_name": l.watchlist_name,
+                }
+                for l in movers.losers
+            ]
+
+            success, error = await discord_service.send_movers_summary(
+                gainers=gainers,
+                losers=losers,
+                threshold_percent=threshold_percent,
+                total_items=movers.total_items,
+                watchlist_count=movers.watchlist_count,
+            )
+
+            return {
+                "success": success,
+                "error": error,
+                "gainers_count": len(gainers),
+                "losers_count": len(losers),
+                "total_items": movers.total_items,
+            }
+
+    try:
+        result = run_async(_send())
+        logger.info(f"Daily movers summary result: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error sending daily movers summary: {e}", exc_info=True)
+        raise
+
+
+@celery_app.task(name="alerts.send_morning_events")
+def send_morning_events(days_ahead: int = 2):
+    """
+    Send morning notification of upcoming events for today and tomorrow.
+
+    Args:
+        days_ahead: Number of days to look ahead (default 2 for today + tomorrow)
+
+    Scheduled to run each morning before market open.
+    """
+    logger.info(f"Sending morning events notification (days: {days_ahead})")
+
+    async def _send():
+        from app.services.economic_event import EconomicEventService
+        from app.schemas.economic_event import EventFilters
+
+        async with AsyncSessionLocal() as session:
+            service = EconomicEventService(session)
+
+            # Get upcoming events
+            result = await service.get_upcoming_events(
+                days_ahead=days_ahead,
+                user_id=None,  # System-level, get all events
+                limit=30,
+            )
+
+            # Convert to dict format for Discord
+            events = [
+                {
+                    "event_date": str(e.event_date),
+                    "title": e.title,
+                    "event_type": e.event_type,
+                    "event_time": e.event_time,
+                    "symbol": e.equity.symbol if e.equity else None,
+                }
+                for e in result.events
+            ]
+
+            days_label = "Today" if days_ahead == 1 else f"Next {days_ahead} Days"
+            success, error = await discord_service.send_upcoming_events(
+                events=events,
+                days_label=days_label,
+            )
+
+            return {
+                "success": success,
+                "error": error,
+                "events_count": len(events),
+            }
+
+    try:
+        result = run_async(_send())
+        logger.info(f"Morning events result: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error sending morning events: {e}", exc_info=True)
+        raise
+
+
 # Celery Beat schedule configuration
 # This should be added to celery_app.conf.beat_schedule
 ALERT_BEAT_SCHEDULE = {
@@ -168,6 +294,24 @@ ALERT_BEAT_SCHEDULE = {
         "schedule": {
             "crontab": {
                 "hour": 18,  # 6 PM UTC
+                "minute": 0,
+            }
+        },
+    },
+    "send-daily-movers-summary": {
+        "task": "alerts.send_daily_movers_summary",
+        "schedule": {
+            "crontab": {
+                "hour": 21,  # 9:30 PM UTC = 4:30 PM ET (after market close)
+                "minute": 30,
+            }
+        },
+    },
+    "send-morning-events": {
+        "task": "alerts.send_morning_events",
+        "schedule": {
+            "crontab": {
+                "hour": 12,  # 12 PM UTC = 7 AM ET (before market open)
                 "minute": 0,
             }
         },

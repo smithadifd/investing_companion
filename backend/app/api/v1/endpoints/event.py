@@ -274,6 +274,26 @@ async def delete_event(
         )
 
 
+@router.delete("/equity/{symbol}", response_model=DataResponse[dict])
+async def delete_equity_events(
+    symbol: str,
+    current_user: User = Depends(get_current_user),
+    service: EconomicEventService = Depends(get_event_service),
+) -> DataResponse[dict]:
+    """
+    Delete all auto-fetched events for a specific equity.
+
+    This removes earnings, dividend, and other system-generated events
+    for the equity. Use this to "untrack" an equity's events.
+    User-created custom events are preserved.
+    """
+    count = await service.delete_events_for_symbol(symbol.upper())
+    return DataResponse(
+        data={"symbol": symbol.upper(), "events_deleted": count},
+        meta=create_meta(),
+    )
+
+
 # -----------------------------------------------------------------------------
 # Refresh Events from Data Sources
 # -----------------------------------------------------------------------------

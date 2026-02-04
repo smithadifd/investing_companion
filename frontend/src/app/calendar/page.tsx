@@ -548,7 +548,7 @@ export default function CalendarPage() {
           <div className="flex-1">
             {/* Calendar controls */}
             <div className="bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 p-4 mb-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <button
                     onClick={goToPreviousMonth}
@@ -556,7 +556,7 @@ export default function CalendarPage() {
                   >
                     <ChevronLeft className="h-5 w-5 text-neutral-600 dark:text-neutral-400" />
                   </button>
-                  <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 min-w-[160px] text-center">
+                  <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 min-w-[140px] sm:min-w-[160px] text-center">
                     {MONTHS[month - 1]} {year}
                   </h2>
                   <button
@@ -567,12 +567,12 @@ export default function CalendarPage() {
                   </button>
                   <button
                     onClick={goToToday}
-                    className="ml-2 px-3 py-1 text-sm border border-neutral-300 dark:border-neutral-600 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
+                    className="ml-2 px-3 py-1 text-sm border border-neutral-300 dark:border-neutral-600 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors hidden sm:block"
                   >
                     Today
                   </button>
                 </div>
-                <div className="flex items-center gap-1 bg-neutral-100 dark:bg-neutral-700 rounded-lg p-1">
+                <div className="flex items-center gap-1 bg-neutral-100 dark:bg-neutral-700 rounded-lg p-1 flex-shrink-0">
                   <button
                     onClick={() => setViewMode('month')}
                     className={`p-2 rounded transition-colors ${

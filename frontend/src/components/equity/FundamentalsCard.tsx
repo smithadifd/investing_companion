@@ -28,7 +28,10 @@ function toNumber(value: unknown): number | null {
 function formatPercentValue(value: number | string | null | undefined): string {
   const num = toNumber(value);
   if (num == null) return '--';
-  return `${(num * 100).toFixed(2)}%`;
+  // Yahoo Finance returns dividend_yield as decimal (0.004 = 0.4%)
+  // Values > 1 are already in percentage form, don't multiply
+  const pct = num > 1 ? num : num * 100;
+  return `${pct.toFixed(2)}%`;
 }
 
 export function FundamentalsCard({ fundamentals }: FundamentalsCardProps) {

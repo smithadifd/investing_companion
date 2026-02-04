@@ -21,7 +21,7 @@ export function EditItemModal({
     item.target_price ? String(item.target_price) : ''
   );
   const [thesis, setThesis] = useState(item.thesis || '');
-  const [trackCalendar, setTrackCalendar] = useState(item.track_calendar ?? true);
+  const [trackCalendar, setTrackCalendar] = useState(item.track_calendar ?? false);
 
   const updateMutation = useUpdateWatchlistItem();
 

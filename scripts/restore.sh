@@ -15,6 +15,9 @@
 
 set -e  # Exit on error
 
+# Synology compatibility: ensure docker is in PATH
+export PATH=/usr/local/bin:$PATH
+
 # Configuration
 CONTAINER_NAME="investing_db"
 BACKUP_FILE="$1"

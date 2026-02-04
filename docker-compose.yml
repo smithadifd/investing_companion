@@ -79,6 +79,7 @@ services:
       context: ./backend
       dockerfile: ../docker/Dockerfile.backend
     container_name: investing_celery_worker
+    user: root
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-investing}:${POSTGRES_PASSWORD:-investing_dev}@db:5432/${POSTGRES_DB:-investing_companion}
       - REDIS_URL=redis://redis:6379/0
@@ -102,6 +103,7 @@ services:
       context: ./backend
       dockerfile: ../docker/Dockerfile.backend
     container_name: investing_celery_beat
+    user: root
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-investing}:${POSTGRES_PASSWORD:-investing_dev}@db:5432/${POSTGRES_DB:-investing_companion}
       - REDIS_URL=redis://redis:6379/0

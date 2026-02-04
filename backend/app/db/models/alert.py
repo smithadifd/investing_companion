@@ -88,6 +88,12 @@ class Alert(Base, TimestampMixin):
         Numeric(precision=18, scale=6), nullable=True
     )
 
+    # For cross alerts, track whether price was above threshold at last check
+    # None = not yet established, True = was above, False = was below
+    was_above_threshold: Mapped[Optional[bool]] = mapped_column(
+        Boolean, nullable=True, default=None
+    )
+
     # Relationships
     user: Mapped[Optional["User"]] = relationship(back_populates="alerts")
     equity: Mapped[Optional["Equity"]] = relationship(

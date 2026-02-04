@@ -1,6 +1,6 @@
 # Issue 011: "Crosses Above/Below" Alert Detection Bug
 
-**Status:** Open
+**Status:** Resolved (2026-02-04)
 **Created:** 2026-02-04
 **Priority:** High
 **Affects:** Alert system

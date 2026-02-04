@@ -296,8 +296,13 @@ class AlertService:
         try:
             result = await self.check_alert(alert)
 
+            # Always update was_above_threshold for cross detection alerts
+            if alert.condition_type in ("crosses_above", "crosses_below"):
+                threshold = Decimal(str(alert.threshold_value))
+                alert.was_above_threshold = result.current_value > threshold
+
             if not result.is_triggered:
-                # Update last checked value for cross detection
+                # Update last checked value
                 alert.last_checked_value = result.current_value
                 await self.db.commit()
                 return False, None
@@ -306,6 +311,9 @@ class AlertService:
                 logger.info(
                     f"Alert {alert.id} triggered but in cooldown, skipping notification"
                 )
+                # Still update the threshold state after trigger
+                alert.last_checked_value = result.current_value
+                await self.db.commit()
                 return False, None
 
             # Create history record
@@ -482,19 +490,40 @@ class AlertService:
             return triggered, desc
 
         elif condition == "crosses_above":
-            # Was below, now above
-            if last_value is None:
-                return False, "No previous value for cross detection"
-            triggered = last_value <= threshold and current_value > threshold
-            desc = f"Crossed above {threshold:.4f} (was {last_value:.4f}, now {current_value:.4f})"
+            # Use was_above_threshold for reliable cross detection
+            currently_above = current_value > threshold
+
+            if alert.was_above_threshold is None:
+                # First check - establish baseline, don't trigger
+                # The baseline will be set in process_alert after this returns
+                desc = f"Baseline established: {'above' if currently_above else 'below'} {threshold:.4f}"
+                return False, desc
+
+            # Trigger if we were below (was_above_threshold=False) and now above
+            triggered = not alert.was_above_threshold and currently_above
+            if triggered:
+                desc = f"Crossed above {threshold:.4f} (now {current_value:.4f})"
+            else:
+                state = "above" if alert.was_above_threshold else "below"
+                desc = f"No cross: was {state} threshold, now {'above' if currently_above else 'below'} ({current_value:.4f})"
             return triggered, desc
 
         elif condition == "crosses_below":
-            # Was above, now below
-            if last_value is None:
-                return False, "No previous value for cross detection"
-            triggered = last_value >= threshold and current_value < threshold
-            desc = f"Crossed below {threshold:.4f} (was {last_value:.4f}, now {current_value:.4f})"
+            # Use was_above_threshold for reliable cross detection
+            currently_below = current_value < threshold
+
+            if alert.was_above_threshold is None:
+                # First check - establish baseline, don't trigger
+                desc = f"Baseline established: {'above' if current_value > threshold else 'below'} {threshold:.4f}"
+                return False, desc
+
+            # Trigger if we were above (was_above_threshold=True) and now below
+            triggered = alert.was_above_threshold and currently_below
+            if triggered:
+                desc = f"Crossed below {threshold:.4f} (now {current_value:.4f})"
+            else:
+                state = "above" if alert.was_above_threshold else "below"
+                desc = f"No cross: was {state} threshold, now {'below' if currently_below else 'above'} ({current_value:.4f})"
             return triggered, desc
 
         elif condition == "percent_up":

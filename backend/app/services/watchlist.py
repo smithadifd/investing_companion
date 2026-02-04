@@ -247,6 +247,8 @@ class WatchlistService:
             item.target_price = data.target_price
         if data.thesis is not None:
             item.thesis = data.thesis
+        if data.track_calendar is not None:
+            item.track_calendar = data.track_calendar
 
         await self.db.commit()
         await self.db.refresh(item)
@@ -260,6 +262,7 @@ class WatchlistService:
             notes=item.notes,
             target_price=item.target_price,
             thesis=item.thesis,
+            track_calendar=item.track_calendar,
             added_at=item.added_at,
             equity=WatchlistItemEquity.model_validate(item.equity),
             quote=quote,

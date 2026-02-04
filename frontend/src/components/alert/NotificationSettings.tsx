@@ -173,7 +173,7 @@ export function NotificationSettings() {
         <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-2">
           <li className="flex items-start gap-2">
             <span className="text-blue-500 mt-0.5">•</span>
-            Use "crosses above/below" for breakout alerts to avoid repeated triggers
+            Use &quot;crosses above/below&quot; for breakout alerts to avoid repeated triggers
           </li>
           <li className="flex items-start gap-2">
             <span className="text-blue-500 mt-0.5">•</span>

@@ -130,7 +130,7 @@ ssh admin@your-nas-ip
 
 3. **Navigate to docker folder**:
 ```bash
-cd /volume1/docker/investing_companion
+cd /volume3/docker/investing_companion
 ```
 
 4. **Deploy**:
@@ -297,8 +297,8 @@ docker compose -f docker-compose.prod.yml logs --tail 100 api
 3. Schedule: Daily at 2:00 AM
 4. Script:
 ```bash
-cd /volume1/docker/investing_companion
-./scripts/backup.sh /volume1/backups/investing
+cd /volume3/docker/investing_companion
+./scripts/backup.sh /volume3/backups/investing
 ```
 
 **Restore from Backup:**
@@ -308,25 +308,47 @@ cd /volume1/docker/investing_companion
 
 ### Updates
 
-1. **Stop services:**
+#### One-Command Deploy (Recommended)
+
+From your Mac, run:
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.production down
+./scripts/deploy-synology.sh
 ```
 
-2. **Pull latest code:**
+This script:
+1. Runs local build tests (TypeScript, ESLint, Docker build)
+2. Pushes to GitHub
+3. Pulls on Synology via SSH
+4. Rebuilds and restarts containers
+
+#### Manual Deploy
+
+1. **Test build locally first:**
 ```bash
-git pull origin main
+./scripts/test-build.sh
 ```
 
-3. **Rebuild and restart:**
+2. **Push to GitHub:**
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+git push origin main
 ```
 
-4. **Run migrations (if any):**
+3. **SSH to Synology and pull:**
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.production up migrate
+ssh synology "cd /volume3/docker/investing_companion && /usr/local/bin/git pull origin main"
 ```
+
+4. **Rebuild and restart:**
+```bash
+ssh synology "cd /volume3/docker/investing_companion && docker-compose -f docker-compose.local.yml up -d --build"
+```
+
+#### Pre-Deploy Checklist
+
+Before deploying, ensure:
+- [ ] `./scripts/test-build.sh` passes
+- [ ] No uncommitted changes (or commit them first)
+- [ ] Database migrations are backwards-compatible
 
 ### Database Migrations
 

@@ -11,6 +11,9 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 SYNOLOGY_HOST="synology"
 DEPLOY_PATH="/volume3/docker/investing_companion"
 GIT_PATH="/usr/local/bin/git"
+DOCKER_COMPOSE="/usr/local/bin/docker-compose"
+COMPOSE_FILE="docker-compose.local.yml"
+ENV_FILE=".env.production"
 
 cd "$PROJECT_ROOT"
 
@@ -51,12 +54,12 @@ echo ""
 
 # 4. Rebuild and restart containers
 echo "Step 4/4: Rebuilding containers..."
-ssh "$SYNOLOGY_HOST" "cd $DEPLOY_PATH && docker-compose -f docker-compose.local.yml up -d --build"
+ssh "$SYNOLOGY_HOST" "export PATH=/usr/local/bin:\$PATH && cd $DEPLOY_PATH && $DOCKER_COMPOSE -f $COMPOSE_FILE --env-file $ENV_FILE up -d --build"
 echo ""
 
 # Show status
 echo "=== Container Status ==="
-ssh "$SYNOLOGY_HOST" "cd $DEPLOY_PATH && docker-compose -f docker-compose.local.yml ps"
+ssh "$SYNOLOGY_HOST" "export PATH=/usr/local/bin:\$PATH && cd $DEPLOY_PATH && $DOCKER_COMPOSE -f $COMPOSE_FILE --env-file $ENV_FILE ps"
 echo ""
 
 echo "========================================="
@@ -66,4 +69,4 @@ echo ""
 echo "→ Frontend: http://192.168.50.88:3000"
 echo "→ Backend:  http://192.168.50.88:8000"
 echo ""
-echo "Check logs with: ssh synology 'cd $DEPLOY_PATH && docker-compose -f docker-compose.local.yml logs -f'"
+echo "Check logs with: ssh synology 'export PATH=/usr/local/bin:\$PATH && cd $DEPLOY_PATH && $DOCKER_COMPOSE -f $COMPOSE_FILE --env-file $ENV_FILE logs -f'"

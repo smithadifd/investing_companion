@@ -258,8 +258,10 @@ class AlertService:
 
         Returns AlertCheckResult with trigger status and details.
         """
-        # Get current value
-        current_value, target_info = await self._get_current_value(alert)
+        # Get current value (plus intraday high/low for crossing detection)
+        current_value, target_info, intraday_high, intraday_low = (
+            await self._get_current_value(alert)
+        )
 
         if current_value is None:
             return AlertCheckResult(
@@ -271,9 +273,9 @@ class AlertService:
                 should_notify=False,
             )
 
-        # Evaluate condition
+        # Evaluate condition (pass intraday extremes for crossing detection)
         is_triggered, condition_desc = self._evaluate_condition(
-            alert, current_value
+            alert, current_value, intraday_high=intraday_high, intraday_low=intraday_low
         )
 
         # Check cooldown
@@ -297,9 +299,12 @@ class AlertService:
             result = await self.check_alert(alert)
 
             # Always update was_above_threshold for cross detection alerts
+            # Use >= so that price exactly at threshold counts as "above"
+            # (avoids a gap where price == threshold sets was_above to False,
+            # causing a subsequent drop below threshold to be missed)
             if alert.condition_type in ("crosses_above", "crosses_below"):
                 threshold = Decimal(str(alert.threshold_value))
-                alert.was_above_threshold = result.current_value > threshold
+                alert.was_above_threshold = result.current_value >= threshold
 
             if not result.is_triggered:
                 # Update last checked value
@@ -436,14 +441,24 @@ class AlertService:
 
     async def _get_current_value(
         self, alert: Alert
-    ) -> Tuple[Optional[Decimal], Optional[AlertTargetInfo]]:
-        """Get current price/ratio value for alert evaluation."""
+    ) -> Tuple[Optional[Decimal], Optional[AlertTargetInfo], Optional[Decimal], Optional[Decimal]]:
+        """Get current price/ratio value for alert evaluation.
+
+        Returns (current_value, target_info, intraday_high, intraday_low).
+        High/low are used by crossing alerts to detect threshold breaches
+        that may occur between polling intervals.
+        """
         target_info = await self._get_target_info(alert)
 
         if alert.equity_id and target_info:
             quote = await self.yahoo.get_quote(target_info.symbol)
             if quote:
-                return Decimal(str(quote.price)), target_info
+                return (
+                    Decimal(str(quote.price)),
+                    target_info,
+                    Decimal(str(quote.high)) if quote.high else None,
+                    Decimal(str(quote.low)) if quote.low else None,
+                )
 
         elif alert.ratio_id and target_info:
             # Parse ratio symbols from target
@@ -460,14 +475,23 @@ class AlertService:
                     ratio_value = Decimal(str(num_quote.price)) / Decimal(
                         str(den_quote.price)
                     )
-                    return ratio_value, target_info
+                    # No meaningful high/low for ratios
+                    return ratio_value, target_info, None, None
 
-        return None, target_info
+        return None, target_info, None, None
 
     def _evaluate_condition(
-        self, alert: Alert, current_value: Decimal
+        self,
+        alert: Alert,
+        current_value: Decimal,
+        intraday_high: Optional[Decimal] = None,
+        intraday_low: Optional[Decimal] = None,
     ) -> Tuple[bool, str]:
         """Evaluate if alert condition is met.
+
+        For crossing/threshold alerts, intraday high/low are used to detect
+        breaches that may occur between polling intervals (e.g., a dip below
+        threshold that recovers before the next poll).
 
         Returns (is_triggered, description)
         """
@@ -480,18 +504,31 @@ class AlertService:
         )
 
         if condition == "above":
-            triggered = current_value > threshold
-            desc = f"{current_value:.4f} > {threshold:.4f}"
+            # Also trigger if intraday high breached threshold
+            effective_high = intraday_high if intraday_high is not None else current_value
+            triggered = current_value > threshold or effective_high > threshold
+            if triggered and current_value <= threshold:
+                desc = f"Intraday high {effective_high:.4f} > {threshold:.4f} (current: {current_value:.4f})"
+            else:
+                desc = f"{current_value:.4f} > {threshold:.4f}"
             return triggered, desc
 
         elif condition == "below":
-            triggered = current_value < threshold
-            desc = f"{current_value:.4f} < {threshold:.4f}"
+            # Also trigger if intraday low breached threshold
+            effective_low = intraday_low if intraday_low is not None else current_value
+            triggered = current_value < threshold or effective_low < threshold
+            if triggered and current_value >= threshold:
+                desc = f"Intraday low {effective_low:.4f} < {threshold:.4f} (current: {current_value:.4f})"
+            else:
+                desc = f"{current_value:.4f} < {threshold:.4f}"
             return triggered, desc
 
         elif condition == "crosses_above":
             # Use was_above_threshold for reliable cross detection
+            # Also check intraday high in case price crossed above and came back
+            effective_high = intraday_high if intraday_high is not None else current_value
             currently_above = current_value > threshold
+            intraday_crossed_above = effective_high > threshold
 
             if alert.was_above_threshold is None:
                 # First check - establish baseline, don't trigger
@@ -499,10 +536,13 @@ class AlertService:
                 desc = f"Baseline established: {'above' if currently_above else 'below'} {threshold:.4f}"
                 return False, desc
 
-            # Trigger if we were below (was_above_threshold=False) and now above
-            triggered = not alert.was_above_threshold and currently_above
+            # Trigger if we were below and now above, OR if intraday high crossed above
+            triggered = not alert.was_above_threshold and (currently_above or intraday_crossed_above)
             if triggered:
-                desc = f"Crossed above {threshold:.4f} (now {current_value:.4f})"
+                if not currently_above and intraday_crossed_above:
+                    desc = f"Intraday high {effective_high:.4f} crossed above {threshold:.4f} (current: {current_value:.4f})"
+                else:
+                    desc = f"Crossed above {threshold:.4f} (now {current_value:.4f})"
             else:
                 state = "above" if alert.was_above_threshold else "below"
                 desc = f"No cross: was {state} threshold, now {'above' if currently_above else 'below'} ({current_value:.4f})"
@@ -510,17 +550,23 @@ class AlertService:
 
         elif condition == "crosses_below":
             # Use was_above_threshold for reliable cross detection
+            # Also check intraday low in case price crossed below and recovered
+            effective_low = intraday_low if intraday_low is not None else current_value
             currently_below = current_value < threshold
+            intraday_crossed_below = effective_low < threshold
 
             if alert.was_above_threshold is None:
                 # First check - establish baseline, don't trigger
-                desc = f"Baseline established: {'above' if current_value > threshold else 'below'} {threshold:.4f}"
+                desc = f"Baseline established: {'above' if current_value >= threshold else 'below'} {threshold:.4f}"
                 return False, desc
 
-            # Trigger if we were above (was_above_threshold=True) and now below
-            triggered = alert.was_above_threshold and currently_below
+            # Trigger if we were above and now below, OR if intraday low crossed below
+            triggered = alert.was_above_threshold and (currently_below or intraday_crossed_below)
             if triggered:
-                desc = f"Crossed below {threshold:.4f} (now {current_value:.4f})"
+                if not currently_below and intraday_crossed_below:
+                    desc = f"Intraday low {effective_low:.4f} crossed below {threshold:.4f} (current: {current_value:.4f})"
+                else:
+                    desc = f"Crossed below {threshold:.4f} (now {current_value:.4f})"
             else:
                 state = "above" if alert.was_above_threshold else "below"
                 desc = f"No cross: was {state} threshold, now {'below' if currently_below else 'above'} ({current_value:.4f})"

@@ -177,27 +177,29 @@ function AlertCard({
           </div>
         </div>
 
-        {/* Condition with current price */}
-        <div className="flex items-center gap-2 mb-3 flex-wrap">
-          <ConditionIcon type={alert.condition_type} />
-          <span className="text-sm text-neutral-600 dark:text-neutral-400">
-            {CONDITION_LABELS[alert.condition_type] || alert.condition_type}
-          </span>
-          <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
-            {thresholdDisplay}
-          </span>
-          {alert.comparison_period && (
-            <span className="text-xs text-neutral-500">
-              ({alert.comparison_period})
+        {/* Condition and current price */}
+        <div className="flex items-center gap-3 mb-3">
+          <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
+            <ConditionIcon type={alert.condition_type} />
+            <span className="text-sm text-neutral-600 dark:text-neutral-400">
+              {CONDITION_LABELS[alert.condition_type] || alert.condition_type}
             </span>
-          )}
-          {currentPrice && (
-            <>
-              <span className="text-neutral-300 dark:text-neutral-600">|</span>
-              <span className="text-sm text-neutral-500">
-                Current: <span className="font-medium text-neutral-700 dark:text-neutral-300">{currentPrice}</span>
+            <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+              {thresholdDisplay}
+            </span>
+            {alert.comparison_period && (
+              <span className="text-xs text-neutral-500">
+                ({alert.comparison_period})
               </span>
-            </>
+            )}
+          </div>
+          {currentPrice && (
+            <div className="text-right shrink-0">
+              <p className="text-xs text-neutral-500">Current</p>
+              <p className="text-sm font-bold text-neutral-900 dark:text-neutral-50">
+                {currentPrice}
+              </p>
+            </div>
           )}
         </div>
 

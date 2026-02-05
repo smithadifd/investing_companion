@@ -21,6 +21,9 @@ def run_async(coro):
     try:
         return loop.run_until_complete(coro)
     finally:
+        # Close the Discord httpx client before the loop is destroyed,
+        # otherwise it tries to close its socket on a dead loop next time.
+        loop.run_until_complete(discord_service.close())
         # Dispose the engine to close all pooled connections.
         # Without this, asyncpg connections are orphaned when the
         # event loop is destroyed, causing "idle in transaction" leaks.
@@ -93,96 +96,25 @@ def check_single_alert(alert_id: int):
         raise
 
 
-@celery_app.task(name="alerts.send_daily_summary")
-def send_daily_summary():
+@celery_app.task(name="alerts.send_end_of_day_summary")
+def send_end_of_day_summary(threshold_percent: float = 5.0):
     """
-    Send daily summary of alert activity to Discord.
+    Send combined end-of-day summary to Discord: movers + alert activity.
 
-    Scheduled to run once per day.
+    Scheduled to run once per day after market close (4:30 PM ET).
     """
-    logger.info("Sending daily alert summary")
+    logger.info("Sending end-of-day summary")
 
     async def _send():
         from sqlalchemy import func, select
-        from datetime import timedelta
         from app.db.models.alert import Alert, AlertHistory
-
-        async with AsyncSessionLocal() as session:
-            now = datetime.now(timezone.utc)
-            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-            # Get stats
-            active_count = await session.scalar(
-                select(func.count(Alert.id)).where(Alert.is_active == True)
-            )
-            triggered_today = await session.scalar(
-                select(func.count(AlertHistory.id)).where(
-                    AlertHistory.triggered_at >= today_start
-                )
-            )
-
-            # Get top triggered alerts
-            top_triggered_stmt = (
-                select(
-                    Alert.name,
-                    Alert.equity_id,
-                    Alert.ratio_id,
-                    func.count(AlertHistory.id).label("count"),
-                )
-                .join(AlertHistory)
-                .where(AlertHistory.triggered_at >= today_start)
-                .group_by(Alert.id)
-                .order_by(func.count(AlertHistory.id).desc())
-                .limit(5)
-            )
-            top_result = await session.execute(top_triggered_stmt)
-            top_triggers = [
-                {
-                    "name": r[0],
-                    "symbol": "N/A",  # Would need to join for full info
-                    "count": r[3],
-                }
-                for r in top_result.all()
-            ]
-
-            success, error = await discord_service.send_daily_summary(
-                alerts_triggered=triggered_today or 0,
-                active_alerts=active_count or 0,
-                top_triggers=top_triggers,
-            )
-
-            return {"success": success, "error": error}
-
-    try:
-        result = run_async(_send())
-        logger.info(f"Daily summary result: {result}")
-        return result
-    except Exception as e:
-        logger.error(f"Error sending daily summary: {e}", exc_info=True)
-        raise
-
-
-@celery_app.task(name="alerts.send_daily_movers_summary")
-def send_daily_movers_summary(threshold_percent: float = 5.0):
-    """
-    Send daily summary of watchlist equities that moved more than threshold%.
-
-    Args:
-        threshold_percent: Minimum absolute percent change to include (default 5%)
-
-    Scheduled to run once per day after market close.
-    """
-    logger.info(f"Sending daily movers summary (threshold: {threshold_percent}%)")
-
-    async def _send():
         from app.services.watchlist import WatchlistService
 
         async with AsyncSessionLocal() as session:
-            service = WatchlistService(session)
-            # Use the get_all_movers method we created for Issue 008
-            movers = await service.get_all_movers(limit=10)
+            # --- Movers data ---
+            watchlist_service = WatchlistService(session)
+            movers = await watchlist_service.get_all_movers(limit=10)
 
-            # Convert Pydantic models to dicts for Discord service
             gainers = [
                 {
                     "symbol": g.symbol,
@@ -204,12 +136,46 @@ def send_daily_movers_summary(threshold_percent: float = 5.0):
                 for l in movers.losers
             ]
 
-            success, error = await discord_service.send_movers_summary(
+            # --- Alert activity data ---
+            now = datetime.now(timezone.utc)
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+            active_count = await session.scalar(
+                select(func.count(Alert.id)).where(Alert.is_active == True)
+            )
+            triggered_today = await session.scalar(
+                select(func.count(AlertHistory.id)).where(
+                    AlertHistory.triggered_at >= today_start
+                )
+            )
+
+            top_triggered_stmt = (
+                select(
+                    Alert.name,
+                    func.count(AlertHistory.id).label("count"),
+                )
+                .join(AlertHistory)
+                .where(AlertHistory.triggered_at >= today_start)
+                .group_by(Alert.id)
+                .order_by(func.count(AlertHistory.id).desc())
+                .limit(5)
+            )
+            top_result = await session.execute(top_triggered_stmt)
+            top_triggers = [
+                {"name": r[0], "count": r[1]}
+                for r in top_result.all()
+            ]
+
+            # --- Send combined message ---
+            success, error = await discord_service.send_end_of_day_summary(
                 gainers=gainers,
                 losers=losers,
                 threshold_percent=threshold_percent,
                 total_items=movers.total_items,
                 watchlist_count=movers.watchlist_count,
+                alerts_triggered=triggered_today or 0,
+                active_alerts=active_count or 0,
+                top_triggers=top_triggers,
             )
 
             return {
@@ -217,15 +183,15 @@ def send_daily_movers_summary(threshold_percent: float = 5.0):
                 "error": error,
                 "gainers_count": len(gainers),
                 "losers_count": len(losers),
-                "total_items": movers.total_items,
+                "alerts_triggered": triggered_today or 0,
             }
 
     try:
         result = run_async(_send())
-        logger.info(f"Daily movers summary result: {result}")
+        logger.info(f"End-of-day summary result: {result}")
         return result
     except Exception as e:
-        logger.error(f"Error sending daily movers summary: {e}", exc_info=True)
+        logger.error(f"Error sending end-of-day summary: {e}", exc_info=True)
         raise
 
 
@@ -295,17 +261,8 @@ ALERT_BEAT_SCHEDULE = {
         "task": "alerts.check_all_alerts",
         "schedule": 300.0,  # 5 minutes
     },
-    "send-daily-summary": {
-        "task": "alerts.send_daily_summary",
-        "schedule": {
-            "crontab": {
-                "hour": 18,  # 6 PM UTC
-                "minute": 0,
-            }
-        },
-    },
-    "send-daily-movers-summary": {
-        "task": "alerts.send_daily_movers_summary",
+    "send-end-of-day-summary": {
+        "task": "alerts.send_end_of_day_summary",
         "schedule": {
             "crontab": {
                 "hour": 21,  # 9:30 PM UTC = 4:30 PM ET (after market close)

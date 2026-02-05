@@ -479,18 +479,18 @@ class DiscordNotificationService:
             logger.error(error, exc_info=True)
             return False, error
 
-    async def send_daily_summary(
+    async def send_end_of_day_summary(
         self,
+        gainers: list[dict],
+        losers: list[dict],
+        threshold_percent: float,
+        total_items: int,
+        watchlist_count: int,
         alerts_triggered: int,
         active_alerts: int,
         top_triggers: list[dict],
     ) -> tuple[bool, Optional[str]]:
-        """Send a daily summary of alert activity.
-
-        Args:
-            alerts_triggered: Number of alerts triggered today
-            active_alerts: Total number of active alerts
-            top_triggers: List of most triggered alerts with details
+        """Send combined end-of-day summary: movers + alert activity.
 
         Returns:
             Tuple of (success, error_message)
@@ -500,33 +500,71 @@ class DiscordNotificationService:
             return False, "Discord webhook URL not configured"
 
         try:
-            # Build summary fields
-            fields = [
-                {
-                    "name": "Alerts Triggered Today",
-                    "value": str(alerts_triggered),
-                    "inline": True,
-                },
-                {
-                    "name": "Active Alerts",
-                    "value": str(active_alerts),
-                    "inline": True,
-                },
-            ]
+            today = datetime.utcnow().strftime("%b %d, %Y")
+            fields = []
 
-            if top_triggers:
-                triggers_text = "\n".join(
-                    f"• **{t['name']}** ({t['symbol']}): {t['count']} times"
-                    for t in top_triggers[:5]
+            # --- Movers section ---
+            big_gainers = [g for g in gainers if float(g.get("change_percent", 0)) >= threshold_percent]
+            big_losers = [l for l in losers if float(l.get("change_percent", 0)) <= -threshold_percent]
+
+            if big_gainers:
+                gainers_text = "\n".join(
+                    f"• **{g['symbol']}** {self._format_percent(g['change_percent'])} ({self._format_price(g['price'])})"
+                    for g in big_gainers[:5]
                 )
                 fields.append({
-                    "name": "Top Triggered",
-                    "value": triggers_text,
+                    "name": f"Big Gainers (>{threshold_percent}%)",
+                    "value": gainers_text,
                     "inline": False,
                 })
 
+            if big_losers:
+                losers_text = "\n".join(
+                    f"• **{l['symbol']}** {self._format_percent(l['change_percent'])} ({self._format_price(l['price'])})"
+                    for l in big_losers[:5]
+                )
+                fields.append({
+                    "name": f"Big Losers (<-{threshold_percent}%)",
+                    "value": losers_text,
+                    "inline": False,
+                })
+
+            if not big_gainers and not big_losers:
+                fields.append({
+                    "name": "Movers",
+                    "value": f"No equities moved more than {threshold_percent}% today",
+                    "inline": False,
+                })
+
+            # Top gainers/losers regardless of threshold
+            top_movers_parts = []
+            if gainers:
+                g = gainers[0]
+                top_movers_parts.append(f"Top gainer: **{g['symbol']}** {self._format_percent(g['change_percent'])}")
+            if losers:
+                l = losers[0]
+                top_movers_parts.append(f"Top loser: **{l['symbol']}** {self._format_percent(l['change_percent'])}")
+            if top_movers_parts:
+                fields.append({
+                    "name": f"Watchlist Overview ({total_items} equities)",
+                    "value": "\n".join(top_movers_parts),
+                    "inline": False,
+                })
+
+            # --- Alerts section ---
+            alert_parts = [f"**{alerts_triggered}** triggered today | **{active_alerts}** active"]
+            if top_triggers:
+                for t in top_triggers[:3]:
+                    alert_parts.append(f"• {t['name']}: {t['count']}x")
+
+            fields.append({
+                "name": "Alerts",
+                "value": "\n".join(alert_parts),
+                "inline": False,
+            })
+
             embed = {
-                "title": "📊 Daily Alert Summary",
+                "title": f"End of Day Summary - {today}",
                 "color": 0x5865F2,
                 "fields": fields,
                 "timestamp": datetime.utcnow().isoformat(),
@@ -541,12 +579,13 @@ class DiscordNotificationService:
             response = await client.post(webhook_url, json=payload)
 
             if response.status_code == 204:
+                logger.info("Discord end-of-day summary sent")
                 return True, None
             else:
                 return False, f"Discord API returned status {response.status_code}"
 
         except Exception as e:
-            error = f"Failed to send daily summary: {str(e)}"
+            error = f"Failed to send end-of-day summary: {str(e)}"
             logger.error(error, exc_info=True)
             return False, error
 

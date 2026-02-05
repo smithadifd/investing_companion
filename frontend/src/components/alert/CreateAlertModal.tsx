@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { X, Search, Loader2 } from 'lucide-react';
 import { useCreateAlert } from '@/lib/hooks/useAlert';
 import { useRatios } from '@/lib/hooks/useRatio';
@@ -29,6 +29,38 @@ const PERIOD_OPTIONS = [
   { value: '1m', label: '1 Month' },
 ];
 
+// Short labels for auto-generated alert names
+const CONDITION_NAME_LABELS: Record<AlertConditionType, string> = {
+  above: 'Above',
+  below: 'Below',
+  crosses_above: 'Crosses Above',
+  crosses_below: 'Crosses Below',
+  percent_up: '% Up',
+  percent_down: '% Down',
+};
+
+/**
+ * Generate a descriptive alert name from the current form state.
+ * Examples: "CCJ Below $118", "GLD/SLV Crosses Above 80", "AAPL % Up 5%"
+ */
+function generateAlertName(
+  symbol: string,
+  conditionType: AlertConditionType,
+  thresholdValue: string,
+): string {
+  if (!symbol) return '';
+  const label = CONDITION_NAME_LABELS[conditionType];
+  const isPercent = conditionType === 'percent_up' || conditionType === 'percent_down';
+
+  if (!thresholdValue) return `${symbol} ${label}`;
+
+  const formattedThreshold = isPercent
+    ? `${thresholdValue}%`
+    : `$${thresholdValue}`;
+
+  return `${symbol} ${label} ${formattedThreshold}`;
+}
+
 export function CreateAlertModal({
   isOpen,
   onClose,
@@ -39,9 +71,11 @@ export function CreateAlertModal({
     prefillRatioId ? 'ratio' : 'equity'
   );
   const [name, setName] = useState('');
+  const [nameManuallyEdited, setNameManuallyEdited] = useState(false);
   const [notes, setNotes] = useState('');
   const [equitySymbol, setEquitySymbol] = useState(prefillSymbol || '');
   const [ratioId, setRatioId] = useState<number | undefined>(prefillRatioId);
+  const [ratioSymbol, setRatioSymbol] = useState('');
   const [conditionType, setConditionType] = useState<AlertConditionType>('above');
   const [thresholdValue, setThresholdValue] = useState('');
   const [comparisonPeriod, setComparisonPeriod] = useState('1d');
@@ -58,6 +92,19 @@ export function CreateAlertModal({
   const createAlert = useCreateAlert();
 
   const isPercentCondition = conditionType === 'percent_up' || conditionType === 'percent_down';
+
+  // Auto-update name when symbol, condition, or threshold changes
+  const updateAutoName = useCallback(
+    (symbol: string, condition: AlertConditionType, threshold: string) => {
+      if (!nameManuallyEdited) {
+        setName(generateAlertName(symbol, condition, threshold));
+      }
+    },
+    [nameManuallyEdited]
+  );
+
+  // Get the current display symbol for auto-naming
+  const currentSymbol = targetType === 'equity' ? equitySymbol.toUpperCase() : ratioSymbol;
 
   const handleSearch = async (query: string) => {
     setSearchQuery(query);
@@ -85,16 +132,14 @@ export function CreateAlertModal({
     setEquitySymbol(equity.symbol);
     setSearchQuery(equity.symbol);
     setShowResults(false);
-    if (!name) {
-      setName(`${equity.symbol} Alert`);
-    }
+    updateAutoName(equity.symbol, conditionType, thresholdValue);
   };
 
   const handleSelectRatio = (ratio: Ratio) => {
     setRatioId(ratio.id);
-    if (!name) {
-      setName(`${ratio.name} Alert`);
-    }
+    const symbol = `${ratio.numerator_symbol}/${ratio.denominator_symbol}`;
+    setRatioSymbol(symbol);
+    updateAutoName(symbol, conditionType, thresholdValue);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -126,9 +171,11 @@ export function CreateAlertModal({
 
   const handleClose = () => {
     setName('');
+    setNameManuallyEdited(false);
     setNotes('');
     setEquitySymbol(prefillSymbol || '');
     setRatioId(prefillRatioId);
+    setRatioSymbol('');
     setConditionType('above');
     setThresholdValue('');
     setComparisonPeriod('1d');
@@ -241,9 +288,9 @@ export function CreateAlertModal({
                 value={ratioId || ''}
                 onChange={(e) => {
                   const id = parseInt(e.target.value);
-                  setRatioId(id);
                   const ratio = ratios?.find((r) => r.id === id);
                   if (ratio) handleSelectRatio(ratio);
+                  else setRatioId(id);
                 }}
                 className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 required
@@ -258,21 +305,6 @@ export function CreateAlertModal({
             </div>
           )}
 
-          {/* Alert Name */}
-          <div>
-            <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
-              Alert Name
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g., AAPL above $200"
-              className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              required
-            />
-          </div>
-
           {/* Condition Type */}
           <div>
             <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
@@ -280,7 +312,11 @@ export function CreateAlertModal({
             </label>
             <select
               value={conditionType}
-              onChange={(e) => setConditionType(e.target.value as AlertConditionType)}
+              onChange={(e) => {
+                const newCondition = e.target.value as AlertConditionType;
+                setConditionType(newCondition);
+                updateAutoName(currentSymbol, newCondition, thresholdValue);
+              }}
               className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               {CONDITION_OPTIONS.map((option) => (
@@ -303,11 +339,37 @@ export function CreateAlertModal({
               type="number"
               step="any"
               value={thresholdValue}
-              onChange={(e) => setThresholdValue(e.target.value)}
+              onChange={(e) => {
+                setThresholdValue(e.target.value);
+                updateAutoName(currentSymbol, conditionType, e.target.value);
+              }}
               placeholder={isPercentCondition ? 'e.g., 5' : 'e.g., 200.00'}
               className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               required
             />
+          </div>
+
+          {/* Alert Name */}
+          <div>
+            <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+              Alert Name
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value);
+                setNameManuallyEdited(true);
+              }}
+              placeholder="Auto-generated from symbol & condition"
+              className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              required
+            />
+            {!nameManuallyEdited && name && (
+              <p className="text-xs text-neutral-400 mt-1">
+                Auto-generated — edit to customize
+              </p>
+            )}
           </div>
 
           {/* Comparison Period (for percent conditions) */}

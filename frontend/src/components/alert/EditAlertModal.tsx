@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { X, Loader2 } from 'lucide-react';
+import { X, Loader2, RefreshCw } from 'lucide-react';
 import { useUpdateAlert } from '@/lib/hooks/useAlert';
 import type { Alert, AlertConditionType, AlertUpdate } from '@/lib/api/types';
 
@@ -24,6 +24,29 @@ const PERIOD_OPTIONS = [
   { value: '1w', label: '1 Week' },
   { value: '1m', label: '1 Month' },
 ];
+
+// Short labels for auto-generated alert names
+const CONDITION_NAME_LABELS: Record<AlertConditionType, string> = {
+  above: 'Above',
+  below: 'Below',
+  crosses_above: 'Crosses Above',
+  crosses_below: 'Crosses Below',
+  percent_up: '% Up',
+  percent_down: '% Down',
+};
+
+function generateAlertName(
+  symbol: string,
+  conditionType: AlertConditionType,
+  thresholdValue: string,
+): string {
+  if (!symbol) return '';
+  const label = CONDITION_NAME_LABELS[conditionType];
+  const isPercent = conditionType === 'percent_up' || conditionType === 'percent_down';
+  if (!thresholdValue) return `${symbol} ${label}`;
+  const formattedThreshold = isPercent ? `${thresholdValue}%` : `$${thresholdValue}`;
+  return `${symbol} ${label} ${formattedThreshold}`;
+}
 
 export function EditAlertModal({ alert, onClose }: EditAlertModalProps) {
   const [name, setName] = useState(alert.name);
@@ -105,14 +128,27 @@ export function EditAlertModal({ alert, onClose }: EditAlertModalProps) {
             <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
               Alert Name
             </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g., AAPL above $200"
-              className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              required
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g., AAPL above $200"
+                className="flex-1 px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const symbol = alert.target?.symbol || '';
+                  setName(generateAlertName(symbol, conditionType, thresholdValue));
+                }}
+                className="px-3 py-2 text-neutral-500 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-neutral-300 dark:border-neutral-600 rounded-lg transition-colors"
+                title="Regenerate name from condition"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </button>
+            </div>
           </div>
 
           {/* Condition Type */}

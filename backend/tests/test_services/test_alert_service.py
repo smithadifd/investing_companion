@@ -469,4 +469,4 @@ class TestProcessAlert:
         was_triggered, error = await service.process_alert(alert)
         assert was_triggered is False
         assert error is None
-        mock_discord.send_alert_notification.assert_not_awaited()
+        mock_discord.send_alert_notification.assert_not_called()

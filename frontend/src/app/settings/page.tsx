@@ -47,6 +47,10 @@ export default function SettingsPage() {
   const [polygonKey, setPolygonKey] = useState('');
   const [discordWebhook, setDiscordWebhook] = useState('');
 
+  // Notification schedule state
+  const [morningTime, setMorningTime] = useState('');
+  const [eodTime, setEodTime] = useState('');
+
   // Password change state
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -289,7 +293,7 @@ export default function SettingsPage() {
                     Notifications
                   </h2>
                   <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                    Configure notification settings for alerts.
+                    Configure Discord webhook and notification schedule.
                   </p>
                 </div>
 
@@ -330,8 +334,72 @@ export default function SettingsPage() {
                   ) : (
                     <Check className="h-4 w-4" />
                   )}
-                  Save Notification Settings
+                  Save Webhook
                 </button>
+
+                {/* Notification Schedule */}
+                <div className="space-y-4 pt-4 border-t border-neutral-200 dark:border-neutral-700">
+                  <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+                    Notification Schedule
+                  </h3>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                    Set when daily Discord summaries are sent. All times are Eastern (ET). Weekdays only.
+                  </p>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                        Morning Pulse
+                      </label>
+                      <input
+                        type="time"
+                        value={morningTime || appSettings?.morning_notification_time || '08:00'}
+                        onChange={(e) => setMorningTime(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100"
+                      />
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                        Futures, overnight moves, calendar, pre-market movers
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                        End of Day Wrap
+                      </label>
+                      <input
+                        type="time"
+                        value={eodTime || appSettings?.eod_notification_time || '16:30'}
+                        onChange={(e) => setEodTime(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100"
+                      />
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                        Market close, theme performance, positions, alerts
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={async () => {
+                      const updates: Record<string, string> = {};
+                      if (morningTime) updates.morning_notification_time = morningTime;
+                      if (eodTime) updates.eod_notification_time = eodTime;
+                      if (Object.keys(updates).length > 0) {
+                        await updateSettings.mutateAsync(updates);
+                        setMorningTime('');
+                        setEodTime('');
+                      }
+                    }}
+                    disabled={updateSettings.isPending || (!morningTime && !eodTime)}
+                    className="px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-400 text-white font-medium rounded-lg transition-colors flex items-center gap-2"
+                  >
+                    {updateSettings.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Check className="h-4 w-4" />
+                    )}
+                    Save Schedule
+                  </button>
+                </div>
               </div>
             )}
 

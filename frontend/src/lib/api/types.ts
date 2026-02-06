@@ -526,6 +526,8 @@ export interface AppSettings {
   discord_webhook_url: string | null;
   default_watchlist_id: number | null;
   theme: string;
+  morning_notification_time: string;
+  eod_notification_time: string;
 }
 
 export interface AppSettingsUpdate {
@@ -535,6 +537,8 @@ export interface AppSettingsUpdate {
   discord_webhook_url?: string;
   default_watchlist_id?: number;
   theme?: string;
+  morning_notification_time?: string;
+  eod_notification_time?: string;
 }
 
 // Trade types

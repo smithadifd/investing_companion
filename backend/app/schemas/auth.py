@@ -133,6 +133,8 @@ class AppSettings(BaseModel):
     discord_webhook_url: Optional[str] = None
     default_watchlist_id: Optional[int] = None
     theme: str = "dark"
+    morning_notification_time: str = "08:00"
+    eod_notification_time: str = "16:30"
 
 
 class AppSettingsUpdate(BaseModel):
@@ -144,6 +146,8 @@ class AppSettingsUpdate(BaseModel):
     discord_webhook_url: Optional[str] = None
     default_watchlist_id: Optional[int] = None
     theme: Optional[str] = None
+    morning_notification_time: Optional[str] = None
+    eod_notification_time: Optional[str] = None
 
 
 class RegistrationStatus(BaseModel):

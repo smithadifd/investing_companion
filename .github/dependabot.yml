@@ -15,8 +15,21 @@ updates:
     reviewers:
       - "smithadifd"
     open-pull-requests-limit: 5
+    ignore:
+      # Tailwind v4 requires full config migration (CSS-first)
+      - dependency-name: "tailwindcss"
+        versions: [">=4.0.0"]
+      # ESLint 9 requires flat config migration
+      - dependency-name: "eslint"
+        versions: [">=9.0.0"]
 
   - package-ecosystem: "docker"
     directory: "/docker"
     schedule:
       interval: "monthly"
+    ignore:
+      # Only bump to stable LTS versions manually
+      - dependency-name: "python"
+        versions: [">=3.13"]
+      - dependency-name: "node"
+        versions: [">=23"]

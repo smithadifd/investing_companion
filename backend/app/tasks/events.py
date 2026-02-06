@@ -1,5 +1,6 @@
 """Celery tasks for economic event updates."""
 
+import asyncio
 import logging
 
 from sqlalchemy import select

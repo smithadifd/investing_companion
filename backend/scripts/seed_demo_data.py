@@ -21,7 +21,7 @@ Usage:
 import argparse
 import asyncio
 from datetime import date, time
-from typing import List, Optional, Tuple
+from typing import List
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -269,7 +269,7 @@ async def seed_fomc_events(db: AsyncSession, year: int) -> int:
             event_date=event_date,
             event_time=time(14, 0),  # 2:00 PM ET
             all_day=False,
-            title=f"FOMC Rate Decision",
+            title="FOMC Rate Decision",
             description=f"{label} meeting. Rate decision and statement at 2:00 PM ET." +
                         (" Includes Summary of Economic Projections." if is_sep else ""),
             importance="high",

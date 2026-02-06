@@ -2,8 +2,7 @@
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
-from decimal import Decimal
+from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy import select
@@ -98,7 +97,7 @@ class RatioService:
             stmt = select(Ratio).where(
                 Ratio.numerator_symbol == ratio_data["numerator_symbol"],
                 Ratio.denominator_symbol == ratio_data["denominator_symbol"],
-                Ratio.is_system == True,
+                Ratio.is_system.is_(True),
             )
             result = await self.db.execute(stmt)
             existing = result.scalar_one_or_none()
@@ -124,7 +123,7 @@ class RatioService:
         stmt = select(Ratio)
 
         if favorites_only:
-            stmt = stmt.where(Ratio.is_favorite == True)
+            stmt = stmt.where(Ratio.is_favorite.is_(True))
 
         if category:
             stmt = stmt.where(Ratio.category == category)
@@ -193,7 +192,7 @@ class RatioService:
 
     async def delete_ratio(self, ratio_id: int) -> bool:
         """Delete a custom ratio (cannot delete system ratios)."""
-        stmt = select(Ratio).where(Ratio.id == ratio_id, Ratio.is_system == False)
+        stmt = select(Ratio).where(Ratio.id == ratio_id, Ratio.is_system.is_(False))
         result = await self.db.execute(stmt)
         ratio = result.scalar_one_or_none()
 

@@ -1,14 +1,13 @@
 """Economic event models for calendar and earnings tracking."""
 
 import uuid
-from datetime import date, datetime, time
+from datetime import date, time
 from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
     Boolean,
     Date,
-    DateTime,
     ForeignKey,
     Index,
     Numeric,

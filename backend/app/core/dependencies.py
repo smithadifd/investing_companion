@@ -1,6 +1,5 @@
 """FastAPI dependencies for authentication and authorization."""
 
-import uuid
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, status

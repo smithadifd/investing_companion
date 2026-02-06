@@ -3,7 +3,6 @@
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, time
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)

@@ -60,8 +60,6 @@ class RateLimiter:
 
         count = int(current)
         if count >= max_attempts:
-            # Get TTL for retry-after
-            ttl = await self.redis.ttl(key)
             return True, 0
 
         # Increment count

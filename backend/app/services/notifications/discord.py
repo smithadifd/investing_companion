@@ -349,7 +349,7 @@ class DiscordNotificationService:
 
         # Filter to only those above threshold
         big_gainers = [g for g in gainers if float(g.get("change_percent", 0)) >= threshold_percent]
-        big_losers = [l for l in losers if float(l.get("change_percent", 0)) <= -threshold_percent]
+        big_losers = [loser for loser in losers if float(loser.get("change_percent", 0)) <= -threshold_percent]
 
         # If no big movers, don't send notification
         total_movers = len(big_gainers) + len(big_losers)
@@ -376,8 +376,8 @@ class DiscordNotificationService:
             # Losers section
             if big_losers:
                 losers_text = "\n".join(
-                    f"• **{l['symbol']}** {self._format_percent(l['change_percent'])} ({self._format_price(l['price'])}) - {l.get('watchlist_name', 'Watchlist')}"
-                    for l in big_losers[:5]
+                    f"• **{loser['symbol']}** {self._format_percent(loser['change_percent'])} ({self._format_price(loser['price'])}) - {loser.get('watchlist_name', 'Watchlist')}"
+                    for loser in big_losers[:5]
                 )
                 fields.append({
                     "name": f"📉 Big Losers (<-{threshold_percent}%)",
@@ -544,7 +544,7 @@ class DiscordNotificationService:
 
             # --- Movers section ---
             big_gainers = [g for g in gainers if float(g.get("change_percent", 0)) >= threshold_percent]
-            big_losers = [l for l in losers if float(l.get("change_percent", 0)) <= -threshold_percent]
+            big_losers = [loser for loser in losers if float(loser.get("change_percent", 0)) <= -threshold_percent]
 
             if big_gainers:
                 gainers_text = "\n".join(
@@ -559,8 +559,8 @@ class DiscordNotificationService:
 
             if big_losers:
                 losers_text = "\n".join(
-                    f"• **{l['symbol']}** {self._format_percent(l['change_percent'])} ({self._format_price(l['price'])})"
-                    for l in big_losers[:5]
+                    f"• **{loser['symbol']}** {self._format_percent(loser['change_percent'])} ({self._format_price(loser['price'])})"
+                    for loser in big_losers[:5]
                 )
                 fields.append({
                     "name": f"Big Losers (<-{threshold_percent}%)",
@@ -581,8 +581,8 @@ class DiscordNotificationService:
                 g = gainers[0]
                 top_movers_parts.append(f"Top gainer: **{g['symbol']}** {self._format_percent(g['change_percent'])}")
             if losers:
-                l = losers[0]
-                top_movers_parts.append(f"Top loser: **{l['symbol']}** {self._format_percent(l['change_percent'])}")
+                top_loser = losers[0]
+                top_movers_parts.append(f"Top loser: **{top_loser['symbol']}** {self._format_percent(top_loser['change_percent'])}")
             if top_movers_parts:
                 fields.append({
                     "name": f"Watchlist Overview ({total_items} equities)",

@@ -1,6 +1,6 @@
 """Trade service - business logic for trade operations and P&L calculation."""
 
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional, Tuple
 from uuid import UUID

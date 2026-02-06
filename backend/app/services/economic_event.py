@@ -2,10 +2,10 @@
 
 import logging
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import List, Optional
 
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.economic_event import EconomicEvent, EventSource, EventType
@@ -14,12 +14,10 @@ from app.db.models.watchlist import Watchlist, WatchlistItem
 from app.schemas.economic_event import (
     CalendarDay,
     CalendarMonth,
-    EarningsInfo,
     EconomicEventCreate,
     EconomicEventResponse,
     EconomicEventUpdate,
     EquityBrief,
-    EquityCalendarInfo,
     EventFilters,
     EventImportance,
     EventStats,

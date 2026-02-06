@@ -214,8 +214,8 @@ async def create_fomc_events(db: AsyncSession, year: int) -> int:
             event_date=day2,
             event_time=time(14, 0),  # 2:00 PM ET
             all_day=False,
-            title=f"FOMC Rate Decision",
-            description=f"Federal Reserve FOMC meeting concludes. Interest rate decision and statement released at 2:00 PM ET.",
+            title="FOMC Rate Decision",
+            description="Federal Reserve FOMC meeting concludes. Interest rate decision and statement released at 2:00 PM ET.",
             importance="high",
             source=EventSource.SEED.value,
             is_confirmed=True,

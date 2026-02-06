@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.models.session import Session
 from app.db.models.user import User
-from app.schemas.auth import TokenResponse, UserCreate, UserResponse
+from app.schemas.auth import TokenResponse, UserCreate
 
 
 class AuthService:
@@ -183,7 +183,7 @@ class AuthService:
                 Session.refresh_token_hash == refresh_token_hash,
                 Session.revoked_at.is_(None),
                 Session.expires_at > datetime.now(timezone.utc),
-                User.is_active == True,
+                User.is_active.is_(True),
             )
         )
         result = await self.db.execute(stmt)

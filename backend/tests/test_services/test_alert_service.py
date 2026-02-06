@@ -2,13 +2,10 @@
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
-import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.alert import Alert
-from app.schemas.alert import AlertConditionType
 from app.schemas.equity import QuoteResponse
 from app.services.alert import AlertService
 from tests.factories import create_test_alert, create_test_equity

@@ -3,7 +3,6 @@
 import asyncio
 import logging
 from datetime import datetime
-from decimal import Decimal
 from typing import List, Optional, Tuple
 
 from app.schemas.market import (
@@ -13,7 +12,7 @@ from app.schemas.market import (
     MarketOverviewResponse,
     SectorPerformance,
 )
-from app.services.data_providers.yahoo import YahooFinanceProvider, _safe_decimal
+from app.services.data_providers.yahoo import YahooFinanceProvider
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,5 @@
 """AI analysis service using Claude API."""
 
-import asyncio
 import logging
 from datetime import datetime
 from decimal import Decimal

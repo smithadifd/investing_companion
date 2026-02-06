@@ -47,7 +47,7 @@ class AlertService:
         stmt = select(Alert)
 
         if active_only:
-            stmt = stmt.where(Alert.is_active == True)
+            stmt = stmt.where(Alert.is_active.is_(True))
 
         if equity_id:
             stmt = stmt.where(Alert.equity_id == equity_id)
@@ -227,7 +227,7 @@ class AlertService:
 
         # Total and active counts
         total_stmt = select(func.count(Alert.id))
-        active_stmt = select(func.count(Alert.id)).where(Alert.is_active == True)
+        active_stmt = select(func.count(Alert.id)).where(Alert.is_active.is_(True))
 
         # Triggered counts
         today_stmt = select(func.count(AlertHistory.id)).where(
@@ -367,7 +367,7 @@ class AlertService:
 
         Returns summary of results.
         """
-        stmt = select(Alert).where(Alert.is_active == True)
+        stmt = select(Alert).where(Alert.is_active.is_(True))
         result = await self.db.execute(stmt)
         alerts = result.scalars().all()
 

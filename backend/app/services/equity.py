@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.models.equity import Equity
-from app.db.models.fundamentals import EquityFundamentals
 from app.schemas.equity import (
     EquityDetailResponse,
     EquitySearchResult,
@@ -249,7 +248,7 @@ class EquityService:
                 .where(
                     Equity.sector == equity.sector,
                     Equity.symbol != symbol.upper(),
-                    Equity.is_active == True,
+                    Equity.is_active.is_(True),
                 )
                 .limit(limit)
             )

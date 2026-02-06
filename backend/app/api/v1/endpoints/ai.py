@@ -100,7 +100,7 @@ async def analyze_stream(
             yield f"data: ERROR: {str(e)}\n\n"
         except Exception as e:
             logger.error(f"AI streaming error: {e}")
-            yield f"data: ERROR: Failed to perform analysis\n\n"
+            yield "data: ERROR: Failed to perform analysis\n\n"
 
     return StreamingResponse(
         generate(),

@@ -2,12 +2,10 @@
 
 import asyncio
 import logging
-from typing import List
 
 from sqlalchemy import select
 
-from app.db.models.user import User
-from app.db.models.watchlist import Watchlist, WatchlistItem
+from app.db.models.watchlist import WatchlistItem
 from app.db.models.equity import Equity
 from app.db.session import AsyncSessionLocal
 from app.services.economic_event import EconomicEventService
@@ -47,7 +45,7 @@ def refresh_all_watchlist_events():
             stmt = (
                 select(Equity.symbol)
                 .join(WatchlistItem, WatchlistItem.equity_id == Equity.id)
-                .where(WatchlistItem.track_calendar == True)
+                .where(WatchlistItem.track_calendar.is_(True))
                 .distinct()
             )
             result = await session.execute(stmt)

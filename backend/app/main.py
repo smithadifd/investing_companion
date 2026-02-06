@@ -112,7 +112,7 @@ async def root():
 
 
 # Include routers
-from app.api.v1.endpoints import ai, alert, auth, equity, event, market, ratio, settings, trade, watchlist
+from app.api.v1.endpoints import ai, alert, auth, equity, event, market, ratio, settings, trade, watchlist  # noqa: E402
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(equity.router, prefix="/api/v1/equity", tags=["equity"])

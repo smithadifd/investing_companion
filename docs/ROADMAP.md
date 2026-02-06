@@ -596,7 +596,7 @@ economic_events
 - [x] Health endpoint reports accurate system status
 
 ### Deployment Execution (2026-02-01)
-- [x] Deployed to Synology NAS at 192.168.50.88
+- [x] Deployed to Synology NAS
 - [x] Created `docker-compose.local.yml` for local network (no Traefik)
 - [x] Resolved build issues (TypeScript, Docker Compose v1, Next.js env vars)
 - [x] Updated Next.js to 14.2.29 (security fix)

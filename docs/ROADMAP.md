@@ -602,9 +602,17 @@ economic_events
 - [x] Updated Next.js to 14.2.29 (security fix)
 - [x] Disabled registration after account creation
 - [ ] Set up automated backups via Task Scheduler
-- [ ] Configure Discord webhook for alerts
+- [x] Configure Discord webhook for alerts (via Settings UI)
 
 See [Session Notes](./sessions/2026-02-01-synology-deployment.md) for details.
+
+### Dependency Maintenance (2026-02-06)
+- [x] Merged safe Dependabot PRs (date-fns 4, tailwind-merge 3, lucide-react 0.563)
+- [x] Bumped Docker base images: Python 3.11→3.12, Node 20→22 LTS
+- [x] Aligned CI workflow with Docker versions (Python 3.12, Node 22)
+- [x] Configured Dependabot ignore rules for breaking major versions
+- [x] Created upgrade plan: `docs/plans/nextjs-16-upgrade.md` (Next.js 16 + React 19 + ESLint 9)
+- [ ] Execute Next.js 16 upgrade (see plan)
 
 ---
 

@@ -4,7 +4,23 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
+import re
+
 from pydantic import BaseModel, EmailStr, Field, field_validator
+
+_PASSWORD_PATTERN = re.compile(
+    r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^a-zA-Z\d]).{8,128}$"
+)
+_PASSWORD_HELP = (
+    "Password must be 8-128 characters with at least one uppercase letter, "
+    "one lowercase letter, one digit, and one special character"
+)
+
+
+def _validate_password_strength(v: str) -> str:
+    if not _PASSWORD_PATTERN.match(v):
+        raise ValueError(_PASSWORD_HELP)
+    return v
 
 
 class UserBase(BaseModel):
@@ -18,6 +34,11 @@ class UserCreate(UserBase):
 
     password: str = Field(..., min_length=8, max_length=128)
     password_confirm: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        return _validate_password_strength(v)
 
     @field_validator("password_confirm")
     @classmethod
@@ -58,6 +79,11 @@ class PasswordChange(BaseModel):
     current_password: str
     new_password: str = Field(..., min_length=8, max_length=128)
     new_password_confirm: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        return _validate_password_strength(v)
 
     @field_validator("new_password_confirm")
     @classmethod

@@ -5,6 +5,8 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.dependencies import get_current_user
+from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.common import DataResponse
 from app.schemas.ratio import (
@@ -28,6 +30,7 @@ def get_ratio_service(db: AsyncSession = Depends(get_db)) -> RatioService:
 async def list_ratios(
     favorites_only: bool = False,
     category: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
     service: RatioService = Depends(get_ratio_service),
 ) -> DataResponse[List[RatioResponse]]:
     """
@@ -43,6 +46,7 @@ async def list_ratios(
 @router.post("", response_model=DataResponse[RatioResponse], status_code=status.HTTP_201_CREATED)
 async def create_ratio(
     data: RatioCreate,
+    current_user: User = Depends(get_current_user),
     service: RatioService = Depends(get_ratio_service),
 ) -> DataResponse[RatioResponse]:
     """
@@ -54,6 +58,7 @@ async def create_ratio(
 
 @router.get("/quotes", response_model=DataResponse[List[RatioQuoteResponse]])
 async def get_all_ratio_quotes(
+    current_user: User = Depends(get_current_user),
     service: RatioService = Depends(get_ratio_service),
 ) -> DataResponse[List[RatioQuoteResponse]]:
     """
@@ -65,6 +70,7 @@ async def get_all_ratio_quotes(
 
 @router.post("/initialize", status_code=status.HTTP_204_NO_CONTENT)
 async def initialize_system_ratios(
+    current_user: User = Depends(get_current_user),
     service: RatioService = Depends(get_ratio_service),
 ) -> None:
     """
@@ -76,6 +82,7 @@ async def initialize_system_ratios(
 @router.get("/{ratio_id}", response_model=DataResponse[RatioResponse])
 async def get_ratio(
     ratio_id: int,
+    current_user: User = Depends(get_current_user),
     service: RatioService = Depends(get_ratio_service),
 ) -> DataResponse[RatioResponse]:
     """
@@ -94,6 +101,7 @@ async def get_ratio(
 async def update_ratio(
     ratio_id: int,
     data: RatioUpdate,
+    current_user: User = Depends(get_current_user),
     service: RatioService = Depends(get_ratio_service),
 ) -> DataResponse[RatioResponse]:
     """
@@ -111,6 +119,7 @@ async def update_ratio(
 @router.delete("/{ratio_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_ratio(
     ratio_id: int,
+    current_user: User = Depends(get_current_user),
     service: RatioService = Depends(get_ratio_service),
 ) -> None:
     """
@@ -127,6 +136,7 @@ async def delete_ratio(
 @router.get("/{ratio_id}/quote", response_model=DataResponse[RatioQuoteResponse])
 async def get_ratio_quote(
     ratio_id: int,
+    current_user: User = Depends(get_current_user),
     service: RatioService = Depends(get_ratio_service),
 ) -> DataResponse[RatioQuoteResponse]:
     """
@@ -145,6 +155,7 @@ async def get_ratio_quote(
 async def get_ratio_history(
     ratio_id: int,
     period: str = "1y",
+    current_user: User = Depends(get_current_user),
     service: RatioService = Depends(get_ratio_service),
 ) -> DataResponse[RatioHistoryResponse]:
     """

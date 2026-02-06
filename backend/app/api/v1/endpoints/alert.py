@@ -5,6 +5,8 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.dependencies import get_current_user
+from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.alert import (
     AlertCreate,
@@ -31,6 +33,7 @@ async def list_alerts(
     active_only: bool = False,
     equity_id: Optional[int] = None,
     ratio_id: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
 ) -> DataResponse[List[AlertResponse]]:
     """
@@ -51,6 +54,7 @@ async def list_alerts(
 @router.post("", response_model=DataResponse[AlertResponse], status_code=status.HTTP_201_CREATED)
 async def create_alert(
     data: AlertCreate,
+    current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
 ) -> DataResponse[AlertResponse]:
     """
@@ -78,6 +82,7 @@ async def create_alert(
 
 @router.get("/stats", response_model=DataResponse[AlertStats])
 async def get_alert_stats(
+    current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
 ) -> DataResponse[AlertStats]:
     """
@@ -91,6 +96,7 @@ async def get_alert_stats(
 async def get_all_alert_history(
     limit: int = 100,
     offset: int = 0,
+    current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
 ) -> DataResponse[List[AlertHistoryResponse]]:
     """
@@ -106,6 +112,7 @@ async def get_all_alert_history(
 @router.get("/{alert_id}", response_model=DataResponse[AlertWithHistoryResponse])
 async def get_alert(
     alert_id: int,
+    current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
 ) -> DataResponse[AlertWithHistoryResponse]:
     """
@@ -124,6 +131,7 @@ async def get_alert(
 async def update_alert(
     alert_id: int,
     data: AlertUpdate,
+    current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
 ) -> DataResponse[AlertResponse]:
     """
@@ -141,6 +149,7 @@ async def update_alert(
 @router.delete("/{alert_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_alert(
     alert_id: int,
+    current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
 ) -> None:
     """
@@ -157,6 +166,7 @@ async def delete_alert(
 @router.post("/{alert_id}/toggle", response_model=DataResponse[AlertResponse])
 async def toggle_alert(
     alert_id: int,
+    current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
 ) -> DataResponse[AlertResponse]:
     """
@@ -175,6 +185,7 @@ async def toggle_alert(
 async def get_alert_history(
     alert_id: int,
     limit: int = 50,
+    current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
 ) -> DataResponse[List[AlertHistoryResponse]]:
     """
@@ -196,6 +207,7 @@ async def get_alert_history(
 async def check_alert(
     alert_id: int,
     notify: bool = False,
+    current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
 ) -> DataResponse[dict]:
     """
@@ -246,7 +258,9 @@ async def check_alert(
 # Discord notification endpoints
 
 @router.post("/notifications/test", response_model=DataResponse[dict])
-async def test_discord_notification() -> DataResponse[dict]:
+async def test_discord_notification(
+    current_user: User = Depends(get_current_user),
+) -> DataResponse[dict]:
     """
     Send a test notification to Discord.
     Useful for verifying webhook configuration.
@@ -270,7 +284,9 @@ async def test_discord_notification() -> DataResponse[dict]:
 
 
 @router.get("/notifications/status", response_model=DataResponse[dict])
-async def get_notification_status() -> DataResponse[dict]:
+async def get_notification_status(
+    current_user: User = Depends(get_current_user),
+) -> DataResponse[dict]:
     """
     Get notification service status.
     """

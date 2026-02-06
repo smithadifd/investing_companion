@@ -12,7 +12,7 @@ app = FastAPI(
     title="Investing Companion API",
     description="Self-hosted investing companion with analysis, watchlists, and alerts",
     version="0.1.0",
-    docs_url="/docs" if app_settings.ENVIRONMENT != "production" else "/docs",
+    docs_url="/docs" if app_settings.ENVIRONMENT != "production" else None,
     redoc_url="/redoc" if app_settings.ENVIRONMENT != "production" else None,
 )
 

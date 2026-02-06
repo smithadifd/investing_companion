@@ -5,6 +5,8 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.dependencies import get_current_user
+from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.common import DataResponse, ResponseMeta
 from app.schemas.watchlist import (
@@ -26,6 +28,7 @@ router = APIRouter()
 
 @router.get("", response_model=DataResponse[List[WatchlistSummary]])
 async def list_watchlists(
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[List[WatchlistSummary]]:
     """List all watchlists."""
@@ -37,6 +40,7 @@ async def list_watchlists(
 @router.get("/movers", response_model=DataResponse[AllWatchlistMovers])
 async def get_all_movers(
     limit: int = Query(10, ge=1, le=50, description="Max movers per category"),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[AllWatchlistMovers]:
     """Get top gainers and losers across all watchlists."""
@@ -48,6 +52,7 @@ async def get_all_movers(
 @router.post("", response_model=DataResponse[WatchlistResponse], status_code=201)
 async def create_watchlist(
     data: WatchlistCreate,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[WatchlistResponse]:
     """Create a new watchlist."""
@@ -60,6 +65,7 @@ async def create_watchlist(
 async def get_watchlist(
     watchlist_id: int,
     include_quotes: bool = Query(True, description="Include current quotes for items"),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[WatchlistResponse]:
     """Get a watchlist with all items."""
@@ -76,6 +82,7 @@ async def get_watchlist(
 async def update_watchlist(
     watchlist_id: int,
     data: WatchlistUpdate,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[WatchlistResponse]:
     """Update a watchlist."""
@@ -91,6 +98,7 @@ async def update_watchlist(
 @router.delete("/{watchlist_id}", status_code=204)
 async def delete_watchlist(
     watchlist_id: int,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Delete a watchlist."""
@@ -111,6 +119,7 @@ async def delete_watchlist(
 async def add_item(
     watchlist_id: int,
     data: WatchlistItemCreate,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[WatchlistItemResponse]:
     """Add an equity to a watchlist."""
@@ -140,6 +149,7 @@ async def update_item(
     watchlist_id: int,
     item_id: int,
     data: WatchlistItemUpdate,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[WatchlistItemResponse]:
     """Update a watchlist item's notes, target price, or thesis."""
@@ -156,6 +166,7 @@ async def update_item(
 async def remove_item(
     watchlist_id: int,
     item_id: int,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Remove an item from a watchlist."""
@@ -171,6 +182,7 @@ async def remove_item(
 @router.get("/{watchlist_id}/export", response_model=WatchlistExport)
 async def export_watchlist(
     watchlist_id: int,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> WatchlistExport:
     """Export a watchlist to JSON format."""
@@ -186,6 +198,7 @@ async def export_watchlist(
 @router.post("/import", response_model=DataResponse[WatchlistResponse], status_code=201)
 async def import_watchlist(
     data: WatchlistImport,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[WatchlistResponse]:
     """Import a watchlist from JSON format."""

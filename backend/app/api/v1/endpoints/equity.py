@@ -5,6 +5,8 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.dependencies import get_current_user
+from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.common import DataResponse, ResponseMeta
 from app.schemas.economic_event import EconomicEventResponse
@@ -25,6 +27,7 @@ router = APIRouter()
 async def search_equities(
     q: str = Query(..., min_length=1, description="Search query"),
     limit: int = Query(20, ge=1, le=100, description="Maximum results"),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[List[EquitySearchResult]]:
     """Search for equities by symbol or name."""
@@ -36,6 +39,7 @@ async def search_equities(
 @router.get("/{symbol}", response_model=DataResponse[EquityDetailResponse])
 async def get_equity(
     symbol: str,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[EquityDetailResponse]:
     """Get equity details with quote and fundamentals."""
@@ -54,6 +58,7 @@ async def get_equity(
 @router.get("/{symbol}/quote", response_model=DataResponse[QuoteResponse])
 async def get_quote(
     symbol: str,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[QuoteResponse]:
     """Get current quote for an equity."""
@@ -82,6 +87,7 @@ async def get_history(
         pattern="^(1m|5m|15m|30m|1h|1d|1wk|1mo)$",
         description="Data interval",
     ),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[HistoryResponse]:
     """Get historical price data for an equity."""
@@ -105,6 +111,7 @@ async def get_technicals(
         pattern="^(1d|5d|1mo|3mo|6mo|1y|2y|5y|10y|max)$",
         description="Time period",
     ),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[dict]:
     """Get technical indicators for an equity."""
@@ -126,6 +133,7 @@ async def get_technicals(
 @router.get("/{symbol}/technicals/summary")
 async def get_technicals_summary(
     symbol: str,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[dict]:
     """Get summary of current technical indicator values."""
@@ -148,6 +156,7 @@ async def get_technicals_summary(
 async def get_peers(
     symbol: str,
     limit: int = Query(5, ge=1, le=10, description="Maximum number of peers"),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[List[EquityDetailResponse]]:
     """Get peer companies in the same sector for comparison."""
@@ -162,6 +171,7 @@ async def get_equity_events(
     symbol: str,
     include_past: bool = Query(False, description="Include past events"),
     limit: int = Query(10, ge=1, le=50, description="Maximum events"),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[List[EconomicEventResponse]]:
     """Get calendar events for an equity (earnings, dividends, splits)."""

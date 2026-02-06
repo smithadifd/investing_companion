@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.dependencies import get_current_user
+from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.ai import (
     AIAnalysisRequest,
@@ -29,6 +31,7 @@ def get_ai_service(db: AsyncSession = Depends(get_db)) -> AIService:
 
 @router.get("/settings", response_model=DataResponse[AISettingsResponse])
 async def get_ai_settings(
+    current_user: User = Depends(get_current_user),
     service: AIService = Depends(get_ai_service),
 ) -> DataResponse[AISettingsResponse]:
     """
@@ -41,6 +44,7 @@ async def get_ai_settings(
 @router.put("/settings", response_model=DataResponse[AISettingsResponse])
 async def update_ai_settings(
     data: AISettingsUpdate,
+    current_user: User = Depends(get_current_user),
     service: AIService = Depends(get_ai_service),
 ) -> DataResponse[AISettingsResponse]:
     """
@@ -53,6 +57,7 @@ async def update_ai_settings(
 @router.post("/analyze", response_model=DataResponse[AIAnalysisResponse])
 async def analyze(
     request: AIAnalysisRequest,
+    current_user: User = Depends(get_current_user),
     service: AIService = Depends(get_ai_service),
 ) -> DataResponse[AIAnalysisResponse]:
     """
@@ -83,6 +88,7 @@ async def analyze(
 @router.post("/analyze/stream")
 async def analyze_stream(
     request: AIAnalysisRequest,
+    current_user: User = Depends(get_current_user),
     service: AIService = Depends(get_ai_service),
 ):
     """

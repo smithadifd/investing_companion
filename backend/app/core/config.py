@@ -53,6 +53,20 @@ class Settings(BaseSettings):
                     "Use strong credentials in production."
                 )
 
+            # Check CORS origins
+            origins = self.CORS_ORIGINS if isinstance(self.CORS_ORIGINS, list) else [self.CORS_ORIGINS]
+            if "*" in origins:
+                errors.append(
+                    "CORS_ORIGINS must not contain '*' in production. "
+                    "Specify explicit origins."
+                )
+            if any("localhost" in o for o in origins):
+                print(
+                    "WARNING: CORS_ORIGINS contains localhost origins in production. "
+                    "Set CORS_ORIGINS to your production frontend URL.",
+                    file=sys.stderr,
+                )
+
             if errors:
                 print("\n" + "=" * 60, file=sys.stderr)
                 print("FATAL: Production configuration validation failed!", file=sys.stderr)

@@ -34,6 +34,14 @@ cd ..
 echo "  ✓ ESLint OK"
 echo ""
 
+# Frontend tests
+echo "→ Frontend tests (Vitest)..."
+cd frontend
+npm test
+cd ..
+echo "  ✓ Frontend tests OK"
+echo ""
+
 # Backend lint (if ruff is installed)
 if command -v ruff &> /dev/null; then
     echo "→ Python lint (ruff)..."

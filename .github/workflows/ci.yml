@@ -93,6 +93,11 @@ jobs:
           cd frontend
           npm run lint
 
+      - name: Run tests
+        run: |
+          cd frontend
+          npm test
+
   docker:
     name: Docker Build
     runs-on: ubuntu-latest

@@ -96,187 +96,375 @@ def check_single_alert(alert_id: int):
         raise
 
 
-@celery_app.task(name="alerts.send_end_of_day_summary")
-def send_end_of_day_summary(threshold_percent: float = 5.0):
-    """
-    Send combined end-of-day summary to Discord: movers + alert activity.
-
-    Scheduled to run once per day after market close (4:30 PM ET).
-    """
-    logger.info("Sending end-of-day summary")
+@celery_app.task(name="alerts.send_morning_pulse")
+def send_morning_pulse():
+    """Send morning pulse notification with futures, overnight moves, calendar, and movers."""
+    logger.info("Sending morning pulse notification")
 
     async def _send():
+        from datetime import timedelta
+
         from sqlalchemy import func, select
+
         from app.db.models.alert import Alert, AlertHistory
+        from app.services.data_providers.yahoo import YahooFinanceProvider
+        from app.services.economic_event import EconomicEventService
+        from app.services.notifications.formatters import MorningData, format_morning_pulse
         from app.services.watchlist import WatchlistService
 
-        async with AsyncSessionLocal() as session:
-            # --- Movers data ---
-            watchlist_service = WatchlistService(session)
-            movers = await watchlist_service.get_all_movers(limit=10)
-
-            gainers = [
-                {
-                    "symbol": g.symbol,
-                    "name": g.name,
-                    "price": float(g.price),
-                    "change_percent": float(g.change_percent),
-                    "watchlist_name": g.watchlist_name,
-                }
-                for g in movers.gainers
-            ]
-            losers = [
-                {
-                    "symbol": l.symbol,
-                    "name": l.name,
-                    "price": float(l.price),
-                    "change_percent": float(l.change_percent),
-                    "watchlist_name": l.watchlist_name,
-                }
-                for l in movers.losers
-            ]
-
-            # --- Alert activity data ---
-            now = datetime.now(timezone.utc)
-            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-            active_count = await session.scalar(
-                select(func.count(Alert.id)).where(Alert.is_active == True)
-            )
-            triggered_today = await session.scalar(
-                select(func.count(AlertHistory.id)).where(
-                    AlertHistory.triggered_at >= today_start
-                )
-            )
-
-            top_triggered_stmt = (
-                select(
-                    Alert.name,
-                    func.count(AlertHistory.id).label("count"),
-                )
-                .join(AlertHistory)
-                .where(AlertHistory.triggered_at >= today_start)
-                .group_by(Alert.id)
-                .order_by(func.count(AlertHistory.id).desc())
-                .limit(5)
-            )
-            top_result = await session.execute(top_triggered_stmt)
-            top_triggers = [
-                {"name": r[0], "count": r[1]}
-                for r in top_result.all()
-            ]
-
-            # --- Send combined message ---
-            success, error = await discord_service.send_end_of_day_summary(
-                gainers=gainers,
-                losers=losers,
-                threshold_percent=threshold_percent,
-                total_items=movers.total_items,
-                watchlist_count=movers.watchlist_count,
-                alerts_triggered=triggered_today or 0,
-                active_alerts=active_count or 0,
-                top_triggers=top_triggers,
-            )
-
-            return {
-                "success": success,
-                "error": error,
-                "gainers_count": len(gainers),
-                "losers_count": len(losers),
-                "alerts_triggered": triggered_today or 0,
-            }
-
-    try:
-        result = run_async(_send())
-        logger.info(f"End-of-day summary result: {result}")
-        return result
-    except Exception as e:
-        logger.error(f"Error sending end-of-day summary: {e}", exc_info=True)
-        raise
-
-
-@celery_app.task(name="alerts.send_morning_events")
-def send_morning_events(days_ahead: int = 2):
-    """
-    Send morning notification of upcoming events for today and tomorrow.
-
-    Args:
-        days_ahead: Number of days to look ahead (default 2 for today + tomorrow)
-
-    Scheduled to run each morning before market open.
-    """
-    logger.info(f"Sending morning events notification (days: {days_ahead})")
-
-    async def _send():
-        from app.services.economic_event import EconomicEventService
-        from app.schemas.economic_event import EventFilters
+        yahoo = YahooFinanceProvider()
 
         async with AsyncSessionLocal() as session:
-            service = EconomicEventService(session)
+            # --- Futures ---
+            futures_data: dict[str, dict] = {}
+            for symbol in ("ES=F", "NQ=F", "RTY=F"):
+                try:
+                    q = await yahoo.get_quote(symbol)
+                    if q and q.change_percent is not None:
+                        futures_data[symbol] = {
+                            "price": float(q.price),
+                            "change_percent": float(q.change_percent),
+                        }
+                except Exception as e:
+                    logger.warning(f"Failed to fetch {symbol}: {e}")
 
-            # Get upcoming events
-            result = await service.get_upcoming_events(
-                days_ahead=days_ahead,
-                user_id=None,  # System-level, get all events
-                limit=30,
+            # --- VIX and 10Y ---
+            vix_data: dict = {}
+            ten_year_data: dict = {}
+            try:
+                q = await yahoo.get_quote("^VIX")
+                if q:
+                    vix_data = {"price": float(q.price), "change": float(q.change or 0)}
+            except Exception as e:
+                logger.warning(f"Failed to fetch VIX: {e}")
+            try:
+                q = await yahoo.get_quote("^TNX")
+                if q:
+                    ten_year_data = {"price": float(q.price), "change": float(q.change or 0)}
+            except Exception as e:
+                logger.warning(f"Failed to fetch 10Y: {e}")
+
+            # --- Overnight moves ---
+            overnight_symbols = [
+                ("GC=F", "Gold"),
+                ("SI=F", "Silver"),
+                ("DX-Y.NYB", "Dollar (DXY)"),
+                ("CL=F", "Crude"),
+                ("NG=F", "Nat Gas"),
+                ("VEA", "VEA"),
+                ("VWO", "VWO"),
+            ]
+            overnight_moves: list[dict] = []
+            for symbol, name in overnight_symbols:
+                try:
+                    q = await yahoo.get_quote(symbol)
+                    if q and q.change_percent is not None:
+                        overnight_moves.append({
+                            "name": name,
+                            "symbol": symbol,
+                            "change_percent": float(q.change_percent),
+                            "price": float(q.price),
+                        })
+                except Exception as e:
+                    logger.warning(f"Failed to fetch {symbol}: {e}")
+
+            # --- Today's calendar events ---
+            event_service = EconomicEventService(session)
+            today_result = await event_service.get_upcoming_events(
+                days_ahead=1, user_id=None, limit=15,
             )
-
-            # Convert to dict format for Discord
-            events = [
+            calendar_events = [
                 {
-                    "event_date": str(e.event_date),
-                    "title": e.title,
-                    "event_type": e.event_type,
                     "event_time": e.event_time,
+                    "title": e.title,
+                    "importance": e.importance.value if e.importance else "medium",
+                    "event_type": e.event_type.value if e.event_type else "",
                     "symbol": e.equity.symbol if e.equity else None,
                 }
-                for e in result.events
+                for e in today_result.events
+                if (e.importance and e.importance.value in ("medium", "high"))
             ]
 
-            days_label = "Today" if days_ahead == 1 else f"Next {days_ahead} Days"
-            success, error = await discord_service.send_upcoming_events(
-                events=events,
-                days_label=days_label,
-            )
+            # --- Pre-market movers from watchlists ---
+            watchlist_service = WatchlistService(session)
+            all_watchlists = await watchlist_service.list_watchlists()
+            premarket_movers: list[dict] = []
+            seen_symbols: set[str] = set()
+            for wl_summary in all_watchlists:
+                wl = await watchlist_service.get_watchlist(wl_summary.id, include_quotes=True)
+                if not wl:
+                    continue
+                for item in wl.items:
+                    sym = item.equity.symbol
+                    if sym in seen_symbols:
+                        continue
+                    seen_symbols.add(sym)
+                    if item.quote and item.quote.change_percent is not None:
+                        change_pct = float(item.quote.change_percent)
+                        if abs(change_pct) >= 2.0:
+                            premarket_movers.append({
+                                "symbol": sym,
+                                "change_percent": change_pct,
+                            })
+            premarket_movers.sort(key=lambda m: abs(m["change_percent"]), reverse=True)
 
-            return {
-                "success": success,
-                "error": error,
-                "events_count": len(events),
-            }
+            # --- Alert stats ---
+            active_count = await session.scalar(
+                select(func.count(Alert.id)).where(Alert.is_active == True)  # noqa: E712
+            ) or 0
+            # Triggered since previous close (21:30 UTC yesterday = 4:30 PM ET)
+            yesterday_close = (
+                datetime.now(timezone.utc).replace(hour=21, minute=30, second=0, microsecond=0)
+                - timedelta(days=1)
+            )
+            triggered_overnight = await session.scalar(
+                select(func.count(AlertHistory.id)).where(
+                    AlertHistory.triggered_at >= yesterday_close
+                )
+            ) or 0
+
+            # --- Build and send ---
+            data = MorningData(
+                futures=futures_data,
+                vix=vix_data,
+                ten_year=ten_year_data,
+                overnight_moves=overnight_moves,
+                calendar_events=calendar_events,
+                premarket_movers=premarket_movers,
+                active_alerts=active_count,
+                triggered_overnight=triggered_overnight,
+            )
+            message = format_morning_pulse(data)
+            success, error = await discord_service.send_plain_text(message)
+            return {"success": success, "error": error, "length": len(message)}
 
     try:
         result = run_async(_send())
-        logger.info(f"Morning events result: {result}")
+        logger.info(f"Morning pulse result: {result}")
         return result
     except Exception as e:
-        logger.error(f"Error sending morning events: {e}", exc_info=True)
+        logger.error(f"Error sending morning pulse: {e}", exc_info=True)
         raise
 
 
-# Celery Beat schedule configuration
-# This should be added to celery_app.conf.beat_schedule
-ALERT_BEAT_SCHEDULE = {
-    "check-alerts-every-5-minutes": {
-        "task": "alerts.check_all_alerts",
-        "schedule": 300.0,  # 5 minutes
-    },
-    "send-end-of-day-summary": {
-        "task": "alerts.send_end_of_day_summary",
-        "schedule": {
-            "crontab": {
-                "hour": 21,  # 9:30 PM UTC = 4:30 PM ET (after market close)
-                "minute": 30,
+@celery_app.task(name="alerts.send_eod_wrap")
+def send_eod_wrap():
+    """Send end-of-day wrap with market close, themes, positions, movers, alerts, tomorrow."""
+    logger.info("Sending EOD wrap notification")
+
+    async def _send():
+        from datetime import date, timedelta
+
+        from sqlalchemy import func, select
+        from sqlalchemy.orm import selectinload
+
+        from app.db.models.alert import Alert, AlertHistory
+        from app.schemas.economic_event import EventFilters
+        from app.services.data_providers.yahoo import YahooFinanceProvider
+        from app.services.economic_event import EconomicEventService
+        from app.services.notifications.formatters import (
+            AlertTrigger,
+            EODData,
+            ThemeData,
+            format_eod_wrap,
+            get_theme_emoji,
+        )
+        from app.services.watchlist import WatchlistService
+
+        yahoo = YahooFinanceProvider()
+
+        async with AsyncSessionLocal() as session:
+            # --- Market close data ---
+            market_data: dict[str, dict] = {}
+            for symbol in ("SPY", "QQQ", "IWM", "^VIX", "^TNX", "DX-Y.NYB"):
+                try:
+                    q = await yahoo.get_quote(symbol)
+                    if q:
+                        market_data[symbol] = {
+                            "price": float(q.price),
+                            "change_percent": float(q.change_percent) if q.change_percent else 0,
+                        }
+                except Exception as e:
+                    logger.warning(f"Failed to fetch {symbol}: {e}")
+
+            # --- Theme performance + My positions ---
+            watchlist_service = WatchlistService(session)
+            all_watchlists = await watchlist_service.list_watchlists()
+            themes: list[ThemeData] = []
+            my_positions: list[dict] = []
+            all_movers: list[dict] = []  # for big movers section
+
+            for wl_summary in all_watchlists:
+                wl = await watchlist_service.get_watchlist(wl_summary.id, include_quotes=True)
+                if not wl:
+                    continue
+
+                positions = []
+                for item in wl.items:
+                    if item.quote and item.quote.change_percent is not None:
+                        pos = {
+                            "symbol": item.equity.symbol,
+                            "change_percent": float(item.quote.change_percent),
+                        }
+                        positions.append(pos)
+                        all_movers.append(pos)
+
+                if wl.is_default:
+                    # This is "My Positions"
+                    my_positions = positions
+                elif positions:
+                    themes.append(ThemeData(
+                        name=wl.name,
+                        emoji=get_theme_emoji(wl.name),
+                        positions=positions,
+                    ))
+
+            # --- Alert data ---
+            today_start = datetime.now(timezone.utc).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            active_count = await session.scalar(
+                select(func.count(Alert.id)).where(Alert.is_active == True)  # noqa: E712
+            ) or 0
+
+            # Get triggered alerts today with details
+            stmt = (
+                select(AlertHistory)
+                .options(selectinload(AlertHistory.alert).selectinload(Alert.equity))
+                .where(AlertHistory.triggered_at >= today_start)
+                .order_by(AlertHistory.triggered_at.desc())
+                .limit(5)
+            )
+            result = await session.execute(stmt)
+            triggered_rows = result.scalars().all()
+
+            alerts_triggered: list[AlertTrigger] = []
+            for h in triggered_rows:
+                alert = h.alert
+                symbol = alert.equity.symbol if alert.equity else (
+                    alert.ratio.name if alert.ratio else "?"
+                )
+                cond = alert.condition_type
+                threshold = float(h.threshold_value)
+                if "below" in cond or "down" in cond:
+                    name = f"{symbol} < {threshold:.2f}"
+                else:
+                    name = f"{symbol} > {threshold:.2f}"
+                alerts_triggered.append(AlertTrigger(
+                    name=name,
+                    triggered_value=float(h.triggered_value),
+                ))
+
+            # --- Tomorrow's calendar ---
+            event_service = EconomicEventService(session)
+            tomorrow = date.today() + timedelta(days=1)
+            # Skip weekends
+            if tomorrow.weekday() == 5:  # Saturday
+                tomorrow += timedelta(days=2)
+            elif tomorrow.weekday() == 6:  # Sunday
+                tomorrow += timedelta(days=1)
+
+            filters = EventFilters(
+                start_date=tomorrow,
+                end_date=tomorrow,
+                include_past=False,
+            )
+            tomorrow_events_raw = await event_service.list_events(
+                filters=filters, user_id=None, limit=10,
+            )
+            tomorrow_events = [
+                {
+                    "event_time": e.event_time,
+                    "title": e.title,
+                    "importance": e.importance.value if e.importance else "medium",
+                    "event_type": e.event_type.value if e.event_type else "",
+                    "symbol": e.equity.symbol if e.equity else None,
+                }
+                for e in tomorrow_events_raw
+                if (e.importance and e.importance.value in ("medium", "high"))
+            ]
+
+            # --- Build and send ---
+            data = EODData(
+                market=market_data,
+                themes=themes,
+                my_positions=my_positions,
+                big_movers=all_movers,
+                alerts_triggered=alerts_triggered,
+                active_alerts=active_count,
+                tomorrow_events=tomorrow_events,
+            )
+            message = format_eod_wrap(data)
+            success, error = await discord_service.send_plain_text(message)
+            return {"success": success, "error": error, "length": len(message)}
+
+    try:
+        result = run_async(_send())
+        logger.info(f"EOD wrap result: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error sending EOD wrap: {e}", exc_info=True)
+        raise
+
+
+@celery_app.task(name="alerts.check_notification_schedule")
+def check_notification_schedule():
+    """Check if it's time to send morning or EOD notifications.
+
+    Runs every minute.  Reads configured send times from user settings,
+    compares to current time, and fires the appropriate task if matched.
+    Uses a "last sent date" key to prevent double-sends.
+    """
+    from zoneinfo import ZoneInfo
+
+    async def _check():
+        from app.services.settings import SettingsService
+
+        ET = ZoneInfo("America/New_York")
+        now_utc = datetime.now(timezone.utc)
+        now_et = now_utc.astimezone(ET)
+
+        # Skip weekends
+        if now_et.weekday() >= 5:
+            return {"skipped": "weekend"}
+
+        current_hhmm = now_et.strftime("%H:%M")
+        today_str = now_et.strftime("%Y-%m-%d")
+
+        async with AsyncSessionLocal() as session:
+            svc = SettingsService(session)
+            morning_time = await svc.get_setting(svc.MORNING_NOTIFICATION_TIME) or "08:00"
+            eod_time = await svc.get_setting(svc.EOD_NOTIFICATION_TIME) or "16:30"
+
+            morning_last = await svc.get_setting(svc.MORNING_NOTIFICATION_LAST_SENT) or ""
+            eod_last = await svc.get_setting(svc.EOD_NOTIFICATION_LAST_SENT) or ""
+
+            sent: list[str] = []
+
+            if current_hhmm == morning_time and morning_last != today_str:
+                logger.info(f"Firing morning pulse at {current_hhmm} ET")
+                send_morning_pulse.delay()
+                await svc.set_setting(svc.MORNING_NOTIFICATION_LAST_SENT, today_str)
+                sent.append("morning")
+
+            if current_hhmm == eod_time and eod_last != today_str:
+                logger.info(f"Firing EOD wrap at {current_hhmm} ET")
+                send_eod_wrap.delay()
+                await svc.set_setting(svc.EOD_NOTIFICATION_LAST_SENT, today_str)
+                sent.append("eod")
+
+            return {
+                "time_et": current_hhmm,
+                "morning_target": morning_time,
+                "eod_target": eod_time,
+                "sent": sent,
             }
-        },
-    },
-    "send-morning-events": {
-        "task": "alerts.send_morning_events",
-        "schedule": {
-            "crontab": {
-                "hour": 12,  # 12 PM UTC = 7 AM ET (before market open)
-                "minute": 0,
-            }
-        },
-    },
-}
+
+    try:
+        result = run_async(_check())
+        if result.get("sent"):
+            logger.info(f"Notification schedule: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error in notification schedule check: {e}", exc_info=True)
+        raise

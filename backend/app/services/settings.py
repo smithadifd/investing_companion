@@ -25,6 +25,10 @@ class SettingsService:
     DISCORD_WEBHOOK_URL = "DISCORD_WEBHOOK_URL"
     DEFAULT_WATCHLIST_ID = "DEFAULT_WATCHLIST_ID"
     THEME = "THEME"
+    MORNING_NOTIFICATION_TIME = "MORNING_NOTIFICATION_TIME"
+    EOD_NOTIFICATION_TIME = "EOD_NOTIFICATION_TIME"
+    MORNING_NOTIFICATION_LAST_SENT = "MORNING_NOTIFICATION_LAST_SENT"
+    EOD_NOTIFICATION_LAST_SENT = "EOD_NOTIFICATION_LAST_SENT"
 
     # Keys that should be encrypted
     ENCRYPTED_KEYS = {
@@ -172,6 +176,8 @@ class SettingsService:
             discord_webhook_url=self._mask_url(settings_dict.get(self.DISCORD_WEBHOOK_URL)),
             default_watchlist_id=default_watchlist_id,
             theme=settings_dict.get(self.THEME, "dark"),
+            morning_notification_time=settings_dict.get(self.MORNING_NOTIFICATION_TIME, "08:00"),
+            eod_notification_time=settings_dict.get(self.EOD_NOTIFICATION_TIME, "16:30"),
         )
 
     async def update_app_settings(
@@ -238,6 +244,22 @@ class SettingsService:
                 updates.theme,
                 user_id,
                 "UI theme preference",
+            )
+
+        if updates.morning_notification_time is not None:
+            await self.set_setting(
+                self.MORNING_NOTIFICATION_TIME,
+                updates.morning_notification_time,
+                user_id,
+                "Morning notification time (ET)",
+            )
+
+        if updates.eod_notification_time is not None:
+            await self.set_setting(
+                self.EOD_NOTIFICATION_TIME,
+                updates.eod_notification_time,
+                user_id,
+                "End-of-day notification time (ET)",
             )
 
         return await self.get_app_settings(user_id)

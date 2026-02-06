@@ -284,6 +284,45 @@ class DiscordNotificationService:
             logger.error(error, exc_info=True)
             return False, error
 
+    async def send_plain_text(
+        self,
+        message: str,
+    ) -> tuple[bool, Optional[str]]:
+        """Send a plain-text message to Discord (not an embed).
+
+        Args:
+            message: Pre-formatted plain text message (max 2000 chars).
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        webhook_url = await self._get_webhook_url()
+        if not webhook_url:
+            return False, "Discord webhook URL not configured"
+
+        try:
+            payload = {"content": message}
+
+            client = await self._get_client()
+            response = await client.post(webhook_url, json=payload)
+
+            if response.status_code == 204:
+                logger.info("Discord plain-text message sent")
+                return True, None
+            else:
+                error = f"Discord API returned status {response.status_code}: {response.text}"
+                logger.error(error)
+                return False, error
+
+        except httpx.TimeoutException:
+            error = "Discord notification timed out"
+            logger.error(error)
+            return False, error
+        except Exception as e:
+            error = f"Failed to send Discord message: {str(e)}"
+            logger.error(error, exc_info=True)
+            return False, error
+
     async def send_movers_summary(
         self,
         gainers: list[dict],

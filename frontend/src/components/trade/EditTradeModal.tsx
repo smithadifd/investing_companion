@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { X, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { useUpdateTrade } from '@/lib/hooks/useTrade';
+import { Modal } from '@/components/ui/Modal';
 import type { Trade, TradeType, TradeUpdate } from '@/lib/api/types';
 
 interface EditTradeModalProps {
@@ -60,21 +61,8 @@ export function EditTradeModal({ trade, onClose }: EditTradeModalProps) {
   const totalWithFees = totalValue + (parseFloat(fees) || 0);
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-neutral-800 rounded-xl w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-4 border-b border-neutral-200 dark:border-neutral-700 sticky top-0 bg-white dark:bg-neutral-800">
-          <h2 className="text-xl font-semibold text-neutral-900 dark:text-neutral-50">
-            Edit Trade
-          </h2>
-          <button
-            onClick={onClose}
-            className="p-1 text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-50 rounded-lg transition-colors"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="p-4 space-y-4">
+    <Modal onClose={onClose} title="Edit Trade" maxWidth="lg">
+      <form onSubmit={handleSubmit} className="p-4 space-y-4">
           {/* Symbol (read-only) */}
           <div>
             <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
@@ -232,8 +220,7 @@ export function EditTradeModal({ trade, onClose }: EditTradeModalProps) {
               Save Changes
             </button>
           </div>
-        </form>
-      </div>
-    </div>
+      </form>
+    </Modal>
   );
 }

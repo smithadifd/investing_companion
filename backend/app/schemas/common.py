@@ -14,6 +14,10 @@ class ResponseMeta(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     request_id: Optional[str] = None
 
+    @classmethod
+    def now(cls) -> "ResponseMeta":
+        return cls()
+
 
 class DataResponse(BaseModel, Generic[T]):
     """Standard response wrapper for single items."""

@@ -1,6 +1,6 @@
 """Economic event API endpoints."""
 
-from datetime import date, datetime
+from datetime import date
 from typing import List, Optional
 from uuid import UUID
 
@@ -25,11 +25,6 @@ from app.schemas.economic_event import (
 from app.services.economic_event import EconomicEventService
 
 router = APIRouter()
-
-
-def create_meta() -> ResponseMeta:
-    """Create response metadata."""
-    return ResponseMeta(timestamp=datetime.utcnow())
 
 
 def get_event_service(db: AsyncSession = Depends(get_db)) -> EconomicEventService:
@@ -89,7 +84,7 @@ async def list_events(
         offset=offset,
     )
 
-    return DataResponse(data=events, meta=create_meta())
+    return DataResponse(data=events, meta=ResponseMeta.now())
 
 
 @router.get("/upcoming", response_model=DataResponse[UpcomingEventsResponse])
@@ -118,7 +113,7 @@ async def get_upcoming_events(
         limit=limit,
     )
 
-    return DataResponse(data=result, meta=create_meta())
+    return DataResponse(data=result, meta=ResponseMeta.now())
 
 
 @router.get("/calendar/{year}/{month}", response_model=DataResponse[CalendarMonth])
@@ -148,7 +143,7 @@ async def get_calendar_month(
         filters=filters,
     )
 
-    return DataResponse(data=result, meta=create_meta())
+    return DataResponse(data=result, meta=ResponseMeta.now())
 
 
 @router.get("/watchlist", response_model=DataResponse[List[EconomicEventResponse]])
@@ -170,7 +165,7 @@ async def get_watchlist_events(
         days_ahead=days,
     )
 
-    return DataResponse(data=events, meta=create_meta())
+    return DataResponse(data=events, meta=ResponseMeta.now())
 
 
 @router.get("/stats", response_model=DataResponse[EventStats])
@@ -186,7 +181,7 @@ async def get_event_stats(
     stats = await service.get_stats(
         user_id=current_user.id if current_user else None
     )
-    return DataResponse(data=stats, meta=create_meta())
+    return DataResponse(data=stats, meta=ResponseMeta.now())
 
 
 # -----------------------------------------------------------------------------
@@ -210,7 +205,7 @@ async def get_event(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Event not found",
         )
-    return DataResponse(data=event, meta=create_meta())
+    return DataResponse(data=event, meta=ResponseMeta.now())
 
 
 @router.post("", response_model=DataResponse[EconomicEventResponse], status_code=status.HTTP_201_CREATED)
@@ -226,7 +221,7 @@ async def create_event(
     Use for personal reminders, portfolio reviews, etc.
     """
     event = await service.create_event(data=data, user_id=current_user.id)
-    return DataResponse(data=event, meta=create_meta())
+    return DataResponse(data=event, meta=ResponseMeta.now())
 
 
 @router.put("/{event_id}", response_model=DataResponse[EconomicEventResponse])
@@ -252,7 +247,7 @@ async def update_event(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Event not found or cannot be modified",
         )
-    return DataResponse(data=event, meta=create_meta())
+    return DataResponse(data=event, meta=ResponseMeta.now())
 
 
 @router.delete("/{event_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -290,7 +285,7 @@ async def delete_equity_events(
     count = await service.delete_events_for_symbol(symbol.upper())
     return DataResponse(
         data={"symbol": symbol.upper(), "events_deleted": count},
-        meta=create_meta(),
+        meta=ResponseMeta.now(),
     )
 
 
@@ -311,7 +306,7 @@ async def refresh_equity_events(
     Fetches and updates earnings dates, ex-dividend dates, etc.
     """
     events = await service.refresh_equity_events(symbol.upper())
-    return DataResponse(data=events, meta=create_meta())
+    return DataResponse(data=events, meta=ResponseMeta.now())
 
 
 @router.post("/refresh/watchlist", response_model=DataResponse[dict])
@@ -332,5 +327,5 @@ async def refresh_watchlist_events(
     )
     return DataResponse(
         data={"events_updated": count},
-        meta=create_meta(),
+        meta=ResponseMeta.now(),
     )

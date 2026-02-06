@@ -25,6 +25,7 @@ from app.schemas.alert import (
     AlertWithHistoryResponse,
 )
 from app.services.data_providers.yahoo import YahooFinanceProvider
+from app.services.equity import EquityService
 from app.services.notifications.discord import discord_service
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,7 @@ class AlertService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.yahoo = YahooFinanceProvider()
+        self.equity_service = EquityService(db)
 
     async def list_alerts(
         self,
@@ -603,31 +605,5 @@ class AlertService:
         return datetime.now(timezone.utc) >= cooldown_end
 
     async def _get_or_create_equity(self, symbol: str) -> Optional[Equity]:
-        """Get or create equity from symbol."""
-        stmt = select(Equity).where(Equity.symbol == symbol.upper())
-        result = await self.db.execute(stmt)
-        equity = result.scalar_one_or_none()
-
-        if equity:
-            return equity
-
-        # Fetch from Yahoo and create
-        info = await self.yahoo.get_info(symbol)
-        if not info or not info.get("symbol"):
-            return None
-
-        equity = Equity(
-            symbol=info["symbol"].upper(),
-            name=info.get("longName") or info.get("shortName") or symbol,
-            exchange=info.get("exchange"),
-            asset_type=(info.get("quoteType") or "stock").lower(),
-            sector=info.get("sector"),
-            industry=info.get("industry"),
-            country=info.get("country") or "US",
-            currency=info.get("currency") or "USD",
-        )
-        self.db.add(equity)
-        await self.db.commit()
-        await self.db.refresh(equity)
-
-        return equity
+        """Get or create equity from symbol. Delegates to EquityService."""
+        return await self.equity_service.get_or_create_equity(symbol)

@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { X, Search, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { useCreateAlert } from '@/lib/hooks/useAlert';
 import { useRatios } from '@/lib/hooks/useRatio';
-import { api } from '@/lib/api/client';
+import { EquitySearchInput } from '@/components/equity/EquitySearchInput';
+import { Modal } from '@/components/ui/Modal';
 import type { AlertConditionType, AlertCreate, EquitySearchResult, Ratio } from '@/lib/api/types';
 
 interface CreateAlertModalProps {
@@ -82,11 +83,7 @@ export function CreateAlertModal({
   const [cooldownMinutes, setCooldownMinutes] = useState('60');
   const [isActive, setIsActive] = useState(true);
 
-  // Search state
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<EquitySearchResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [showResults, setShowResults] = useState(false);
 
   const { data: ratios } = useRatios();
   const createAlert = useCreateAlert();
@@ -106,32 +103,14 @@ export function CreateAlertModal({
   // Get the current display symbol for auto-naming
   const currentSymbol = targetType === 'equity' ? equitySymbol.toUpperCase() : ratioSymbol;
 
-  const handleSearch = async (query: string) => {
+  const handleSearchChange = (query: string) => {
     setSearchQuery(query);
     setEquitySymbol(query);
-
-    if (query.length < 1) {
-      setSearchResults([]);
-      setShowResults(false);
-      return;
-    }
-
-    setIsSearching(true);
-    try {
-      const results = await api.searchEquities(query, 10);
-      setSearchResults(results);
-      setShowResults(true);
-    } catch (error) {
-      console.error('Search failed:', error);
-    } finally {
-      setIsSearching(false);
-    }
   };
 
   const handleSelectEquity = (equity: EquitySearchResult) => {
     setEquitySymbol(equity.symbol);
     setSearchQuery(equity.symbol);
-    setShowResults(false);
     updateAutoName(equity.symbol, conditionType, thresholdValue);
   };
 
@@ -182,29 +161,14 @@ export function CreateAlertModal({
     setCooldownMinutes('60');
     setIsActive(true);
     setSearchQuery('');
-    setSearchResults([]);
-    setShowResults(false);
     onClose();
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-neutral-800 rounded-xl w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-4 border-b border-neutral-200 dark:border-neutral-700 sticky top-0 bg-white dark:bg-neutral-800">
-          <h2 className="text-xl font-semibold text-neutral-900 dark:text-neutral-50">
-            Create Alert
-          </h2>
-          <button
-            onClick={handleClose}
-            className="p-1 text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-50 rounded-lg transition-colors"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="p-4 space-y-4">
+    <Modal onClose={handleClose} title="Create Alert" maxWidth="lg">
+      <form onSubmit={handleSubmit} className="p-4 space-y-4">
           {/* Target Type */}
           <div>
             <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">
@@ -238,46 +202,16 @@ export function CreateAlertModal({
 
           {/* Equity Search or Ratio Select */}
           {targetType === 'equity' ? (
-            <div className="relative">
+            <div>
               <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
                 Symbol
               </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => handleSearch(e.target.value)}
-                  onFocus={() => searchResults.length > 0 && setShowResults(true)}
-                  placeholder="Search symbol or name..."
-                  className="w-full px-3 py-2 pl-10 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  required
-                />
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
-                {isSearching && (
-                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400 animate-spin" />
-                )}
-              </div>
-
-              {/* Search Results Dropdown */}
-              {showResults && searchResults.length > 0 && (
-                <div className="absolute z-10 w-full mt-1 bg-white dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                  {searchResults.map((result) => (
-                    <button
-                      key={result.symbol}
-                      type="button"
-                      onClick={() => handleSelectEquity(result)}
-                      className="w-full px-3 py-2 text-left hover:bg-neutral-100 dark:hover:bg-neutral-600 transition-colors"
-                    >
-                      <span className="font-medium text-neutral-900 dark:text-neutral-50">
-                        {result.symbol}
-                      </span>
-                      <span className="text-sm text-neutral-500 ml-2">
-                        {result.name}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
+              <EquitySearchInput
+                value={searchQuery}
+                onChange={handleSearchChange}
+                onSelect={handleSelectEquity}
+                required
+              />
             </div>
           ) : (
             <div>
@@ -459,8 +393,7 @@ export function CreateAlertModal({
               Create Alert
             </button>
           </div>
-        </form>
-      </div>
-    </div>
+      </form>
+    </Modal>
   );
 }

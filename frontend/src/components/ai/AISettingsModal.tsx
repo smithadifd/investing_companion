@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { X, Key, Bot, Loader2, Check, AlertCircle } from 'lucide-react';
 import { useAISettings, useUpdateAISettings } from '@/lib/hooks/useAI';
+import { Modal } from '@/components/ui/Modal';
 
 interface AISettingsModalProps {
   isOpen: boolean;
@@ -40,26 +41,25 @@ export function AISettingsModal({ isOpen, onClose }: AISettingsModalProps) {
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white dark:bg-neutral-800 rounded-xl w-full max-w-md mx-4 shadow-xl">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-neutral-200 dark:border-neutral-700">
-          <div className="flex items-center gap-2">
-            <Bot className="h-5 w-5 text-blue-500" />
-            <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">
-              AI Settings
-            </h2>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-50 rounded-lg transition-colors"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+  const headerContent = (
+    <div className="flex items-center justify-between p-4 border-b border-neutral-200 dark:border-neutral-700">
+      <div className="flex items-center gap-2">
+        <Bot className="h-5 w-5 text-blue-500" />
+        <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">
+          AI Settings
+        </h2>
+      </div>
+      <button
+        onClick={onClose}
+        className="p-1 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-50 rounded-lg transition-colors"
+      >
+        <X className="h-5 w-5" />
+      </button>
+    </div>
+  );
 
-        {/* Content */}
+  return (
+    <Modal onClose={onClose} header={headerContent}>
         <div className="p-4 space-y-4">
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
@@ -174,7 +174,6 @@ export function AISettingsModal({ isOpen, onClose }: AISettingsModalProps) {
             Save Settings
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { X, Calendar, Clock, AlertCircle } from 'lucide-react';
 import { useCreateEvent } from '@/lib/hooks/useEvents';
+import { Modal } from '@/components/ui/Modal';
 import type { EventType, EventImportance, EconomicEventCreate } from '@/lib/api/types';
 
 interface Props {
@@ -64,31 +65,23 @@ export function CreateEventModal({ onClose, onSuccess, defaultDate }: Props) {
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/50"
+  const headerContent = (
+    <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200 dark:border-neutral-700">
+      <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+        <Calendar className="h-5 w-5" />
+        Add Custom Event
+      </h2>
+      <button
         onClick={onClose}
-      />
+        className="p-1 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-lg transition-colors"
+      >
+        <X className="h-5 w-5 text-neutral-500" />
+      </button>
+    </div>
+  );
 
-      {/* Modal */}
-      <div className="relative bg-white dark:bg-neutral-800 rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200 dark:border-neutral-700">
-          <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-            <Calendar className="h-5 w-5" />
-            Add Custom Event
-          </h2>
-          <button
-            onClick={onClose}
-            className="p-1 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-lg transition-colors"
-          >
-            <X className="h-5 w-5 text-neutral-500" />
-          </button>
-        </div>
-
-        {/* Form */}
+  return (
+    <Modal onClose={onClose} header={headerContent} maxWidth="lg">
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {error && (
             <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400 text-sm">
@@ -226,7 +219,6 @@ export function CreateEventModal({ onClose, onSuccess, defaultDate }: Props) {
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 }

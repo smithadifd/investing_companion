@@ -1,6 +1,5 @@
 """Equity API endpoints."""
 
-from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -22,11 +21,6 @@ from app.services.technical import TechnicalAnalysisService
 router = APIRouter()
 
 
-def create_meta() -> ResponseMeta:
-    """Create response metadata."""
-    return ResponseMeta(timestamp=datetime.utcnow())
-
-
 @router.get("/search", response_model=DataResponse[List[EquitySearchResult]])
 async def search_equities(
     q: str = Query(..., min_length=1, description="Search query"),
@@ -36,7 +30,7 @@ async def search_equities(
     """Search for equities by symbol or name."""
     service = EquityService(db)
     results = await service.search(q, limit)
-    return DataResponse(data=results, meta=create_meta())
+    return DataResponse(data=results, meta=ResponseMeta.now())
 
 
 @router.get("/{symbol}", response_model=DataResponse[EquityDetailResponse])
@@ -54,7 +48,7 @@ async def get_equity(
             detail=f"Equity '{symbol}' not found",
         )
 
-    return DataResponse(data=detail, meta=create_meta())
+    return DataResponse(data=detail, meta=ResponseMeta.now())
 
 
 @router.get("/{symbol}/quote", response_model=DataResponse[QuoteResponse])
@@ -72,7 +66,7 @@ async def get_quote(
             detail=f"Quote for '{symbol}' not found",
         )
 
-    return DataResponse(data=quote, meta=create_meta())
+    return DataResponse(data=quote, meta=ResponseMeta.now())
 
 
 @router.get("/{symbol}/history", response_model=DataResponse[HistoryResponse])
@@ -100,7 +94,7 @@ async def get_history(
             detail=f"History for '{symbol}' not found",
         )
 
-    return DataResponse(data=history, meta=create_meta())
+    return DataResponse(data=history, meta=ResponseMeta.now())
 
 
 @router.get("/{symbol}/technicals")
@@ -126,7 +120,7 @@ async def get_technicals(
     tech_service = TechnicalAnalysisService()
     indicators = tech_service.calculate_all(history.history)
 
-    return DataResponse(data=indicators, meta=create_meta())
+    return DataResponse(data=indicators, meta=ResponseMeta.now())
 
 
 @router.get("/{symbol}/technicals/summary")
@@ -147,7 +141,7 @@ async def get_technicals_summary(
     tech_service = TechnicalAnalysisService()
     summary = tech_service.get_summary(history.history)
 
-    return DataResponse(data=summary, meta=create_meta())
+    return DataResponse(data=summary, meta=ResponseMeta.now())
 
 
 @router.get("/{symbol}/peers", response_model=DataResponse[List[EquityDetailResponse]])
@@ -160,7 +154,7 @@ async def get_peers(
     service = EquityService(db)
     peers = await service.get_peers(symbol, limit)
 
-    return DataResponse(data=peers, meta=create_meta())
+    return DataResponse(data=peers, meta=ResponseMeta.now())
 
 
 @router.get("/{symbol}/events", response_model=DataResponse[List[EconomicEventResponse]])
@@ -177,4 +171,4 @@ async def get_equity_events(
         include_past=include_past,
         limit=limit,
     )
-    return DataResponse(data=events, meta=create_meta())
+    return DataResponse(data=events, meta=ResponseMeta.now())

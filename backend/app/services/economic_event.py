@@ -27,6 +27,7 @@ from app.schemas.economic_event import (
     UpcomingEventsResponse,
 )
 from app.services.data_providers.yahoo import YahooFinanceProvider
+from app.services.equity import EquityService
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ class EconomicEventService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.yahoo = YahooFinanceProvider()
+        self.equity_service = EquityService(db)
 
     # -------------------------------------------------------------------------
     # CRUD Operations
@@ -584,28 +586,8 @@ class EconomicEventService:
         return result.scalar_one_or_none()
 
     async def _get_or_create_equity(self, symbol: str) -> Optional[Equity]:
-        """Get or create equity by symbol."""
-        equity = await self._get_equity_by_symbol(symbol)
-        if equity:
-            return equity
-
-        # Fetch info and create
-        info = await self.yahoo.get_info(symbol)
-        if not info or not info.get("symbol"):
-            return None
-
-        equity = Equity(
-            symbol=info["symbol"].upper(),
-            name=info.get("longName") or info.get("shortName") or symbol,
-            exchange=info.get("exchange"),
-            asset_type=(info.get("quoteType") or "stock").lower(),
-            sector=info.get("sector"),
-            industry=info.get("industry"),
-        )
-        self.db.add(equity)
-        await self.db.commit()
-        await self.db.refresh(equity)
-        return equity
+        """Get or create equity by symbol. Delegates to EquityService."""
+        return await self.equity_service.get_or_create_equity(symbol)
 
     async def _upsert_equity_event(
         self,

@@ -102,7 +102,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build backend image
-        run: docker build -f docker/Dockerfile.backend.prod -t investing-backend:ci .
+        run: docker build -f ../docker/Dockerfile.backend.prod -t investing-backend:ci .
+        working-directory: backend
 
       - name: Build frontend image
-        run: docker build -f docker/Dockerfile.frontend.prod -t investing-frontend:ci .
+        run: docker build -f ../docker/Dockerfile.frontend.prod -t investing-frontend:ci .
+        working-directory: frontend

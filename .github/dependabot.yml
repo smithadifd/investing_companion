@@ -16,22 +16,6 @@ updates:
       - "smithadifd"
     open-pull-requests-limit: 5
     ignore:
-      # Next.js 16 migration planned — see docs/plans/nextjs-16-upgrade.md
-      - dependency-name: "next"
-        versions: [">=15.0.0"]
-      - dependency-name: "eslint-config-next"
-        versions: [">=15.0.0"]
-      - dependency-name: "react"
-        versions: [">=19.0.0"]
-      - dependency-name: "react-dom"
-        versions: [">=19.0.0"]
-      - dependency-name: "@types/react"
-        versions: [">=19.0.0"]
-      - dependency-name: "@types/react-dom"
-        versions: [">=19.0.0"]
-      # ESLint 9 — bundled with Next.js 16 migration
-      - dependency-name: "eslint"
-        versions: [">=9.0.0"]
       # Tailwind v4 requires full config migration (CSS-first)
       - dependency-name: "tailwindcss"
         versions: [">=4.0.0"]

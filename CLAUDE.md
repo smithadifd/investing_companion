@@ -161,17 +161,23 @@ POLYGON_API_KEY=  # Optional paid tier
 
 ## Testing Strategy
 
-- **Unit tests**: Services, utilities, data transformations
-- **Integration tests**: API endpoints with test database
+- **Backend unit tests**: Services, utilities, data transformations
+- **Backend integration tests**: API endpoints with test database
+- **Frontend unit tests**: Custom hooks (useAlert, useTrade) with mocked API client
+- **Frontend component tests**: Modal forms (CreateAlertModal, CreateTradeModal) with user-event
+- **Frontend integration tests**: Page-level tests (alerts page) with mocked hooks
 - **E2E tests**: Critical user flows (future, with Playwright)
 
 Run tests:
 ```bash
 # Backend
-pytest --cov=app
+cd backend && pytest --cov=app
 
 # Frontend
-npm test
+cd frontend && npm test
+
+# Frontend watch mode
+cd frontend && npm run test:watch
 ```
 
 ---

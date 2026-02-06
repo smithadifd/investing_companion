@@ -6,12 +6,17 @@ This guide documents the deployment of Investing Companion to a Synology NAS.
 
 ## Connection Information
 
-```bash
-# SSH connection (configured in ~/.ssh/config as 'synology')
-ssh synology
+First, configure your SSH connection details. Add to `~/.ssh/config`:
+```
+Host synology
+    HostName <your-nas-ip>
+    Port <your-ssh-port>
+    User <your-ssh-user>
+```
 
-# Manual connection if alias not configured:
-ssh -p your-ssh-port your-ssh-user@your-nas-ip
+Then connect with:
+```bash
+ssh synology
 ```
 
 **Paths on Synology:**
@@ -61,10 +66,10 @@ POSTGRES_PORT=5433
 SECRET_KEY=<generated-secret>
 
 # CORS (must include the Synology IP/port)
-CORS_ORIGINS=http://your-nas-ip:3000,http://localhost:3000
+CORS_ORIGINS=http://<your-nas-ip>:3000,http://localhost:3000
 
 # Frontend API URL (what the browser uses)
-NEXT_PUBLIC_API_URL=http://your-nas-ip:8000/api/v1
+NEXT_PUBLIC_API_URL=http://<your-nas-ip>:8000/api/v1
 
 # Environment
 ENVIRONMENT=production
@@ -210,7 +215,7 @@ docker-compose --env-file .env.production logs -f celery_worker
 
 Ensure `CORS_ORIGINS` in `.env.production` includes the URL you're accessing the frontend from:
 ```bash
-CORS_ORIGINS=http://your-nas-ip:3000,http://localhost:3000
+CORS_ORIGINS=http://<your-nas-ip>:3000,http://localhost:3000
 ```
 
 After changing, restart the API:
@@ -237,9 +242,9 @@ The celery and frontend containers run as root to avoid permission issues with S
 
 | Service | Internal (from Synology) | External (from LAN) |
 |---------|-------------------------|---------------------|
-| Frontend | http://localhost:3000 | http://your-nas-ip:3000 |
-| API | http://localhost:8000 | http://your-nas-ip:8000 |
-| API Docs | http://localhost:8000/docs | http://your-nas-ip:8000/docs |
+| Frontend | http://localhost:3000 | http://&lt;your-nas-ip&gt;:3000 |
+| API | http://localhost:8000 | http://&lt;your-nas-ip&gt;:8000 |
+| API Docs | http://localhost:8000/docs | http://&lt;your-nas-ip&gt;:8000/docs |
 
 ---
 
@@ -247,7 +252,7 @@ The celery and frontend containers run as root to avoid permission issues with S
 
 1. **Never commit `.env.production`** - it contains secrets
 2. **Change default passwords** before first deployment
-3. **The application is only accessible on the local network** (your local network) unless you configure port forwarding
+3. **The application is only accessible on the local network** unless you configure port forwarding
 4. **Registration is disabled by default** (`REGISTRATION_ENABLED=false`)
 
 ---

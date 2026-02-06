@@ -71,6 +71,30 @@ async def health_check(detailed: bool = False):
             checks["redis"] = {"status": "error", "message": str(e)}
             response["status"] = "degraded"
 
+        # Celery worker check
+        try:
+            import asyncio
+            from app.tasks.celery_app import celery_app
+
+            loop = asyncio.get_event_loop()
+            ping_result = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, lambda: celery_app.control.inspect().ping()
+                ),
+                timeout=3.0,
+            )
+            if ping_result:
+                checks["celery"] = {
+                    "status": "ok",
+                    "workers": len(ping_result),
+                }
+            else:
+                checks["celery"] = {"status": "error", "message": "No workers responded"}
+                response["status"] = "degraded"
+        except Exception as e:
+            checks["celery"] = {"status": "error", "message": str(e)}
+            response["status"] = "degraded"
+
         response["checks"] = checks
         response["response_time_ms"] = round((time.time() - start) * 1000, 2)
 

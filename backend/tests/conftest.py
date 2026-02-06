@@ -4,8 +4,13 @@ import uuid
 from typing import AsyncGenerator
 
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from app.core.config import settings
 from app.db.base import Base
@@ -21,39 +26,51 @@ from app.services.auth import AuthService
 # ---------------------------------------------------------------------------
 TEST_DATABASE_URL = settings.DATABASE_URL.rsplit("/", 1)[0] + "/investing_companion_test"
 
-engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-TestingSessionLocal = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autocommit=False,
-    autoflush=False,
-)
-
 
 # ---------------------------------------------------------------------------
-# Session-scoped: create / drop all tables once per test run
+# Session-scoped: create engine + tables once per test run
 # ---------------------------------------------------------------------------
-@pytest.fixture(scope="session", autouse=True)
-async def setup_database():
-    """Create all tables before the test suite, drop after."""
-    async with engine.begin() as conn:
+@pytest_asyncio.fixture(scope="session")
+async def engine():
+    """Create async engine and tables; tear down after entire suite."""
+    _engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+    async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    yield
-    async with engine.begin() as conn:
+    yield _engine
+    async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
-    await engine.dispose()
+    await _engine.dispose()
 
 
 # ---------------------------------------------------------------------------
-# Function-scoped: one session per test, rolled back for isolation
+# Function-scoped: one session per test, using savepoint for rollback
 # ---------------------------------------------------------------------------
-@pytest.fixture
-async def db() -> AsyncGenerator[AsyncSession, None]:
-    """Provide a transactional database session that rolls back after each test."""
+@pytest_asyncio.fixture
+async def db(engine) -> AsyncGenerator[AsyncSession, None]:
+    """Provide a database session wrapped in a savepoint.
+
+    The outer transaction is never committed, so all writes are rolled back
+    after each test — even when service code calls session.commit().
+    """
     async with engine.connect() as conn:
         txn = await conn.begin()
         session = AsyncSession(bind=conn, expire_on_commit=False)
+
+        # Use begin_nested() so that session.commit() inside services
+        # only commits the savepoint, not the outer transaction.
+        await conn.begin_nested()
+
+        # Re-open a nested savepoint every time the previous one ends
+        # (i.e. when service code calls commit or rollback).
+        from sqlalchemy import event
+
+        @event.listens_for(session.sync_session, "after_transaction_end")
+        def _restart_savepoint(sess, transaction):
+            if conn.closed:
+                return
+            if not conn.in_nested_transaction():
+                conn.sync_connection.begin_nested()
+
         try:
             yield session
         finally:
@@ -64,7 +81,7 @@ async def db() -> AsyncGenerator[AsyncSession, None]:
 # ---------------------------------------------------------------------------
 # FastAPI test client with DB override
 # ---------------------------------------------------------------------------
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(db: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     """Async HTTP client wired to the test database session."""
 
@@ -81,7 +98,7 @@ async def client(db: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
 # ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
-@pytest.fixture
+@pytest_asyncio.fixture
 async def test_user(db: AsyncSession):
     """Create and return a test user."""
     from tests.factories import create_test_user
@@ -89,7 +106,7 @@ async def test_user(db: AsyncSession):
     return await create_test_user(db)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def auth_headers(db: AsyncSession, test_user) -> dict:
     """Return Authorization headers for the test user."""
     auth_service = AuthService(db)
@@ -97,7 +114,7 @@ async def auth_headers(db: AsyncSession, test_user) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def authed_client(
     client: AsyncClient, auth_headers: dict
 ) -> AsyncClient:

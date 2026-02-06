@@ -72,16 +72,16 @@ describe('useTrades', () => {
   });
 
   it('fetches trades with no filters', async () => {
-    mockedApi.getTrades.mockResolvedValue([mockTrade]);
+    mockedApi.getTrades.mockResolvedValue({ trades: [mockTrade], total: 1 });
     const { result } = renderHook(() => useTrades(), { wrapper: createWrapper() });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(mockedApi.getTrades).toHaveBeenCalledWith(undefined);
-    expect(result.current.data).toEqual([mockTrade]);
+    expect(result.current.data).toEqual({ trades: [mockTrade], total: 1 });
   });
 
   it('passes filter params', async () => {
-    mockedApi.getTrades.mockResolvedValue([]);
+    mockedApi.getTrades.mockResolvedValue({ trades: [], total: 0 });
     const params = { equity_id: 1, trade_type: 'buy' as const, limit: 10 };
     const { result } = renderHook(() => useTrades(params), { wrapper: createWrapper() });
 

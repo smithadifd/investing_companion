@@ -17,6 +17,7 @@ Tracked issues and limitations that don't block development but need future reso
 | [011](./011-alert-crosses-detection-bug.md) | Alert "Crosses Above/Below" Detection Bug | Resolved | High | Alerts |
 | [012](./012-redis-cache-event-loop.md) | Redis Cache Client Event Loop in Celery | Open | Low | Celery/Caching |
 | [013](./013-news-page.md) | News Page & Catalyst Integration | Planned | Low | Notifications/UI |
+| [014](./014-intelligent-agents.md) | Intelligent Product Agents | Planned | Medium | Notifications/AI/Trading |
 
 ## Quick Reference
 

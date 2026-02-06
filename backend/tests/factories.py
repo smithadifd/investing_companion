@@ -19,7 +19,7 @@ async def create_test_user(
     db: AsyncSession,
     *,
     email: str = "test@example.com",
-    password: str = "testpassword123",
+    password: str = "TestPass123!",
     is_active: bool = True,
     is_admin: bool = False,
 ) -> User:

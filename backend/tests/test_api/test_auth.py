@@ -19,8 +19,8 @@ class TestRegistration:
         mock_settings.REGISTRATION_ENABLED = True
         resp = await client.post("/api/v1/auth/register", json={
             "email": "new@example.com",
-            "password": "strongpass123",
-            "password_confirm": "strongpass123",
+            "password": "StrongPass123!",
+            "password_confirm": "StrongPass123!",
         })
         assert resp.status_code == 201
         data = resp.json()["data"]
@@ -30,7 +30,7 @@ class TestRegistration:
     async def test_register_password_mismatch(self, client: AsyncClient):
         resp = await client.post("/api/v1/auth/register", json={
             "email": "mismatch@example.com",
-            "password": "strongpass123",
+            "password": "StrongPass123!",
             "password_confirm": "differentpass",
         })
         assert resp.status_code == 422
@@ -41,8 +41,8 @@ class TestRegistration:
         await create_test_user(db, email="dupe@example.com")
         resp = await client.post("/api/v1/auth/register", json={
             "email": "dupe@example.com",
-            "password": "strongpass123",
-            "password_confirm": "strongpass123",
+            "password": "StrongPass123!",
+            "password_confirm": "StrongPass123!",
         })
         assert resp.status_code == 409
 
@@ -59,8 +59,8 @@ class TestRegistration:
         mock_settings.REGISTRATION_ENABLED = False
         resp = await client.post("/api/v1/auth/register", json={
             "email": "disabled@example.com",
-            "password": "strongpass123",
-            "password_confirm": "strongpass123",
+            "password": "StrongPass123!",
+            "password_confirm": "StrongPass123!",
         })
         assert resp.status_code == 403
 
@@ -74,10 +74,10 @@ class TestLogin:
     @patch("app.api.v1.endpoints.auth.check_login_rate_limit", new_callable=AsyncMock)
     @patch("app.api.v1.endpoints.auth.reset_login_rate_limit", new_callable=AsyncMock)
     async def test_login_success(self, mock_reset, mock_check, client: AsyncClient, db: AsyncSession):
-        await create_test_user(db, email="login@example.com", password="testpassword123")
+        await create_test_user(db, email="login@example.com", password="TestPass123!")
         resp = await client.post("/api/v1/auth/login", json={
             "email": "login@example.com",
-            "password": "testpassword123",
+            "password": "TestPass123!",
         })
         assert resp.status_code == 200
         data = resp.json()["data"]
@@ -87,7 +87,7 @@ class TestLogin:
 
     @patch("app.api.v1.endpoints.auth.check_login_rate_limit", new_callable=AsyncMock)
     async def test_login_wrong_password(self, mock_check, client: AsyncClient, db: AsyncSession):
-        await create_test_user(db, email="wrongpw@example.com", password="testpassword123")
+        await create_test_user(db, email="wrongpw@example.com", password="TestPass123!")
         resp = await client.post("/api/v1/auth/login", json={
             "email": "wrongpw@example.com",
             "password": "wrongpassword",
@@ -107,7 +107,7 @@ class TestLogin:
         await create_test_user(db, email="inactive@example.com", is_active=False)
         resp = await client.post("/api/v1/auth/login", json={
             "email": "inactive@example.com",
-            "password": "testpassword123",
+            "password": "TestPass123!",
         })
         assert resp.status_code == 401
 

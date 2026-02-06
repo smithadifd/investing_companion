@@ -15,7 +15,9 @@ from tests.factories import create_test_user
 
 class TestRegistration:
 
-    async def test_register_success(self, client: AsyncClient):
+    @patch("app.api.v1.endpoints.auth.settings")
+    async def test_register_success(self, mock_settings, client: AsyncClient):
+        mock_settings.REGISTRATION_ENABLED = True
         resp = await client.post("/api/v1/auth/register", json={
             "email": "new@example.com",
             "password": "strongpass123",
@@ -34,7 +36,9 @@ class TestRegistration:
         })
         assert resp.status_code == 422
 
-    async def test_register_duplicate_email(self, client: AsyncClient, db: AsyncSession):
+    @patch("app.api.v1.endpoints.auth.settings")
+    async def test_register_duplicate_email(self, mock_settings, client: AsyncClient, db: AsyncSession):
+        mock_settings.REGISTRATION_ENABLED = True
         await create_test_user(db, email="dupe@example.com")
         resp = await client.post("/api/v1/auth/register", json={
             "email": "dupe@example.com",

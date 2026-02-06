@@ -1,7 +1,5 @@
 """User settings API endpoints."""
 
-from datetime import datetime
-
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,11 +14,6 @@ from app.services.settings import SettingsService
 router = APIRouter()
 
 
-def create_meta() -> ResponseMeta:
-    """Create response metadata."""
-    return ResponseMeta(timestamp=datetime.utcnow())
-
-
 @router.get("", response_model=DataResponse[AppSettings])
 async def get_settings(
     current_user: User = Depends(get_current_user),
@@ -29,7 +22,7 @@ async def get_settings(
     """Get current user's application settings."""
     settings_service = SettingsService(db)
     app_settings = await settings_service.get_app_settings(current_user.id)
-    return DataResponse(data=app_settings, meta=create_meta())
+    return DataResponse(data=app_settings, meta=ResponseMeta.now())
 
 
 @router.patch("", response_model=DataResponse[AppSettings])
@@ -49,4 +42,4 @@ async def update_settings(
     if updates.discord_webhook_url is not None:
         discord_service.clear_cache()
 
-    return DataResponse(data=app_settings, meta=create_meta())
+    return DataResponse(data=app_settings, meta=ResponseMeta.now())

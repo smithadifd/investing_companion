@@ -1,6 +1,5 @@
 """Watchlist API endpoints."""
 
-from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -25,11 +24,6 @@ from app.services.watchlist import WatchlistService
 router = APIRouter()
 
 
-def create_meta() -> ResponseMeta:
-    """Create response metadata."""
-    return ResponseMeta(timestamp=datetime.utcnow())
-
-
 @router.get("", response_model=DataResponse[List[WatchlistSummary]])
 async def list_watchlists(
     db: AsyncSession = Depends(get_db),
@@ -37,7 +31,7 @@ async def list_watchlists(
     """List all watchlists."""
     service = WatchlistService(db)
     watchlists = await service.list_watchlists()
-    return DataResponse(data=watchlists, meta=create_meta())
+    return DataResponse(data=watchlists, meta=ResponseMeta.now())
 
 
 @router.get("/movers", response_model=DataResponse[AllWatchlistMovers])
@@ -48,7 +42,7 @@ async def get_all_movers(
     """Get top gainers and losers across all watchlists."""
     service = WatchlistService(db)
     movers = await service.get_all_movers(limit)
-    return DataResponse(data=movers, meta=create_meta())
+    return DataResponse(data=movers, meta=ResponseMeta.now())
 
 
 @router.post("", response_model=DataResponse[WatchlistResponse], status_code=201)
@@ -59,7 +53,7 @@ async def create_watchlist(
     """Create a new watchlist."""
     service = WatchlistService(db)
     watchlist = await service.create_watchlist(data)
-    return DataResponse(data=watchlist, meta=create_meta())
+    return DataResponse(data=watchlist, meta=ResponseMeta.now())
 
 
 @router.get("/{watchlist_id}", response_model=DataResponse[WatchlistResponse])
@@ -75,7 +69,7 @@ async def get_watchlist(
     if not watchlist:
         raise HTTPException(status_code=404, detail="Watchlist not found")
 
-    return DataResponse(data=watchlist, meta=create_meta())
+    return DataResponse(data=watchlist, meta=ResponseMeta.now())
 
 
 @router.put("/{watchlist_id}", response_model=DataResponse[WatchlistResponse])
@@ -91,7 +85,7 @@ async def update_watchlist(
     if not watchlist:
         raise HTTPException(status_code=404, detail="Watchlist not found")
 
-    return DataResponse(data=watchlist, meta=create_meta())
+    return DataResponse(data=watchlist, meta=ResponseMeta.now())
 
 
 @router.delete("/{watchlist_id}", status_code=204)
@@ -135,7 +129,7 @@ async def add_item(
             detail="Could not add item. Watchlist or equity not found, or item already exists.",
         )
 
-    return DataResponse(data=item, meta=create_meta())
+    return DataResponse(data=item, meta=ResponseMeta.now())
 
 
 @router.put(
@@ -155,7 +149,7 @@ async def update_item(
     if not item:
         raise HTTPException(status_code=404, detail="Watchlist item not found")
 
-    return DataResponse(data=item, meta=create_meta())
+    return DataResponse(data=item, meta=ResponseMeta.now())
 
 
 @router.delete("/{watchlist_id}/items/{item_id}", status_code=204)
@@ -197,4 +191,4 @@ async def import_watchlist(
     """Import a watchlist from JSON format."""
     service = WatchlistService(db)
     watchlist = await service.import_watchlist(data)
-    return DataResponse(data=watchlist, meta=create_meta())
+    return DataResponse(data=watchlist, meta=ResponseMeta.now())

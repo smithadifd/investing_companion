@@ -1,6 +1,5 @@
 """Celery tasks for alert monitoring and notifications."""
 
-import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -8,27 +7,9 @@ from app.db.session import AsyncSessionLocal
 from app.services.alert import AlertService
 from app.services.notifications.discord import discord_service
 from app.tasks.celery_app import celery_app
+from app.tasks.utils import run_async
 
 logger = logging.getLogger(__name__)
-
-
-def run_async(coro):
-    """Helper to run async code in sync Celery task."""
-    from app.db.session import engine
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        # Close the Discord httpx client before the loop is destroyed,
-        # otherwise it tries to close its socket on a dead loop next time.
-        loop.run_until_complete(discord_service.close())
-        # Dispose the engine to close all pooled connections.
-        # Without this, asyncpg connections are orphaned when the
-        # event loop is destroyed, causing "idle in transaction" leaks.
-        loop.run_until_complete(engine.dispose())
-        loop.close()
 
 
 @celery_app.task(name="alerts.check_all_alerts")

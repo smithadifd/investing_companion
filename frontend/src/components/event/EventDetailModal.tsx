@@ -5,6 +5,7 @@ import { X, Calendar, Clock, Trash2, ExternalLink, Loader2, EyeOff } from 'lucid
 import type { EconomicEvent, EventType } from '@/lib/api/types';
 import { useDeleteEvent, useDeleteEquityEvents } from '@/lib/hooks/useEvents';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { Modal } from '@/components/ui/Modal';
 
 // Event type configuration
 const EVENT_TYPE_CONFIG: Record<EventType, { label: string; color: string }> = {
@@ -79,46 +80,38 @@ export function EventDetailModal({ event, onClose, onDeleted }: Props) {
     return num.toFixed(2);
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/50"
-        onClick={onClose}
-      />
-
-      {/* Modal */}
-      <div className="relative bg-white dark:bg-neutral-800 rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
-        {/* Header */}
-        <div className={`${config.color} px-6 py-4`}>
-          <div className="flex items-start justify-between">
-            <div className="flex items-center gap-3">
-              <div className="text-white/90 text-sm font-medium uppercase tracking-wide">
-                {config.label}
-              </div>
-            </div>
-            <button
-              onClick={onClose}
-              className="p-1 hover:bg-white/20 rounded-lg transition-colors"
-            >
-              <X className="h-5 w-5 text-white" />
-            </button>
+  const headerContent = (
+    <div className={`${config.color} px-6 py-4 rounded-t-xl`}>
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <div className="text-white/90 text-sm font-medium uppercase tracking-wide">
+            {config.label}
           </div>
-          <h2 className="text-xl font-bold text-white mt-2">
-            {event.title}
-          </h2>
-          {event.equity && (
-            <a
-              href={`/equity/${event.equity.symbol}`}
-              className="inline-flex items-center gap-1 text-white/90 hover:text-white text-sm mt-1"
-            >
-              {event.equity.symbol} - {event.equity.name}
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          )}
         </div>
+        <button
+          onClick={onClose}
+          className="p-1 hover:bg-white/20 rounded-lg transition-colors"
+        >
+          <X className="h-5 w-5 text-white" />
+        </button>
+      </div>
+      <h2 className="text-xl font-bold text-white mt-2">
+        {event.title}
+      </h2>
+      {event.equity && (
+        <a
+          href={`/equity/${event.equity.symbol}`}
+          className="inline-flex items-center gap-1 text-white/90 hover:text-white text-sm mt-1"
+        >
+          {event.equity.symbol} - {event.equity.name}
+          <ExternalLink className="h-3 w-3" />
+        </a>
+      )}
+    </div>
+  );
 
-        {/* Content */}
+  return (
+    <Modal onClose={onClose} header={headerContent} maxWidth="lg">
         <div className="p-6 space-y-4">
           {/* Date and time */}
           <div className="flex items-center gap-6">
@@ -257,7 +250,6 @@ export function EventDetailModal({ event, onClose, onDeleted }: Props) {
             Close
           </button>
         </div>
-      </div>
 
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
@@ -284,6 +276,6 @@ export function EventDetailModal({ event, onClose, onDeleted }: Props) {
           onCancel={() => setShowUntrackConfirm(false)}
         />
       )}
-    </div>
+    </Modal>
   );
 }

@@ -27,11 +27,6 @@ from app.services.trade import TradeService
 router = APIRouter()
 
 
-def create_meta() -> ResponseMeta:
-    """Create response metadata."""
-    return ResponseMeta(timestamp=datetime.utcnow())
-
-
 def get_trade_service(db: AsyncSession = Depends(get_db)) -> TradeService:
     """Dependency to get trade service instance."""
     return TradeService(db)
@@ -100,7 +95,7 @@ async def create_trade(
             detail="Could not create trade. Equity not found.",
         )
 
-    return DataResponse(data=trade, meta=create_meta())
+    return DataResponse(data=trade, meta=ResponseMeta.now())
 
 
 @router.get("/portfolio", response_model=DataResponse[PortfolioSummary])
@@ -115,7 +110,7 @@ async def get_portfolio(
     Current prices are fetched for unrealized P&L calculation.
     """
     portfolio = await service.get_portfolio(current_user.id)
-    return DataResponse(data=portfolio, meta=create_meta())
+    return DataResponse(data=portfolio, meta=ResponseMeta.now())
 
 
 @router.get("/performance", response_model=DataResponse[PerformanceReport])
@@ -136,7 +131,7 @@ async def get_performance(
         start_date=start_date,
         end_date=end_date,
     )
-    return DataResponse(data=report, meta=create_meta())
+    return DataResponse(data=report, meta=ResponseMeta.now())
 
 
 @router.get("/pairs", response_model=DataResponse[List[TradePairResponse]])
@@ -156,7 +151,7 @@ async def get_trade_pairs(
         equity_id=equity_id,
         limit=limit,
     )
-    return DataResponse(data=pairs, meta=create_meta())
+    return DataResponse(data=pairs, meta=ResponseMeta.now())
 
 
 @router.post("/position-size", response_model=DataResponse[PositionSizeResponse])
@@ -171,7 +166,7 @@ async def calculate_position_size(
     Uses the fixed risk method: Position Size = (Account × Risk%) / (Entry - Stop)
     """
     result = service.calculate_position_size(request)
-    return DataResponse(data=result, meta=create_meta())
+    return DataResponse(data=result, meta=ResponseMeta.now())
 
 
 @router.get("/positions/{equity_id}", response_model=DataResponse[PositionSummary])
@@ -193,7 +188,7 @@ async def get_position(
             detail="No position found for this equity",
         )
 
-    return DataResponse(data=position, meta=create_meta())
+    return DataResponse(data=position, meta=ResponseMeta.now())
 
 
 @router.get("/{trade_id}", response_model=DataResponse[TradeResponse])
@@ -211,7 +206,7 @@ async def get_trade(
             detail="Trade not found",
         )
 
-    return DataResponse(data=trade, meta=create_meta())
+    return DataResponse(data=trade, meta=ResponseMeta.now())
 
 
 @router.put("/{trade_id}", response_model=DataResponse[TradeResponse])
@@ -234,7 +229,7 @@ async def update_trade(
             detail="Trade not found",
         )
 
-    return DataResponse(data=trade, meta=create_meta())
+    return DataResponse(data=trade, meta=ResponseMeta.now())
 
 
 @router.delete("/{trade_id}", status_code=status.HTTP_204_NO_CONTENT)

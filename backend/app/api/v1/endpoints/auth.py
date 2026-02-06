@@ -1,6 +1,5 @@
 """Authentication API endpoints."""
 
-from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -32,11 +31,6 @@ from app.services.auth import AuthService
 router = APIRouter()
 
 
-def create_meta() -> ResponseMeta:
-    """Create response metadata."""
-    return ResponseMeta(timestamp=datetime.utcnow())
-
-
 @router.get("/registration-status", response_model=DataResponse[RegistrationStatus])
 async def get_registration_status() -> DataResponse[RegistrationStatus]:
     """Check if registration is enabled."""
@@ -44,7 +38,7 @@ async def get_registration_status() -> DataResponse[RegistrationStatus]:
         enabled=settings.REGISTRATION_ENABLED,
         message="Registration is open" if settings.REGISTRATION_ENABLED else "Registration is disabled",
     )
-    return DataResponse(data=status_data, meta=create_meta())
+    return DataResponse(data=status_data, meta=ResponseMeta.now())
 
 
 @router.post("/register", response_model=DataResponse[UserResponse], status_code=status.HTTP_201_CREATED)
@@ -71,7 +65,7 @@ async def register(
 
     user = await auth_service.create_user(user_data)
     user_response = UserResponse.model_validate(user)
-    return DataResponse(data=user_response, meta=create_meta())
+    return DataResponse(data=user_response, meta=ResponseMeta.now())
 
 
 @router.post("/login", response_model=DataResponse[TokenResponse])
@@ -102,7 +96,7 @@ async def login(
         ip_address=get_client_ip(request),
     )
 
-    return DataResponse(data=tokens, meta=create_meta())
+    return DataResponse(data=tokens, meta=ResponseMeta.now())
 
 
 @router.post("/refresh", response_model=DataResponse[TokenResponse])
@@ -126,7 +120,7 @@ async def refresh_tokens(
             detail="Invalid or expired refresh token",
         )
 
-    return DataResponse(data=tokens, meta=create_meta())
+    return DataResponse(data=tokens, meta=ResponseMeta.now())
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -155,7 +149,7 @@ async def get_current_user_info(
 ) -> DataResponse[UserResponse]:
     """Get current authenticated user's profile."""
     user_response = UserResponse.model_validate(current_user)
-    return DataResponse(data=user_response, meta=create_meta())
+    return DataResponse(data=user_response, meta=ResponseMeta.now())
 
 
 @router.patch("/me", response_model=DataResponse[UserResponse])
@@ -177,7 +171,7 @@ async def update_current_user(
 
     await db.refresh(current_user)
     user_response = UserResponse.model_validate(current_user)
-    return DataResponse(data=user_response, meta=create_meta())
+    return DataResponse(data=user_response, meta=ResponseMeta.now())
 
 
 @router.post("/me/change-password", status_code=status.HTTP_204_NO_CONTENT)
@@ -232,4 +226,4 @@ async def get_my_sessions(
         )
         session_list.append(session_info)
 
-    return DataResponse(data=session_list, meta=create_meta())
+    return DataResponse(data=session_list, meta=ResponseMeta.now())

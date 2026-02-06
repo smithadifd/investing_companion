@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { X, Loader2, Zap } from 'lucide-react';
 import { useCreateTrade } from '@/lib/hooks/useTrade';
+import { Modal } from '@/components/ui/Modal';
 import type { TradeType, TradeCreate } from '@/lib/api/types';
 
 interface QuickTradeModalProps {
@@ -55,26 +56,27 @@ export function QuickTradeModal({
   const totalValue = quantity && price ? parseFloat(quantity) * parseFloat(price) : 0;
   const isBuy = tradeType === 'buy';
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-neutral-800 rounded-xl w-full max-w-sm shadow-xl">
-        <div className={`flex items-center justify-between p-4 border-b border-neutral-200 dark:border-neutral-700 ${
-          isBuy ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-red-50 dark:bg-red-900/20'
-        } rounded-t-xl`}>
-          <div className="flex items-center gap-2">
-            <Zap className={`h-5 w-5 ${isBuy ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`} />
-            <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">
-              Quick {isBuy ? 'Buy' : 'Sell'} {symbol}
-            </h2>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1 text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-50 rounded-lg transition-colors"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+  const headerContent = (
+    <div className={`flex items-center justify-between p-4 border-b border-neutral-200 dark:border-neutral-700 ${
+      isBuy ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-red-50 dark:bg-red-900/20'
+    } rounded-t-xl`}>
+      <div className="flex items-center gap-2">
+        <Zap className={`h-5 w-5 ${isBuy ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`} />
+        <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">
+          Quick {isBuy ? 'Buy' : 'Sell'} {symbol}
+        </h2>
+      </div>
+      <button
+        onClick={onClose}
+        className="p-1 text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-50 rounded-lg transition-colors"
+      >
+        <X className="h-5 w-5" />
+      </button>
+    </div>
+  );
 
+  return (
+    <Modal onClose={onClose} header={headerContent} maxWidth="sm">
         <form onSubmit={handleSubmit} className="p-4 space-y-4">
           {/* Quantity */}
           <div>
@@ -146,7 +148,6 @@ export function QuickTradeModal({
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 }

@@ -60,7 +60,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
       - ENVIRONMENT=production
-      - CORS_ORIGINS=http://localhost:3000,http://${SYNOLOGY_IP:-192.168.1.100}:3000
+      - CORS_ORIGINS=https://investing.home,http://localhost:3000,http://${SYNOLOGY_IP:-192.168.1.100}:3000
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
       - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}
@@ -130,10 +130,10 @@ services:
       context: ./frontend
       dockerfile: ../docker/Dockerfile.frontend.prod
       args:
-        - NEXT_PUBLIC_API_URL=http://${SYNOLOGY_IP:-192.168.1.100}:8000/api/v1
+        - NEXT_PUBLIC_API_URL=/api/v1
     container_name: investing_frontend
     environment:
-      - NEXT_PUBLIC_API_URL=http://${SYNOLOGY_IP:-192.168.1.100}:8000/api/v1
+      - NEXT_PUBLIC_API_URL=/api/v1
     ports:
       - "3000:3000"
     depends_on:

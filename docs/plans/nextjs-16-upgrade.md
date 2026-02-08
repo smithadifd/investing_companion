@@ -1,4 +1,4 @@
-# Plan: Upgrade Next.js 14 → 16 + ESLint 9
+# Plan: Upgrade Next.js 14 → 16 + ESLint 9 — COMPLETE
 
 ## Motivation
 
@@ -138,6 +138,26 @@ After upgrade, update `.github/dependabot.yml` to remove the ESLint 9 ignore rul
 - **Tailwind CSS 3 → 4** — separate effort, no security impact, lower priority
 - **Converting client components to server components** — not needed, working fine as-is
 - **Removing `forwardRef`** — still works in React 19, can clean up opportunistically later
+
+## Result (2026-02-06)
+
+Completed in commit `ebf2c9d`. Final versions:
+
+| Package | Version |
+|---------|---------|
+| next | 16.1.6 |
+| react / react-dom | 19.2.4 |
+| eslint | 9.39.2 |
+| eslint-config-next | 16.1.6 |
+| @types/react | 19.2.13 |
+| @types/react-dom | 19.2.3 |
+
+- eslint-config-next 16.x ships native flat config — used simpler import (no FlatCompat needed)
+- Disabled `react-hooks/set-state-in-effect` and `react-hooks/preserve-manual-memoization` (React Compiler rules, not using Compiler)
+- 0 npm audit vulnerabilities (was 4 high)
+- All 61 tests pass, type-check clean, lint clean (0 errors)
+- CI green (backend, frontend, Docker build)
+- Deployed to Synology NAS, frontend healthy
 
 ## Rollback
 

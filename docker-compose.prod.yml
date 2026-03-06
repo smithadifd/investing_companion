@@ -1,5 +1,5 @@
 # Production Docker Compose for Investing Companion
-# Designed for deployment on Synology NAS with Traefik reverse proxy
+# Production deployment with Traefik reverse proxy
 #
 # Usage:
 #   1. Copy .env.production.example to .env.production
@@ -154,7 +154,7 @@ services:
     networks:
       - investing_network
     restart: unless-stopped
-    # Resource limits for Synology
+    # Resource limits for low-memory servers
     deploy:
       resources:
         limits:

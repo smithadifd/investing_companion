@@ -1,5 +1,5 @@
 # Local Network Docker Compose for Investing Companion
-# No HTTPS/Traefik - access via http://synology-ip:3000
+# For LAN deployment behind a reverse proxy (Caddy, Nginx, etc.)
 #
 # Usage:
 #   docker-compose -f docker-compose.local.yml --env-file .env.production up -d
@@ -60,7 +60,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
       - ENVIRONMENT=production
-      - CORS_ORIGINS=https://your-domain.local,http://localhost:3000,http://${SYNOLOGY_IP:-192.168.1.100}:3000
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
       - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}

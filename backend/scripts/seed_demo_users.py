@@ -188,7 +188,6 @@ async def seed_alerts(db, user_id: int) -> None:
             condition_type=condition,
             threshold_value=threshold,
             is_active=active,
-            notify_discord=False,
         )
         db.add(alert)
 

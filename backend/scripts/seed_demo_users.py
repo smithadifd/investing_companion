@@ -36,12 +36,10 @@ DEMO_PASSWORD = "demo1234!"
 async def ensure_equity(db, symbol: str, name: str) -> int:
     """Ensure an equity exists and return its ID."""
     equity_service = EquityService(db)
-    equity = await equity_service.get_or_create_by_symbol(symbol)
+    equity = await equity_service.get_or_create_equity(symbol)
     if equity:
         return equity.id
-    # Fallback: create minimal equity
-    equity = await equity_service.create_equity(symbol=symbol, name=name)
-    return equity.id
+    raise ValueError(f"Could not create equity for {symbol}")
 
 
 async def seed_demo_user(db) -> User:

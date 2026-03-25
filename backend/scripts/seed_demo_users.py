@@ -157,7 +157,7 @@ async def seed_trades(db, user_id: int) -> None:
             trade_type=trade_type,
             quantity=Decimal(str(quantity)),
             price=Decimal(price),
-            commission=Decimal("0"),
+            fees=Decimal("0"),
             executed_at=now - timedelta(days=days_ago),
         )
         db.add(trade)

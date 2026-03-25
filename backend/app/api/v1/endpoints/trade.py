@@ -6,7 +6,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_not_demo
 from app.db.models.trade import TradeType
 from app.db.models.user import User
 from app.db.session import get_db
@@ -72,6 +72,7 @@ async def list_trades(
 @router.post("", response_model=DataResponse[TradeResponse], status_code=status.HTTP_201_CREATED)
 async def create_trade(
     data: TradeCreate,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     service: TradeService = Depends(get_trade_service),
 ) -> DataResponse[TradeResponse]:
@@ -213,6 +214,7 @@ async def get_trade(
 async def update_trade(
     trade_id: int,
     data: TradeUpdate,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     service: TradeService = Depends(get_trade_service),
 ) -> DataResponse[TradeResponse]:
@@ -235,6 +237,7 @@ async def update_trade(
 @router.delete("/{trade_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_trade(
     trade_id: int,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     service: TradeService = Depends(get_trade_service),
 ) -> None:

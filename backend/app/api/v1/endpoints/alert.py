@@ -5,7 +5,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_not_demo
 from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.alert import (
@@ -54,6 +54,7 @@ async def list_alerts(
 @router.post("", response_model=DataResponse[AlertResponse], status_code=status.HTTP_201_CREATED)
 async def create_alert(
     data: AlertCreate,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
 ) -> DataResponse[AlertResponse]:
@@ -131,6 +132,7 @@ async def get_alert(
 async def update_alert(
     alert_id: int,
     data: AlertUpdate,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
 ) -> DataResponse[AlertResponse]:
@@ -149,6 +151,7 @@ async def update_alert(
 @router.delete("/{alert_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_alert(
     alert_id: int,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
 ) -> None:
@@ -166,6 +169,7 @@ async def delete_alert(
 @router.post("/{alert_id}/toggle", response_model=DataResponse[AlertResponse])
 async def toggle_alert(
     alert_id: int,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
 ) -> DataResponse[AlertResponse]:
@@ -259,6 +263,7 @@ async def check_alert(
 
 @router.post("/notifications/test", response_model=DataResponse[dict])
 async def test_discord_notification(
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
 ) -> DataResponse[dict]:
     """

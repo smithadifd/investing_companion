@@ -5,7 +5,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_not_demo
 from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.common import DataResponse, ResponseMeta
@@ -52,6 +52,7 @@ async def get_all_movers(
 @router.post("", response_model=DataResponse[WatchlistResponse], status_code=201)
 async def create_watchlist(
     data: WatchlistCreate,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[WatchlistResponse]:
@@ -82,6 +83,7 @@ async def get_watchlist(
 async def update_watchlist(
     watchlist_id: int,
     data: WatchlistUpdate,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[WatchlistResponse]:
@@ -98,6 +100,7 @@ async def update_watchlist(
 @router.delete("/{watchlist_id}", status_code=204)
 async def delete_watchlist(
     watchlist_id: int,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
@@ -119,6 +122,7 @@ async def delete_watchlist(
 async def add_item(
     watchlist_id: int,
     data: WatchlistItemCreate,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[WatchlistItemResponse]:
@@ -149,6 +153,7 @@ async def update_item(
     watchlist_id: int,
     item_id: int,
     data: WatchlistItemUpdate,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[WatchlistItemResponse]:
@@ -166,6 +171,7 @@ async def update_item(
 async def remove_item(
     watchlist_id: int,
     item_id: int,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
@@ -198,6 +204,7 @@ async def export_watchlist(
 @router.post("/import", response_model=DataResponse[WatchlistResponse], status_code=201)
 async def import_watchlist(
     data: WatchlistImport,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[WatchlistResponse]:

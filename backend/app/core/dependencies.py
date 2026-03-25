@@ -115,3 +115,17 @@ def get_client_ip(request: Request) -> Optional[str]:
 def get_user_agent(request: Request) -> Optional[str]:
     """Extract user agent from request."""
     return request.headers.get("User-Agent")
+
+
+def require_not_demo() -> None:
+    """Dependency that blocks the endpoint in demo mode.
+
+    Usage: Depends(require_not_demo)
+    """
+    from app.core.demo import is_demo_mode, DEMO_BLOCKED_MESSAGE
+
+    if is_demo_mode():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=DEMO_BLOCKED_MESSAGE,
+        )

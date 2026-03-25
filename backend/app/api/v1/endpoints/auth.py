@@ -10,6 +10,7 @@ from app.core.dependencies import (
     get_client_ip,
     get_current_user,
     get_user_agent,
+    require_not_demo,
 )
 from app.core.rate_limit import check_login_rate_limit, reset_login_rate_limit
 from app.db.models.user import User
@@ -34,16 +35,21 @@ router = APIRouter()
 @router.get("/registration-status", response_model=DataResponse[RegistrationStatus])
 async def get_registration_status() -> DataResponse[RegistrationStatus]:
     """Check if registration is enabled."""
-    status_data = RegistrationStatus(
-        enabled=settings.REGISTRATION_ENABLED,
-        message="Registration is open" if settings.REGISTRATION_ENABLED else "Registration is disabled",
-    )
+    enabled = settings.REGISTRATION_ENABLED and not settings.DEMO_MODE
+    if settings.DEMO_MODE:
+        message = "Registration is disabled in demo mode"
+    elif settings.REGISTRATION_ENABLED:
+        message = "Registration is open"
+    else:
+        message = "Registration is disabled"
+    status_data = RegistrationStatus(enabled=enabled, message=message)
     return DataResponse(data=status_data, meta=ResponseMeta.now())
 
 
 @router.post("/register", response_model=DataResponse[UserResponse], status_code=status.HTTP_201_CREATED)
 async def register(
     user_data: UserCreate,
+    _demo_guard: None = Depends(require_not_demo),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[UserResponse]:
     """Register a new user account."""
@@ -155,6 +161,7 @@ async def get_current_user_info(
 @router.patch("/me", response_model=DataResponse[UserResponse])
 async def update_current_user(
     user_update: UserUpdate,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[UserResponse]:
@@ -177,6 +184,7 @@ async def update_current_user(
 @router.post("/me/change-password", status_code=status.HTTP_204_NO_CONTENT)
 async def change_password(
     password_data: PasswordChange,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:

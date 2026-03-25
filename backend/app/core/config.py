@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     REGISTRATION_ENABLED: bool = True  # Set to False for single-user mode
+    DEMO_MODE: bool = False  # Set to True for public demo deployment
 
     # External APIs
     ALPHA_VANTAGE_API_KEY: str = ""

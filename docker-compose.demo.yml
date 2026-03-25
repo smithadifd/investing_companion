@@ -1,0 +1,176 @@
+# Demo Docker Compose for Investing Companion
+# Public demo at invest.smithadifd.com (EC2 behind Caddy)
+#
+# Usage:
+#   docker compose -f docker-compose.demo.yml --env-file .env.demo up -d --build
+
+services:
+  # ===========================================
+  # Database
+  # ===========================================
+  db:
+    image: timescale/timescaledb:latest-pg15
+    container_name: investing_demo_db
+    environment:
+      POSTGRES_USER: investing_demo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: investing_demo
+    volumes:
+      - demo_postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U investing_demo -d investing_demo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - demo_network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ===========================================
+  # Redis (Cache + Celery Broker)
+  # ===========================================
+  redis:
+    image: redis:7-alpine
+    container_name: investing_demo_redis
+    command: redis-server --appendonly yes --maxmemory 64mb --maxmemory-policy allkeys-lru
+    volumes:
+      - demo_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - demo_network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 96M
+
+  # ===========================================
+  # Backend API
+  # ===========================================
+  api:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend.prod
+    container_name: investing_demo_api
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://investing_demo:${POSTGRES_PASSWORD}@db:5432/investing_demo
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - ENVIRONMENT=production
+      - CORS_ORIGINS=https://invest.smithadifd.com
+      - REGISTRATION_ENABLED=false
+      - DEMO_MODE=true
+    ports:
+      - "8003:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - demo_network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ===========================================
+  # Celery Worker (Background Tasks)
+  # ===========================================
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend.prod
+    container_name: investing_demo_celery_worker
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://investing_demo:${POSTGRES_PASSWORD}@db:5432/investing_demo
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - ENVIRONMENT=production
+      - DEMO_MODE=true
+    command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info", "--concurrency=1"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - demo_network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 200M
+
+  # ===========================================
+  # Celery Beat (Scheduler)
+  # ===========================================
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend.prod
+    container_name: investing_demo_celery_beat
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://investing_demo:${POSTGRES_PASSWORD}@db:5432/investing_demo
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - ENVIRONMENT=production
+      - DEMO_MODE=true
+    command: ["celery", "-A", "app.tasks.celery_app", "beat", "--loglevel=info"]
+    depends_on:
+      celery_worker:
+        condition: service_started
+    networks:
+      - demo_network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # ===========================================
+  # Frontend
+  # ===========================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/Dockerfile.frontend.prod
+      args:
+        - NEXT_PUBLIC_API_URL=/api/v1
+        - NEXT_PUBLIC_DEMO_MODE=true
+    container_name: investing_demo_frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=/api/v1
+      - NEXT_PUBLIC_DEMO_MODE=true
+    ports:
+      - "3013:3000"
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - demo_network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+volumes:
+  demo_postgres_data:
+    name: investing_demo_postgres_data
+  demo_redis_data:
+    name: investing_demo_redis_data
+
+networks:
+  demo_network:
+    name: investing_demo_network

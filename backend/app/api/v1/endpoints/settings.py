@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_not_demo
 from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.auth import AppSettings, AppSettingsUpdate
@@ -28,6 +28,7 @@ async def get_settings(
 @router.patch("", response_model=DataResponse[AppSettings])
 async def update_settings(
     updates: AppSettingsUpdate,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[AppSettings]:

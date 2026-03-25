@@ -7,6 +7,7 @@ import { TrendingUp, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRegistrationStatus } from '@/lib/hooks/useAuth';
 import { api } from '@/lib/api/client';
+import { DEMO_MODE, DEMO_USER } from '@/lib/demo';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -83,6 +84,15 @@ export default function LoginPage() {
           <h1 className="text-2xl font-bold text-center text-neutral-900 dark:text-neutral-50 mb-6">
             {isLogin ? 'Welcome back' : 'Create account'}
           </h1>
+
+          {/* Demo credentials */}
+          {DEMO_MODE && (
+            <div className="mb-4 p-3 rounded-lg bg-amber-600/10 border border-amber-600/30 text-amber-400 text-sm">
+              <p className="font-medium mb-1">Demo Credentials</p>
+              <p>Email: <code className="bg-amber-600/10 px-1 rounded">{DEMO_USER.email}</code></p>
+              <p>Password: <code className="bg-amber-600/10 px-1 rounded">{DEMO_USER.password}</code></p>
+            </div>
+          )}
 
           {/* Error message */}
           {error && (

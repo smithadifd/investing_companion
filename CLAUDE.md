@@ -223,6 +223,37 @@ cd frontend && npm run test:watch
 
 ---
 
+## Demo Mode
+
+For public demo deployment at `https://invest.smithadifd.com`. Controlled by `DEMO_MODE=true` env var.
+
+### What it does
+- **DemoBanner**: Amber bar at top of every page ("Demo Mode — data resets weekly. View source on GitHub")
+- **Demo credentials**: Shown on login page (`demo@example.com` / `demo1234!`)
+- **Mutation blocking**: `require_not_demo` FastAPI dependency returns 403 for trade/watchlist/alert/event/settings/AI mutations
+- **Registration disabled**: Registration status endpoint returns disabled in demo mode
+- **Celery Beat**: Alert checking and notification schedule disabled; event refresh kept active
+- **Session**: Standard JWT expiry (30min access, 30 day refresh)
+
+### Demo data
+- `backend/scripts/seed_demo_users.py` — creates demo user, 2 watchlists, synthetic trades, sample alerts
+- `backend/scripts/seed_demo_data.py` — seeds ratios and macro economic events (FOMC, CPI, NFP, GDP)
+- Live Yahoo Finance data via Celery workers (free, no API key)
+
+### Demo deployment
+- `docker-compose.demo.yml` — all 6 services (db, redis, api, celery worker/beat, frontend)
+- `scripts/deploy-demo.sh` — SSH to EC2 `demo` host, pull, build, migrate, seed
+- `.env.demo` on EC2 contains `SECRET_KEY` and `POSTGRES_PASSWORD`
+- Caddy on EC2 proxies: `/api/*` and `/health` → port 8003, everything else → port 3013
+
+### Environment variables
+| Variable | Description |
+|----------|-------------|
+| `DEMO_MODE` | Backend: blocks mutations, adjusts Celery beat |
+| `NEXT_PUBLIC_DEMO_MODE` | Frontend: shows demo banner and credentials |
+
+---
+
 ## Known Limitations
 
 - Yahoo Finance is unofficial API - may break

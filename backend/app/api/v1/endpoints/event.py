@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user, get_current_user_optional
+from app.core.dependencies import get_current_user, get_current_user_optional, require_not_demo
 from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.common import DataResponse, ResponseMeta
@@ -211,6 +211,7 @@ async def get_event(
 @router.post("", response_model=DataResponse[EconomicEventResponse], status_code=status.HTTP_201_CREATED)
 async def create_event(
     data: EconomicEventCreate,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     service: EconomicEventService = Depends(get_event_service),
 ) -> DataResponse[EconomicEventResponse]:
@@ -228,6 +229,7 @@ async def create_event(
 async def update_event(
     event_id: UUID,
     data: EconomicEventUpdate,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     service: EconomicEventService = Depends(get_event_service),
 ) -> DataResponse[EconomicEventResponse]:
@@ -253,6 +255,7 @@ async def update_event(
 @router.delete("/{event_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_event(
     event_id: UUID,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     service: EconomicEventService = Depends(get_event_service),
 ) -> None:
@@ -272,6 +275,7 @@ async def delete_event(
 @router.delete("/equity/{symbol}", response_model=DataResponse[dict])
 async def delete_equity_events(
     symbol: str,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     service: EconomicEventService = Depends(get_event_service),
 ) -> DataResponse[dict]:

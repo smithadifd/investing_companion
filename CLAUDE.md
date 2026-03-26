@@ -242,9 +242,12 @@ For public demo deployment at `https://invest.smithadifd.com`. Controlled by `DE
 
 ### Demo deployment
 - `docker-compose.demo.yml` — all 6 services (db, redis, api, celery worker/beat, frontend)
-- `scripts/deploy-demo.sh` — SSH to EC2 `demo` host, pull, build, migrate, seed
+- `scripts/deploy-demo.sh` — manual SSH to EC2 `demo` host, pull, build, migrate, seed
 - `.env.demo` on EC2 contains `SECRET_KEY` and `POSTGRES_PASSWORD`
 - Caddy on EC2 proxies: `/api/*` and `/health` → port 8003, everything else → port 3013
+- **Auto-deploy**: EC2 cron polls for new commits on main every 5 minutes, builds and deploys automatically (see `demo-infra/scripts/auto-deploy.sh`)
+- **Weekly reset**: EC2 cron re-seeds user data via seed scripts Sunday 4am UTC (see `demo-infra/scripts/reset-demos.sh`)
+- **Deploy log**: `/var/log/demo-deploy.log` on EC2
 
 ### Environment variables
 | Variable | Description |

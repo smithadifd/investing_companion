@@ -5,7 +5,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_not_demo
 from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.common import DataResponse
@@ -48,6 +48,7 @@ async def create_ratio(
     data: RatioCreate,
     current_user: User = Depends(get_current_user),
     service: RatioService = Depends(get_ratio_service),
+    _demo_guard: None = Depends(require_not_demo),
 ) -> DataResponse[RatioResponse]:
     """
     Create a new custom ratio.
@@ -72,6 +73,7 @@ async def get_all_ratio_quotes(
 async def initialize_system_ratios(
     current_user: User = Depends(get_current_user),
     service: RatioService = Depends(get_ratio_service),
+    _demo_guard: None = Depends(require_not_demo),
 ) -> None:
     """
     Initialize system ratios. Creates pre-defined ratios if they don't exist.
@@ -103,6 +105,7 @@ async def update_ratio(
     data: RatioUpdate,
     current_user: User = Depends(get_current_user),
     service: RatioService = Depends(get_ratio_service),
+    _demo_guard: None = Depends(require_not_demo),
 ) -> DataResponse[RatioResponse]:
     """
     Update a ratio. For system ratios, only is_favorite can be changed.
@@ -121,6 +124,7 @@ async def delete_ratio(
     ratio_id: int,
     current_user: User = Depends(get_current_user),
     service: RatioService = Depends(get_ratio_service),
+    _demo_guard: None = Depends(require_not_demo),
 ) -> None:
     """
     Delete a custom ratio. System ratios cannot be deleted.

@@ -793,6 +793,25 @@ export interface EventStats {
   watchlist_earnings_upcoming: number;
 }
 
+// News types
+export interface NewsItem {
+  id: string;
+  title: string;
+  summary: string | null;
+  url: string;
+  source: string;
+  image_url: string | null;
+  published_at: string;
+  sentiment: 'positive' | 'negative' | 'neutral' | null;
+  symbols: string[];
+}
+
+export interface NewsResponse {
+  symbol: string | null;
+  items: NewsItem[];
+  cached_at: string | null;
+}
+
 export interface EventFilters {
   start_date?: string;
   end_date?: string;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { TrendingUp, Eye, EyeOff, Loader2 } from 'lucide-react';
@@ -22,8 +22,13 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Redirect if already authenticated
+  useEffect(() => {
+    if (!authLoading && isAuthenticated) {
+      router.push('/');
+    }
+  }, [authLoading, isAuthenticated, router]);
+
   if (!authLoading && isAuthenticated) {
-    router.push('/');
     return null;
   }
 

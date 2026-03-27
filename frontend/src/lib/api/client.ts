@@ -4,6 +4,7 @@
 
 import type {
   AIAnalysisRequest,
+  NewsResponse,
   AIAnalysisResponse,
   AISettings,
   AISettingsUpdate,
@@ -527,6 +528,29 @@ class ApiClient {
    */
   async getMarketOverview(): Promise<MarketOverview> {
     return this.fetch<MarketOverview>('/market/overview');
+  }
+
+  // News methods
+
+  /**
+   * Get news for a specific symbol
+   */
+  async getSymbolNews(symbol: string, limit = 10): Promise<NewsResponse> {
+    return this.fetch<NewsResponse>(`/news/${encodeURIComponent(symbol)}?limit=${limit}`);
+  }
+
+  /**
+   * Get general market news
+   */
+  async getMarketNews(limit = 20): Promise<NewsResponse> {
+    return this.fetch<NewsResponse>(`/news/market?limit=${limit}`);
+  }
+
+  /**
+   * Get aggregated news for all watchlist symbols
+   */
+  async getWatchlistNews(limit = 20): Promise<NewsResponse> {
+    return this.fetch<NewsResponse>(`/news/watchlist?limit=${limit}`);
   }
 
   // Ratio methods

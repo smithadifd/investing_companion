@@ -105,6 +105,7 @@ class Settings(BaseSettings):
     # External APIs
     ALPHA_VANTAGE_API_KEY: str = ""
     POLYGON_API_KEY: str = ""
+    FINNHUB_API_KEY: str = ""
     DISCORD_WEBHOOK_URL: str = ""
 
     # AI (fallback, users provide their own)

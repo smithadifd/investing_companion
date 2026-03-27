@@ -57,6 +57,7 @@ services:
       # External API Keys (optional)
       - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}
       - POLYGON_API_KEY=${POLYGON_API_KEY:-}
+      - FINNHUB_API_KEY=${FINNHUB_API_KEY:-}
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
     volumes:

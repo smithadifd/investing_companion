@@ -80,6 +80,16 @@ class CacheService:
         """Generate cache key for ticker info."""
         return f"info:{symbol.upper()}"
 
+    @staticmethod
+    def news_key(symbol: str) -> str:
+        """Generate cache key for symbol news."""
+        return f"news:{symbol.upper()}"
+
+    @staticmethod
+    def market_news_key() -> str:
+        """Generate cache key for market-wide news."""
+        return "news:market"
+
 
 # Global cache instance
 cache_service = CacheService()

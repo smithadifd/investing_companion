@@ -8,6 +8,12 @@ Self-hosted equity analysis dashboard with AI-powered insights, real-time alerts
 
 Free tools like Yahoo Finance and Google Finance are fine for checking a stock price, but fall apart when you want to compare ratios across a watchlist, track your actual trades, or get AI-generated analysis that considers your specific holdings. Paid tools (TradingView, Koyfin) are great but expensive for a hobbyist investor. This project fills the gap: a self-hosted dashboard that combines data from multiple sources, runs analysis you care about, and sends alerts to Discord when something moves.
 
+## Live Demo
+
+**[Try it live at invest.smithadifd.com](https://invest.smithadifd.com)**
+
+Log in with `demo@example.com` / `demo1234!` to explore the full dashboard. Data resets weekly and write operations (creating trades, alerts, watchlists) are disabled in demo mode.
+
 ## Tech Stack
 
 | Layer | Technology |

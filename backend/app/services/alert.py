@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.alert import Alert, AlertHistory
 from app.db.models.equity import Equity
+from app.db.models.price_history import PriceHistory
 from app.db.models.ratio import Ratio
 from app.schemas.alert import (
     AlertCheckResult,
@@ -276,7 +277,7 @@ class AlertService:
             )
 
         # Evaluate condition (pass intraday extremes for crossing detection)
-        is_triggered, condition_desc = self._evaluate_condition(
+        is_triggered, condition_desc = await self._evaluate_condition(
             alert, current_value, intraday_high=intraday_high, intraday_low=intraday_low
         )
 
@@ -482,7 +483,7 @@ class AlertService:
 
         return None, target_info, None, None
 
-    def _evaluate_condition(
+    async def _evaluate_condition(
         self,
         alert: Alert,
         current_value: Decimal,
@@ -499,11 +500,6 @@ class AlertService:
         """
         threshold = Decimal(str(alert.threshold_value))
         condition = alert.condition_type
-        last_value = (
-            Decimal(str(alert.last_checked_value))
-            if alert.last_checked_value
-            else None
-        )
 
         if condition == "above":
             # Also trigger if intraday high breached threshold
@@ -574,25 +570,107 @@ class AlertService:
                 desc = f"No cross: was {state} threshold, now {'below' if currently_below else 'above'} ({current_value:.4f})"
             return triggered, desc
 
-        elif condition == "percent_up":
-            # This would need historical data comparison
-            # For now, we'll compare against last checked value as a simple implementation
-            if last_value is None or last_value == 0:
-                return False, "No previous value for percent change"
-            pct_change = ((current_value - last_value) / last_value) * 100
-            triggered = pct_change >= threshold
-            desc = f"Up {pct_change:.2f}% (threshold: +{threshold:.2f}%)"
-            return triggered, desc
-
-        elif condition == "percent_down":
-            if last_value is None or last_value == 0:
-                return False, "No previous value for percent change"
-            pct_change = ((last_value - current_value) / last_value) * 100
-            triggered = pct_change >= threshold
-            desc = f"Down {pct_change:.2f}% (threshold: -{threshold:.2f}%)"
+        elif condition in ("percent_up", "percent_down"):
+            reference_value = await self._get_historical_reference_value(alert)
+            period = alert.comparison_period or "1d"
+            if reference_value is None or reference_value == 0:
+                return False, f"No price history for {period} lookback"
+            pct_change = ((current_value - reference_value) / reference_value) * 100
+            if condition == "percent_up":
+                triggered = pct_change >= threshold
+                desc = f"Up {pct_change:.2f}% over {period} (threshold: +{threshold:.2f}%, ref: {reference_value:.4f})"
+            else:
+                # percent_down: pct_change is negative when price dropped
+                triggered = pct_change <= -threshold
+                desc = f"Down {abs(pct_change):.2f}% over {period} (threshold: -{threshold:.2f}%, ref: {reference_value:.4f})"
             return triggered, desc
 
         return False, f"Unknown condition type: {condition}"
+
+    async def _get_historical_reference_value(
+        self, alert: Alert
+    ) -> Optional[Decimal]:
+        """Get historical reference value for percent change alerts.
+
+        Maps comparison_period to a lookback duration, then queries price_history
+        for the close price nearest to (now - lookback). For ratio alerts,
+        computes the historical ratio from both symbols' price history.
+        """
+        period_map = {"1d": timedelta(days=1), "1w": timedelta(days=7), "1m": timedelta(days=30)}
+        period = alert.comparison_period or "1d"
+        lookback = period_map.get(period)
+        if lookback is None:
+            logger.warning(f"Alert {alert.id}: unknown comparison_period '{period}'")
+            return None
+
+        target_time = datetime.now(timezone.utc) - lookback
+
+        if alert.equity_id:
+            return await self._get_closest_close(alert.equity_id, target_time)
+
+        elif alert.ratio_id:
+            # Ratio alert: look up both symbols' historical prices
+            stmt = select(Ratio).where(Ratio.id == alert.ratio_id)
+            result = await self.db.execute(stmt)
+            ratio = result.scalar_one_or_none()
+            if not ratio:
+                return None
+
+            # Find equity IDs for numerator and denominator
+            num_stmt = select(Equity).where(Equity.symbol == ratio.numerator_symbol)
+            den_stmt = select(Equity).where(Equity.symbol == ratio.denominator_symbol)
+            num_result, den_result = await asyncio.gather(
+                self.db.execute(num_stmt), self.db.execute(den_stmt)
+            )
+            num_equity = num_result.scalar_one_or_none()
+            den_equity = den_result.scalar_one_or_none()
+            if not num_equity or not den_equity:
+                logger.warning(
+                    f"Alert {alert.id}: missing equity for ratio "
+                    f"{ratio.numerator_symbol}/{ratio.denominator_symbol}"
+                )
+                return None
+
+            num_close, den_close = await asyncio.gather(
+                self._get_closest_close(num_equity.id, target_time),
+                self._get_closest_close(den_equity.id, target_time),
+            )
+            if num_close is None or den_close is None or den_close == 0:
+                logger.warning(
+                    f"Alert {alert.id}: no price history for ratio components at {target_time}"
+                )
+                return None
+            return num_close / den_close
+
+        return None
+
+    async def _get_closest_close(
+        self, equity_id: int, target_time: datetime
+    ) -> Optional[Decimal]:
+        """Get the close price nearest to target_time for an equity.
+
+        Searches within a +/- 3 day window around the target time to handle
+        weekends and holidays, picks the row closest to target_time.
+        """
+        window = timedelta(days=3)
+        stmt = (
+            select(PriceHistory.close, PriceHistory.timestamp)
+            .where(
+                PriceHistory.equity_id == equity_id,
+                PriceHistory.timestamp >= target_time - window,
+                PriceHistory.timestamp <= target_time + window,
+            )
+            .order_by(func.abs(func.extract("epoch", PriceHistory.timestamp - target_time)))
+            .limit(1)
+        )
+        result = await self.db.execute(stmt)
+        row = result.first()
+        if row is None:
+            logger.warning(
+                f"No price history for equity {equity_id} near {target_time}"
+            )
+            return None
+        return Decimal(str(row.close))
 
     def _check_cooldown(self, alert: Alert) -> bool:
         """Check if alert is past cooldown period."""

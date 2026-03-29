@@ -33,7 +33,7 @@ def _mock_quote(price: float, high: float | None = None, low: float | None = Non
 
 
 # ---------------------------------------------------------------------------
-# _evaluate_condition — pure logic, no DB/API needed
+# _evaluate_condition — condition logic (percent types query price_history)
 # ---------------------------------------------------------------------------
 
 class TestEvaluateConditionAbove:
@@ -44,7 +44,7 @@ class TestEvaluateConditionAbove:
         alert = await create_test_alert(db, equity, condition_type="above", threshold_value=100.0)
         service = AlertService(db)
 
-        triggered, desc = service._evaluate_condition(alert, Decimal("105"))
+        triggered, desc = await service._evaluate_condition(alert, Decimal("105"))
         assert triggered is True
         assert "105" in desc
 
@@ -53,7 +53,7 @@ class TestEvaluateConditionAbove:
         alert = await create_test_alert(db, equity, condition_type="above", threshold_value=100.0)
         service = AlertService(db)
 
-        triggered, _ = service._evaluate_condition(alert, Decimal("99"))
+        triggered, _ = await service._evaluate_condition(alert, Decimal("99"))
         assert triggered is False
 
     async def test_above_equal_not_triggered(self, db: AsyncSession):
@@ -61,7 +61,7 @@ class TestEvaluateConditionAbove:
         alert = await create_test_alert(db, equity, condition_type="above", threshold_value=100.0)
         service = AlertService(db)
 
-        triggered, _ = service._evaluate_condition(alert, Decimal("100"))
+        triggered, _ = await service._evaluate_condition(alert, Decimal("100"))
         assert triggered is False
 
     async def test_above_intraday_high_triggers(self, db: AsyncSession):
@@ -70,7 +70,7 @@ class TestEvaluateConditionAbove:
         service = AlertService(db)
 
         # Current below threshold, but intraday high breached it
-        triggered, desc = service._evaluate_condition(
+        triggered, desc = await service._evaluate_condition(
             alert, Decimal("98"), intraday_high=Decimal("102")
         )
         assert triggered is True
@@ -85,7 +85,7 @@ class TestEvaluateConditionBelow:
         alert = await create_test_alert(db, equity, condition_type="below", threshold_value=100.0)
         service = AlertService(db)
 
-        triggered, _ = service._evaluate_condition(alert, Decimal("95"))
+        triggered, _ = await service._evaluate_condition(alert, Decimal("95"))
         assert triggered is True
 
     async def test_below_not_triggered(self, db: AsyncSession):
@@ -93,7 +93,7 @@ class TestEvaluateConditionBelow:
         alert = await create_test_alert(db, equity, condition_type="below", threshold_value=100.0)
         service = AlertService(db)
 
-        triggered, _ = service._evaluate_condition(alert, Decimal("105"))
+        triggered, _ = await service._evaluate_condition(alert, Decimal("105"))
         assert triggered is False
 
     async def test_below_intraday_low_triggers(self, db: AsyncSession):
@@ -101,7 +101,7 @@ class TestEvaluateConditionBelow:
         alert = await create_test_alert(db, equity, condition_type="below", threshold_value=100.0)
         service = AlertService(db)
 
-        triggered, desc = service._evaluate_condition(
+        triggered, desc = await service._evaluate_condition(
             alert, Decimal("102"), intraday_low=Decimal("98")
         )
         assert triggered is True
@@ -121,7 +121,7 @@ class TestEvaluateConditionCrossesAbove:
         )
         service = AlertService(db)
 
-        triggered, desc = service._evaluate_condition(alert, Decimal("105"))
+        triggered, desc = await service._evaluate_condition(alert, Decimal("105"))
         assert triggered is False
         assert "Baseline" in desc
 
@@ -135,7 +135,7 @@ class TestEvaluateConditionCrossesAbove:
         )
         service = AlertService(db)
 
-        triggered, desc = service._evaluate_condition(alert, Decimal("105"))
+        triggered, desc = await service._evaluate_condition(alert, Decimal("105"))
         assert triggered is True
         assert "Crossed above" in desc
 
@@ -149,7 +149,7 @@ class TestEvaluateConditionCrossesAbove:
         )
         service = AlertService(db)
 
-        triggered, _ = service._evaluate_condition(alert, Decimal("110"))
+        triggered, _ = await service._evaluate_condition(alert, Decimal("110"))
         assert triggered is False
 
     async def test_crosses_above_not_triggered_still_below(self, db: AsyncSession):
@@ -162,7 +162,7 @@ class TestEvaluateConditionCrossesAbove:
         )
         service = AlertService(db)
 
-        triggered, _ = service._evaluate_condition(alert, Decimal("95"))
+        triggered, _ = await service._evaluate_condition(alert, Decimal("95"))
         assert triggered is False
 
     async def test_crosses_above_intraday_high(self, db: AsyncSession):
@@ -176,7 +176,7 @@ class TestEvaluateConditionCrossesAbove:
         service = AlertService(db)
 
         # Current still below, but intraday high crossed
-        triggered, desc = service._evaluate_condition(
+        triggered, desc = await service._evaluate_condition(
             alert, Decimal("98"), intraday_high=Decimal("102")
         )
         assert triggered is True
@@ -196,7 +196,7 @@ class TestEvaluateConditionCrossesBelow:
         )
         service = AlertService(db)
 
-        triggered, desc = service._evaluate_condition(alert, Decimal("95"))
+        triggered, desc = await service._evaluate_condition(alert, Decimal("95"))
         assert triggered is False
         assert "Baseline" in desc
 
@@ -210,7 +210,7 @@ class TestEvaluateConditionCrossesBelow:
         )
         service = AlertService(db)
 
-        triggered, desc = service._evaluate_condition(alert, Decimal("95"))
+        triggered, desc = await service._evaluate_condition(alert, Decimal("95"))
         assert triggered is True
         assert "Crossed below" in desc
 
@@ -224,7 +224,7 @@ class TestEvaluateConditionCrossesBelow:
         )
         service = AlertService(db)
 
-        triggered, _ = service._evaluate_condition(alert, Decimal("90"))
+        triggered, _ = await service._evaluate_condition(alert, Decimal("90"))
         assert triggered is False
 
     async def test_crosses_below_intraday_low(self, db: AsyncSession):
@@ -237,7 +237,7 @@ class TestEvaluateConditionCrossesBelow:
         )
         service = AlertService(db)
 
-        triggered, desc = service._evaluate_condition(
+        triggered, desc = await service._evaluate_condition(
             alert, Decimal("102"), intraday_low=Decimal("98")
         )
         assert triggered is True
@@ -245,75 +245,120 @@ class TestEvaluateConditionCrossesBelow:
 
 
 class TestEvaluateConditionPercent:
-    """Tests for percent_up and percent_down conditions."""
+    """Tests for percent_up and percent_down conditions using price_history."""
+
+    async def _insert_price_history(
+        self, db: AsyncSession, equity_id: int, timestamp: datetime, close: float
+    ):
+        """Insert a price_history row for testing."""
+        from app.db.models.price_history import PriceHistory
+        ph = PriceHistory(
+            equity_id=equity_id,
+            timestamp=timestamp,
+            open=close, high=close, low=close, close=close,
+        )
+        db.add(ph)
+        await db.flush()
 
     async def test_percent_up_triggered(self, db: AsyncSession):
         equity = await create_test_equity(db, symbol="PU1")
+        # Insert a reference price of 100 from ~1 day ago
+        ref_time = datetime.now(timezone.utc) - timedelta(days=1)
+        await self._insert_price_history(db, equity.id, ref_time, 100.0)
+
         alert = await create_test_alert(
             db, equity,
             condition_type="percent_up",
             threshold_value=5.0,
-            last_checked_value=100.0,
+            comparison_period="1d",
         )
         service = AlertService(db)
 
-        triggered, desc = service._evaluate_condition(alert, Decimal("106"))
+        triggered, desc = await service._evaluate_condition(alert, Decimal("106"))
         assert triggered is True
         assert "Up" in desc
 
     async def test_percent_up_not_triggered(self, db: AsyncSession):
         equity = await create_test_equity(db, symbol="PU2")
+        ref_time = datetime.now(timezone.utc) - timedelta(days=1)
+        await self._insert_price_history(db, equity.id, ref_time, 100.0)
+
         alert = await create_test_alert(
             db, equity,
             condition_type="percent_up",
             threshold_value=5.0,
-            last_checked_value=100.0,
+            comparison_period="1d",
         )
         service = AlertService(db)
 
-        triggered, _ = service._evaluate_condition(alert, Decimal("103"))
+        triggered, _ = await service._evaluate_condition(alert, Decimal("103"))
         assert triggered is False
 
-    async def test_percent_up_no_last_value(self, db: AsyncSession):
+    async def test_percent_up_no_history(self, db: AsyncSession):
+        """No price_history => skip, don't trigger."""
         equity = await create_test_equity(db, symbol="PU3")
         alert = await create_test_alert(
             db, equity,
             condition_type="percent_up",
             threshold_value=5.0,
-            last_checked_value=None,
+            comparison_period="1d",
         )
         service = AlertService(db)
 
-        triggered, desc = service._evaluate_condition(alert, Decimal("106"))
+        triggered, desc = await service._evaluate_condition(alert, Decimal("106"))
         assert triggered is False
-        assert "No previous value" in desc
+        assert "No price history" in desc
 
     async def test_percent_down_triggered(self, db: AsyncSession):
         equity = await create_test_equity(db, symbol="PD1")
+        ref_time = datetime.now(timezone.utc) - timedelta(days=1)
+        await self._insert_price_history(db, equity.id, ref_time, 100.0)
+
         alert = await create_test_alert(
             db, equity,
             condition_type="percent_down",
             threshold_value=5.0,
-            last_checked_value=100.0,
+            comparison_period="1d",
         )
         service = AlertService(db)
 
-        triggered, desc = service._evaluate_condition(alert, Decimal("93"))
+        triggered, desc = await service._evaluate_condition(alert, Decimal("93"))
         assert triggered is True
         assert "Down" in desc
 
     async def test_percent_down_not_triggered(self, db: AsyncSession):
         equity = await create_test_equity(db, symbol="PD2")
+        ref_time = datetime.now(timezone.utc) - timedelta(days=1)
+        await self._insert_price_history(db, equity.id, ref_time, 100.0)
+
         alert = await create_test_alert(
             db, equity,
             condition_type="percent_down",
             threshold_value=5.0,
-            last_checked_value=100.0,
+            comparison_period="1d",
         )
         service = AlertService(db)
 
-        triggered, _ = service._evaluate_condition(alert, Decimal("97"))
+        triggered, _ = await service._evaluate_condition(alert, Decimal("97"))
         assert triggered is False
+
+    async def test_percent_down_weekly_lookback(self, db: AsyncSession):
+        """Verify 1w comparison_period looks back ~7 days."""
+        equity = await create_test_equity(db, symbol="PD3")
+        ref_time = datetime.now(timezone.utc) - timedelta(days=7)
+        await self._insert_price_history(db, equity.id, ref_time, 100.0)
+
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="percent_down",
+            threshold_value=10.0,
+            comparison_period="1w",
+        )
+        service = AlertService(db)
+
+        triggered, desc = await service._evaluate_condition(alert, Decimal("88"))
+        assert triggered is True
+        assert "1w" in desc
 
 
 # ---------------------------------------------------------------------------

@@ -3,8 +3,18 @@ name: CI
 on:
   push:
     branches: [main, develop]
+    paths-ignore:
+      - 'docs-site/**'
+      - 'docs/**'
+      - '**/*.md'
+      - '.github/workflows/docs-site.yml'
   pull_request:
     branches: [main, develop]
+    paths-ignore:
+      - 'docs-site/**'
+      - 'docs/**'
+      - '**/*.md'
+      - '.github/workflows/docs-site.yml'
 
 jobs:
   backend:

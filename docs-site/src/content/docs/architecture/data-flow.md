@@ -12,7 +12,7 @@ This page traces four concrete paths through the system: a live quote request, a
 When the frontend requests a quote for a ticker, the request hits the FastAPI backend and goes through `EquityService.get_quote()` in `backend/app/services/equity.py`.
 
 ```text
-1. GET /api/v1/equities/{symbol}/quote arrives at the equity endpoint
+1. GET /api/v1/equity/{symbol}/quote arrives at the equity endpoint
 2. EquityService.get_quote(symbol) is called
 3. cache_service.quote_key(symbol) produces the key "quote:{SYMBOL}" (uppercased)
 4. cache_service.get(key) checks Redis
@@ -34,7 +34,7 @@ The same cache-check pattern applies to `get_fundamentals()` (key: `fundamentals
 
 Historical OHLCV data travels two distinct paths depending on who's asking.
 
-**On-demand (frontend):** `GET /api/v1/equities/{symbol}/history` calls `EquityService.get_history(symbol, period, interval)`. This follows the same cache-first pattern as quotes. On a miss, `YahooFinanceProvider.get_history()` fetches the data via yfinance, the result is wrapped in a `HistoryResponse`, cached in Redis, and returned. The data never touches the database in this path.
+**On-demand (frontend):** `GET /api/v1/equity/{symbol}/history` calls `EquityService.get_history(symbol, period, interval)`. This follows the same cache-first pattern as quotes. On a miss, `YahooFinanceProvider.get_history()` fetches the data via yfinance, the result is wrapped in a `HistoryResponse`, cached in Redis, and returned. The data never touches the database in this path.
 
 **Persisted history (alert evaluation):** The `price_history` table — a TimescaleDB hypertable defined in `backend/app/db/models/price_history.py` with a composite primary key of `(equity_id, timestamp)` — stores OHLCV rows for use by the alert evaluator. `AlertService._get_historical_reference_value()` queries this table when evaluating `percent_up` / `percent_down` alert conditions. It uses `_get_closest_close()`, which searches within a ±3-day window around the target time to handle weekends and holidays.
 

@@ -36,7 +36,14 @@ These docs cover architecture, features, deployment, and the reasoning behind th
 - [Features](/features/equity-dashboard/) — one page per feature, with the relevant endpoints and models.
 - [Design decisions](/design-decisions/stack/) — TimescaleDB, cache-first reads, FIFO trade matching, the AI integration shape.
 - [Roadmap & status](/roadmap/) — what's done, what's next.
+- [Contributing](/contributing/) — codebase layout, the service-layer pattern, and how to add a new feature.
 
 ## What's in the repo
 
-The project is a two-service app wrapped in Docker Compose. `backend/` is a FastAPI application with SQLAlchemy 2.0 models, Alembic migrations, and Celery tasks under `app/tasks/`. `frontend/` is a Next.js App Router app using Zustand for client state and TanStack Query for server state. Postgres 15 with the TimescaleDB extension stores price history as a hypertable; Redis handles the cache and acts as the Celery broker. Reverse-proxied by Caddy in the deployment setup.
+The project is a two-service app wrapped in Docker Compose. `backend/` is a FastAPI application with SQLAlchemy 2.0 models, Alembic migrations, and Celery tasks under `app/tasks/`. `frontend/` is a Next.js App Router app using Zustand for client state and TanStack Query for server state. Postgres 15 with the TimescaleDB extension stores price history as a hypertable; Redis handles the cache and acts as the Celery broker. The production compose file bundles Traefik with Let's Encrypt; the local compose file leaves the reverse proxy to whatever you're already running.
+
+## Elsewhere
+
+- [smithadifd.com](https://smithadifd.com) — portfolio site with this project and the rest of my work.
+- [GitHub repository](https://github.com/smithadifd/investing_companion) — source, issues, and the [README](https://github.com/smithadifd/investing_companion/blob/main/README.md) for a condensed pitch.
+- [docs/ROADMAP.md](https://github.com/smithadifd/investing_companion/blob/main/docs/ROADMAP.md) — the full per-phase deliverable checklist if the [summary](/roadmap/) isn't enough.

@@ -11,7 +11,7 @@ python-dotenv>=1.0.0
 # ===========================================
 sqlalchemy[asyncio]>=2.0.25
 asyncpg>=0.29.0
-alembic>=1.13.0
+alembic>=1.18.4
 psycopg2-binary>=2.9.9  # For alembic sync operations
 
 # ===========================================

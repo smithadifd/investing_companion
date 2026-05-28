@@ -92,6 +92,12 @@ services:
       - ENVIRONMENT=production
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
     command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info", "--concurrency=2"]
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     depends_on:
       db:
         condition: service_healthy
@@ -116,6 +122,8 @@ services:
       - ENVIRONMENT=production
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
     command: ["celery", "-A", "app.tasks.celery_app", "beat", "--loglevel=info"]
+    healthcheck:
+      disable: true
     depends_on:
       celery_worker:
         condition: service_started

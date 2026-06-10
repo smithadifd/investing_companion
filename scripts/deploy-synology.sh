@@ -53,13 +53,16 @@ echo "  ✓ Pulled latest code"
 echo ""
 
 # 4. Rebuild and restart containers
+# COMPOSE_HTTP_TIMEOUT=300: Synology's docker-compose v1 default is 60s, which
+# times out mid-recreate on multi-service rebuilds (leaving some containers on
+# the old image). 300s gives the slow recreate room to finish.
 echo "Step 4/4: Rebuilding containers..."
-ssh "$SYNOLOGY_HOST" "export PATH=/usr/local/bin:\$PATH && cd $DEPLOY_PATH && $DOCKER_COMPOSE -f $COMPOSE_FILE --env-file $ENV_FILE up -d --build"
+ssh "$SYNOLOGY_HOST" "export PATH=/usr/local/bin:\$PATH && export COMPOSE_HTTP_TIMEOUT=300 && cd $DEPLOY_PATH && $DOCKER_COMPOSE -f $COMPOSE_FILE --env-file $ENV_FILE up -d --build"
 echo ""
 
 # Show status
 echo "=== Container Status ==="
-ssh "$SYNOLOGY_HOST" "export PATH=/usr/local/bin:\$PATH && cd $DEPLOY_PATH && $DOCKER_COMPOSE -f $COMPOSE_FILE --env-file $ENV_FILE ps"
+ssh "$SYNOLOGY_HOST" "export PATH=/usr/local/bin:\$PATH && export COMPOSE_HTTP_TIMEOUT=300 && cd $DEPLOY_PATH && $DOCKER_COMPOSE -f $COMPOSE_FILE --env-file $ENV_FILE ps"
 echo ""
 
 echo "========================================="

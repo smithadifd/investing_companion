@@ -1,0 +1,21 @@
+# Never copy host build artifacts into the image — the deps stage runs `npm ci`
+# for the image's own platform. Copying host node_modules (e.g. macOS-only
+# @next/swc-darwin) over the clean install causes next/@next/swc version
+# mismatches and platform-binary breakage during `npm run build`.
+node_modules
+.next
+out
+
+# Dev/local-only
+.git
+.gitignore
+.env
+.env.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor / OS
+.DS_Store
+.vscode
+.idea

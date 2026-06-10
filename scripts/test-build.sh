@@ -9,9 +9,21 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
 
-# Use Node 20 if available via nvm
-if [ -d "$HOME/.nvm/versions/node/v20.11.1" ]; then
-    export PATH="$HOME/.nvm/versions/node/v20.11.1/bin:$PATH"
+# Match the repo's pinned Node (.nvmrc = 22). The frontend test suite pulls in
+# jsdom's html-encoding-sniffer, which require()s the ESM-only @exodus/bytes —
+# that fails on Node <22 with ERR_REQUIRE_ESM. Node 22 supports require(ESM),
+# and CI/Docker both run 22, so pin local pre-flight to the same.
+if [ -s "$HOME/.nvm/nvm.sh" ]; then
+    # shellcheck disable=SC1091
+    . "$HOME/.nvm/nvm.sh"
+    nvm use >/dev/null 2>&1 || nvm use 22 >/dev/null 2>&1 || true
+fi
+
+NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+if [ "$NODE_MAJOR" -lt 22 ]; then
+    echo "✗ Node $NODE_MAJOR detected; this project requires Node 22+ (see .nvmrc)."
+    echo "  The frontend test suite fails on Node <22 (ERR_REQUIRE_ESM in html-encoding-sniffer)."
+    exit 1
 fi
 
 echo "=== Testing Production Build ==="

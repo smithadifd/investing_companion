@@ -531,6 +531,39 @@ export interface TriggerUpdate {
   alert_ids?: number[];
 }
 
+// Trade-readiness card types (dashboard)
+export interface ReadinessPosition {
+  symbol: string;
+  quantity: number | string;
+  avg_cost_basis: number | string;
+}
+
+export interface ReadinessEvent {
+  title: string;
+  symbol: string | null;
+  event_date: string;
+  days_away: number;
+}
+
+export interface TradeReadinessItem {
+  trigger_id: number;
+  name: string;
+  tier: string | null;
+  rule: string;
+  action: string;
+  signal: TriggerSignal;
+  distance_percent: number | string | null;
+  last_triggered_at: string | null;
+  symbols: string[];
+  positions: ReadinessPosition[];
+  upcoming_events: ReadinessEvent[];
+  inactive_alert_count: number;
+}
+
+export interface TradeReadinessResponse {
+  items: TradeReadinessItem[];
+}
+
 // Auth types
 export interface User {
   id: string;

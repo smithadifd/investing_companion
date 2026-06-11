@@ -197,6 +197,11 @@ class TradeService:
         positions = await self._calculate_positions(user_id, equity_id=equity_id)
         return positions[0] if positions else None
 
+    async def get_open_positions(self, user_id: UUID) -> List[PositionSummary]:
+        """Open positions without quote lookups - DB-only context for dashboard surfaces."""
+        positions = await self._calculate_positions(user_id, with_quotes=False)
+        return [p for p in positions if p.quantity != 0]
+
     async def get_portfolio(self, user_id: UUID) -> PortfolioSummary:
         """Get portfolio summary with all positions."""
         positions = await self._calculate_positions(user_id)
@@ -425,7 +430,10 @@ class TradeService:
         await self.db.commit()
 
     async def _calculate_positions(
-        self, user_id: UUID, equity_id: Optional[int] = None
+        self,
+        user_id: UUID,
+        equity_id: Optional[int] = None,
+        with_quotes: bool = True,
     ) -> List[PositionSummary]:
         """Calculate current positions from trades."""
         conditions = [Trade.user_id == user_id]
@@ -489,7 +497,7 @@ class TradeService:
             unrealized_pnl = None
             unrealized_pnl_percent = None
 
-            if net_quantity != 0:
+            if net_quantity != 0 and with_quotes:
                 quote = await self.equity_service.get_quote(equity.symbol)
                 if quote and quote.price:
                     current_price = quote.price

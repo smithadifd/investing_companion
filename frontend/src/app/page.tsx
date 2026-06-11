@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import {
   NeedsAttention,
+  TradeReadiness,
   WatchlistMovers,
   NotificationsFeed,
   MarketSnapshot,
@@ -25,6 +26,9 @@ export default function Dashboard() {
 
         {/* Needs Attention - decisions first, renders nothing when all clear */}
         <NeedsAttention />
+
+        {/* Trade Readiness - actionable standing orders, renders nothing when none */}
+        <TradeReadiness />
 
         {/* Market Snapshot - Full width */}
         <div className="mb-6">

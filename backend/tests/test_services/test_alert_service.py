@@ -634,3 +634,243 @@ class TestProcessAlert:
         assert was_triggered is False
         assert error is None
         mock_discord.send_alert_notification.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Sustained confirmation (confirm_checks) on crossing alerts
+# ---------------------------------------------------------------------------
+
+class TestSustainedConfirmation:
+    """confirm_checks=N: the condition must hold for N consecutive checks."""
+
+    def _service_with_price(self, db, price: float, low: float | None = None) -> AlertService:
+        service = AlertService(db)
+        mock_yahoo = AsyncMock()
+        mock_yahoo.get_quote = AsyncMock(
+            return_value=_mock_quote(price, low=low) if price is not None else None
+        )
+        service.yahoo = mock_yahoo
+        return service
+
+    @patch("app.services.alert.discord_service")
+    async def test_fires_on_nth_consecutive_check_only(self, mock_discord, db: AsyncSession):
+        mock_discord.send_alert_notification = AsyncMock(return_value=(True, None))
+        equity = await create_test_equity(db, symbol="SUS1")
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="crosses_below",
+            threshold_value=100.0,
+            confirm_checks=3,
+        )
+
+        service = self._service_with_price(db, 95.0)
+        # Checks 1 and 2: below but not yet confirmed
+        for expected_count in (1, 2):
+            was_triggered, error = await service.process_alert(alert)
+            assert error is None
+            assert was_triggered is False
+            assert alert.consecutive_met_count == expected_count
+        # Check 3: sustained -> fires
+        was_triggered, _ = await service.process_alert(alert)
+        assert was_triggered is True
+        assert alert.consecutive_met_count == 3
+        mock_discord.send_alert_notification.assert_awaited_once()
+        # Check 4: still below -> counter grows, no re-fire
+        was_triggered, _ = await service.process_alert(alert)
+        assert was_triggered is False
+        assert alert.consecutive_met_count == 4
+        mock_discord.send_alert_notification.assert_awaited_once()
+
+    @patch("app.services.alert.discord_service")
+    async def test_recovery_resets_counter(self, mock_discord, db: AsyncSession):
+        mock_discord.send_alert_notification = AsyncMock(return_value=(True, None))
+        equity = await create_test_equity(db, symbol="SUS2")
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="crosses_below",
+            threshold_value=100.0,
+            confirm_checks=2,
+        )
+
+        below = self._service_with_price(db, 95.0)
+        above = self._service_with_price(db, 105.0)
+
+        was_triggered, _ = await below.process_alert(alert)
+        assert was_triggered is False
+        assert alert.consecutive_met_count == 1
+        # Recovery resets the count - the dip was not sustained
+        was_triggered, _ = await above.process_alert(alert)
+        assert was_triggered is False
+        assert alert.consecutive_met_count == 0
+        # A fresh excursion confirms from scratch
+        was_triggered, _ = await below.process_alert(alert)
+        assert was_triggered is False
+        assert alert.consecutive_met_count == 1
+        was_triggered, _ = await below.process_alert(alert)
+        assert was_triggered is True
+        assert alert.consecutive_met_count == 2
+
+    @patch("app.services.alert.discord_service")
+    async def test_intraday_dip_does_not_count(self, mock_discord, db: AsyncSession):
+        """An intraday breach that recovered by check time is what sustained filters out."""
+        mock_discord.send_alert_notification = AsyncMock(return_value=(True, None))
+        equity = await create_test_equity(db, symbol="SUS3")
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="crosses_below",
+            threshold_value=100.0,
+            confirm_checks=2,
+            was_above_threshold=True,
+        )
+
+        # Check-time price above threshold, but intraday low dipped below.
+        # A plain crossing alert would fire here; sustained must not count it.
+        service = self._service_with_price(db, 105.0, low=90.0)
+        was_triggered, _ = await service.process_alert(alert)
+        assert was_triggered is False
+        assert alert.consecutive_met_count == 0
+        mock_discord.send_alert_notification.assert_not_called()
+
+    @patch("app.services.alert.discord_service")
+    async def test_fetch_failure_preserves_counter(self, mock_discord, db: AsyncSession):
+        mock_discord.send_alert_notification = AsyncMock(return_value=(True, None))
+        equity = await create_test_equity(db, symbol="SUS4")
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="crosses_below",
+            threshold_value=100.0,
+            confirm_checks=3,
+            was_above_threshold=False,
+        )
+        alert.consecutive_met_count = 2
+        await db.flush()
+
+        service = AlertService(db)
+        mock_yahoo = AsyncMock()
+        mock_yahoo.get_quote = AsyncMock(return_value=None)
+        service.yahoo = mock_yahoo
+
+        was_triggered, _ = await service.process_alert(alert)
+        assert was_triggered is False
+        # Neither the counter nor the cross state was corrupted by the 0 placeholder
+        assert alert.consecutive_met_count == 2
+        assert alert.was_above_threshold is False
+
+    @patch("app.services.alert.discord_service")
+    async def test_crosses_above_sustained(self, mock_discord, db: AsyncSession):
+        mock_discord.send_alert_notification = AsyncMock(return_value=(True, None))
+        equity = await create_test_equity(db, symbol="SUS5")
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="crosses_above",
+            threshold_value=100.0,
+            confirm_checks=2,
+        )
+
+        service = self._service_with_price(db, 105.0)
+        was_triggered, _ = await service.process_alert(alert)
+        assert was_triggered is False
+        assert alert.consecutive_met_count == 1
+        was_triggered, _ = await service.process_alert(alert)
+        assert was_triggered is True
+        assert alert.consecutive_met_count == 2
+
+    async def test_evaluate_describes_progress(self, db: AsyncSession):
+        equity = await create_test_equity(db, symbol="SUS6")
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="crosses_below",
+            threshold_value=100.0,
+            confirm_checks=3,
+        )
+        service = AlertService(db)
+
+        triggered, desc = await service._evaluate_condition(alert, Decimal("95"))
+        assert triggered is False
+        assert "check 1/3" in desc
+
+
+class TestSustainedCrud:
+    """Create/update plumbing for confirm_checks."""
+
+    async def test_create_rejects_non_crossing_condition(self, db: AsyncSession):
+        import pytest
+        from pydantic import ValidationError
+        from app.schemas.alert import AlertCreate
+
+        with pytest.raises(ValidationError, match="crossing conditions"):
+            AlertCreate(
+                name="bad",
+                condition_type="below",
+                threshold_value=Decimal("100"),
+                equity_symbol="TEST",
+                confirm_checks=3,
+            )
+
+    async def test_update_null_clears_and_resets_counter(self, db: AsyncSession):
+        from app.schemas.alert import AlertUpdate
+
+        equity = await create_test_equity(db, symbol="SUS7")
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="crosses_below",
+            threshold_value=100.0,
+            confirm_checks=3,
+        )
+        alert.consecutive_met_count = 2
+        await db.flush()
+
+        service = AlertService(db)
+        updated = await service.update_alert(alert.id, AlertUpdate(confirm_checks=None))
+        assert updated is not None
+        assert updated.confirm_checks is None
+        assert alert.consecutive_met_count == 0
+
+    async def test_update_threshold_resets_counter(self, db: AsyncSession):
+        from app.schemas.alert import AlertUpdate
+
+        equity = await create_test_equity(db, symbol="SUS8")
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="crosses_below",
+            threshold_value=100.0,
+            confirm_checks=3,
+        )
+        alert.consecutive_met_count = 2
+        await db.flush()
+
+        service = AlertService(db)
+        updated = await service.update_alert(
+            alert.id, AlertUpdate(threshold_value=Decimal("90"))
+        )
+        assert updated is not None
+        assert updated.confirm_checks == 3  # untouched when absent
+        assert alert.consecutive_met_count == 0
+
+    async def test_update_rejects_non_crossing_with_confirm_checks(self, db: AsyncSession):
+        import pytest
+        from pydantic import ValidationError
+        from app.schemas.alert import AlertUpdate
+
+        with pytest.raises(ValidationError, match="crossing conditions"):
+            AlertUpdate(condition_type="below", confirm_checks=3)
+
+    async def test_update_to_non_crossing_clears_confirm_checks(self, db: AsyncSession):
+        from app.schemas.alert import AlertUpdate
+
+        equity = await create_test_equity(db, symbol="SUS9")
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="crosses_below",
+            threshold_value=100.0,
+            confirm_checks=3,
+        )
+
+        service = AlertService(db)
+        # Direct API call changing only the condition must not leave a stale
+        # confirm_checks behind
+        updated = await service.update_alert(
+            alert.id, AlertUpdate(condition_type="below")
+        )
+        assert updated is not None
+        assert updated.confirm_checks is None

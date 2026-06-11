@@ -95,6 +95,15 @@ class Alert(Base, TimestampMixin):
         Boolean, nullable=True, default=None
     )
 
+    # Sustained confirmation for crossing alerts: require the condition to
+    # hold for N consecutive checks before firing ("sustained sub-$60").
+    # None = fire on the cross (default behavior).
+    confirm_checks: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # State for confirm_checks: consecutive checks the condition has held
+    consecutive_met_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+
     # Relationships
     user: Mapped[Optional["User"]] = relationship(back_populates="alerts")
     equity: Mapped[Optional["Equity"]] = relationship(

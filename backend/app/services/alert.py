@@ -138,6 +138,7 @@ class AlertService:
             threshold_value=data.threshold_value,
             comparison_period=data.comparison_period,
             cooldown_minutes=data.cooldown_minutes,
+            confirm_checks=data.confirm_checks,
             is_active=data.is_active,
         )
 
@@ -173,6 +174,21 @@ class AlertService:
             alert.cooldown_minutes = data.cooldown_minutes
         if data.is_active is not None:
             alert.is_active = data.is_active
+        # exclude_unset semantics so an explicit null clears the confirmation
+        # (the "PUT ignores tier:null" lesson from the trigger playbook)
+        if "confirm_checks" in data.model_fields_set:
+            alert.confirm_checks = data.confirm_checks
+        # Sustained confirmation only applies to crossing conditions; clear a
+        # stale value when the condition changes to a non-crossing type
+        if alert.condition_type not in ("crosses_above", "crosses_below"):
+            alert.confirm_checks = None
+        # A changed condition or threshold invalidates the sustained counter
+        if (
+            data.condition_type is not None
+            or data.threshold_value is not None
+            or "confirm_checks" in data.model_fields_set
+        ):
+            alert.consecutive_met_count = 0
 
         await self.db.commit()
         await self.db.refresh(alert)
@@ -287,6 +303,7 @@ class AlertService:
                 threshold_value=alert.threshold_value,
                 condition_met="Unable to fetch current value",
                 should_notify=False,
+                value_available=False,
             )
 
         # Evaluate condition (pass intraday extremes for crossing detection)
@@ -318,9 +335,25 @@ class AlertService:
             # Use >= so that price exactly at threshold counts as "above"
             # (avoids a gap where price == threshold sets was_above to False,
             # causing a subsequent drop below threshold to be missed)
-            if alert.condition_type in ("crosses_above", "crosses_below"):
+            # Skip state updates when the fetch failed: the placeholder 0
+            # value would corrupt was_above_threshold / the sustained counter
+            if result.value_available and alert.condition_type in (
+                "crosses_above",
+                "crosses_below",
+            ):
                 threshold = Decimal(str(alert.threshold_value))
                 alert.was_above_threshold = result.current_value >= threshold
+                if alert.confirm_checks is not None:
+                    # Advance the sustained counter; must mirror the
+                    # prospective count _evaluate_sustained computed
+                    beyond = (
+                        result.current_value > threshold
+                        if alert.condition_type == "crosses_above"
+                        else result.current_value < threshold
+                    )
+                    alert.consecutive_met_count = (
+                        (alert.consecutive_met_count or 0) + 1 if beyond else 0
+                    )
 
             if not result.is_triggered:
                 # Update last checked value
@@ -424,6 +457,8 @@ class AlertService:
             is_active=alert.is_active,
             last_triggered_at=alert.last_triggered_at,
             last_checked_value=alert.last_checked_value,
+            confirm_checks=alert.confirm_checks,
+            consecutive_met_count=alert.consecutive_met_count or 0,
             created_at=alert.created_at,
             updated_at=alert.updated_at,
             target=target_info,
@@ -535,6 +570,8 @@ class AlertService:
             return triggered, desc
 
         elif condition == "crosses_above":
+            if alert.confirm_checks is not None:
+                return self._evaluate_sustained(alert, current_value, above=True)
             # Use was_above_threshold for reliable cross detection
             # Also check intraday high in case price crossed above and came back
             effective_high = intraday_high if intraday_high is not None else current_value
@@ -560,6 +597,8 @@ class AlertService:
             return triggered, desc
 
         elif condition == "crosses_below":
+            if alert.confirm_checks is not None:
+                return self._evaluate_sustained(alert, current_value, above=False)
             # Use was_above_threshold for reliable cross detection
             # Also check intraday low in case price crossed below and recovered
             effective_low = intraday_low if intraday_low is not None else current_value
@@ -621,6 +660,51 @@ class AlertService:
             return triggered, desc
 
         return False, f"Unknown condition type: {condition}"
+
+    def _evaluate_sustained(
+        self, alert: Alert, current_value: Decimal, above: bool
+    ) -> Tuple[bool, str]:
+        """Sustained crossing: the condition must hold for N consecutive checks.
+
+        Uses the check-time value only — no intraday extremes. An intraday
+        breach that recovered by check time is exactly what "sustained"
+        filters out; conversely a check-time recovery resets the counter.
+
+        State-based, not edge-based: an alert created while price is already
+        beyond the threshold confirms over the next N checks and fires (the
+        user asked "is it sustained beyond X", not "did it cross while I
+        watched"). Fires exactly once per excursion — the counter keeps
+        growing past N without re-firing, and only a recovery resets it.
+
+        The counter itself is advanced in process_alert (the single
+        state-mutation point, like was_above_threshold); here we evaluate
+        against the prospective count this check would produce.
+        """
+        threshold = Decimal(str(alert.threshold_value))
+        beyond = current_value > threshold if above else current_value < threshold
+        needed = alert.confirm_checks or 1
+        count = (alert.consecutive_met_count or 0) + 1 if beyond else 0
+        direction = "above" if above else "below"
+
+        if not beyond:
+            return False, (
+                f"Not {direction} {threshold:.4f} ({current_value:.4f}); "
+                f"sustained count reset"
+            )
+        if count == needed:
+            return True, (
+                f"Sustained {direction} {threshold:.4f} for {needed} "
+                f"consecutive checks (now {current_value:.4f})"
+            )
+        if count < needed:
+            return False, (
+                f"{direction.capitalize()} {threshold:.4f}: check "
+                f"{count}/{needed} ({current_value:.4f})"
+            )
+        return False, (
+            f"Still {direction} {threshold:.4f} "
+            f"(confirmed {count - needed} checks ago, no re-fire)"
+        )
 
     async def _get_historical_reference_value(
         self, alert: Alert

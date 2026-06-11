@@ -403,6 +403,8 @@ export interface Alert {
   is_active: boolean;
   last_triggered_at: string | null;
   last_checked_value: number | string | null;
+  confirm_checks: number | null;
+  consecutive_met_count: number;
   created_at: string;
   updated_at: string;
   target: AlertTargetInfo | null;
@@ -417,6 +419,7 @@ export interface AlertCreate {
   threshold_value: number;
   comparison_period?: string;
   cooldown_minutes?: number;
+  confirm_checks?: number;
   is_active?: boolean;
 }
 
@@ -427,6 +430,7 @@ export interface AlertUpdate {
   threshold_value?: number;
   comparison_period?: string;
   cooldown_minutes?: number;
+  confirm_checks?: number | null;
   is_active?: boolean;
 }
 

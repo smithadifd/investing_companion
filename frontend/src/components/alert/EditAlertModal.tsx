@@ -39,6 +39,7 @@ const CONDITION_NAME_LABELS: Record<AlertConditionType, string> = {
   percent_up: '% Up',
   percent_down: '% Down',
   percent_from_high: '% From High',
+  entry_zone: 'Entry Zones',
 };
 
 function generateAlertName(
@@ -83,23 +84,34 @@ export function EditAlertModal({ alert, onClose }: EditAlertModalProps) {
   const isCrossingCondition =
     conditionType === 'crosses_above' || conditionType === 'crosses_below';
 
+  // Zone alerts evaluate the watchlist item's tiered zones - no condition or
+  // threshold to edit here (the backend rejects changing the condition)
+  const isZoneAlert = alert.condition_type === 'entry_zone';
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!name || !thresholdValue) return;
+    if (!name || (!isZoneAlert && !thresholdValue)) return;
 
-    const data: AlertUpdate = {
-      name,
-      notes: notes || undefined,
-      condition_type: conditionType,
-      threshold_value: parseFloat(thresholdValue),
-      comparison_period: isPercentCondition ? comparisonPeriod : undefined,
-      cooldown_minutes: parseInt(cooldownMinutes) || 60,
-      // Explicit null clears the confirmation on the backend
-      confirm_checks:
-        isCrossingCondition && confirmChecks ? parseInt(confirmChecks) : null,
-      is_active: isActive,
-    };
+    const data: AlertUpdate = isZoneAlert
+      ? {
+          name,
+          notes: notes || undefined,
+          cooldown_minutes: parseInt(cooldownMinutes) || 60,
+          is_active: isActive,
+        }
+      : {
+          name,
+          notes: notes || undefined,
+          condition_type: conditionType,
+          threshold_value: parseFloat(thresholdValue),
+          comparison_period: isPercentCondition ? comparisonPeriod : undefined,
+          cooldown_minutes: parseInt(cooldownMinutes) || 60,
+          // Explicit null clears the confirmation on the backend
+          confirm_checks:
+            isCrossingCondition && confirmChecks ? parseInt(confirmChecks) : null,
+          is_active: isActive,
+        };
 
     try {
       await updateAlert.mutateAsync({ id: alert.id, data });
@@ -160,41 +172,52 @@ export function EditAlertModal({ alert, onClose }: EditAlertModalProps) {
           </div>
 
           {/* Condition Type */}
-          <div>
-            <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
-              Condition
-            </label>
-            <select
-              value={conditionType}
-              onChange={(e) => setConditionType(e.target.value as AlertConditionType)}
-              className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              {CONDITION_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-neutral-500 mt-1">
-              {CONDITION_OPTIONS.find((o) => o.value === conditionType)?.description}
-            </p>
-          </div>
+          {isZoneAlert ? (
+            <div className="px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+              <p className="text-sm text-amber-700 dark:text-amber-400">
+                Tiered entry-zone alert — fires once per tier as price enters
+                each zone. Edit the zones on the watchlist item.
+              </p>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                Condition
+              </label>
+              <select
+                value={conditionType}
+                onChange={(e) => setConditionType(e.target.value as AlertConditionType)}
+                className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                {CONDITION_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-neutral-500 mt-1">
+                {CONDITION_OPTIONS.find((o) => o.value === conditionType)?.description}
+              </p>
+            </div>
+          )}
 
           {/* Threshold */}
-          <div>
-            <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
-              Threshold {isPercentCondition ? '(%)' : '(Value)'}
-            </label>
-            <input
-              type="number"
-              step="any"
-              value={thresholdValue}
-              onChange={(e) => setThresholdValue(e.target.value)}
-              placeholder={isPercentCondition ? 'e.g., 5' : 'e.g., 200.00'}
-              className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              required
-            />
-          </div>
+          {!isZoneAlert && (
+            <div>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                Threshold {isPercentCondition ? '(%)' : '(Value)'}
+              </label>
+              <input
+                type="number"
+                step="any"
+                value={thresholdValue}
+                onChange={(e) => setThresholdValue(e.target.value)}
+                placeholder={isPercentCondition ? 'e.g., 5' : 'e.g., 200.00'}
+                className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required
+              />
+            </div>
+          )}
 
           {/* Comparison Period (for percent conditions) */}
           {isPercentCondition && (

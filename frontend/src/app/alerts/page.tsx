@@ -15,6 +15,7 @@ import {
   XCircle,
   AlertCircle,
   Pencil,
+  Crosshair,
 } from 'lucide-react';
 import {
   useAlerts,
@@ -73,10 +74,14 @@ const CONDITION_LABELS: Record<string, string> = {
   percent_up: '% Up',
   percent_down: '% Down',
   percent_from_high: '% From High',
+  entry_zone: 'Entry Zone',
 };
 
 // Condition type icons
 function ConditionIcon({ type }: { type: string }) {
+  if (type === 'entry_zone') {
+    return <Crosshair className="h-4 w-4 text-amber-500" />;
+  }
   if (type.includes('up') || type.includes('above')) {
     return <TrendingUp className="h-4 w-4 text-emerald-500" />;
   }
@@ -99,9 +104,12 @@ function AlertCard({
   isChecking: boolean;
 }) {
   const isRatio = alert.target?.type === 'ratio';
-  const thresholdDisplay = alert.condition_type.includes('percent')
-    ? `${toNumber(alert.threshold_value)}%`
-    : formatValue(alert.threshold_value, isRatio);
+  const thresholdDisplay =
+    alert.condition_type === 'entry_zone'
+      ? 'Tiered'
+      : alert.condition_type.includes('percent')
+        ? `${toNumber(alert.threshold_value)}%`
+        : formatValue(alert.threshold_value, isRatio);
 
   // Current price from last check
   const currentPrice = alert.last_checked_value !== null && alert.last_checked_value !== undefined

@@ -55,6 +55,9 @@ import type {
   TradePair,
   TradeType,
   TradeUpdate,
+  Trigger,
+  TriggerCreate,
+  TriggerUpdate,
   UpcomingEventsResponse,
   User,
   UserCreate,
@@ -819,6 +822,71 @@ class ApiClient {
    */
   async getNotificationStatus(): Promise<NotificationStatus> {
     return this.fetch<NotificationStatus>('/alerts/notifications/status');
+  }
+
+  // Trigger playbook methods
+
+  /**
+   * Get all triggers (standing orders), ordered by display_order
+   */
+  async getTriggers(includeRetired = false): Promise<Trigger[]> {
+    const url = includeRetired ? '/triggers?include_retired=true' : '/triggers';
+    return this.fetch<Trigger[]>(url);
+  }
+
+  /**
+   * Get a single trigger
+   */
+  async getTrigger(id: number): Promise<Trigger> {
+    return this.fetch<Trigger>(`/triggers/${id}`);
+  }
+
+  /**
+   * Create a new trigger
+   */
+  async createTrigger(data: TriggerCreate): Promise<Trigger> {
+    return this.fetch<Trigger>('/triggers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Update a trigger (including its linked alerts)
+   */
+  async updateTrigger(id: number, data: TriggerUpdate): Promise<Trigger> {
+    return this.fetch<Trigger>(`/triggers/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Delete a trigger
+   */
+  async deleteTrigger(id: number): Promise<void> {
+    await this.fetch<void>(`/triggers/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * Mark a trigger as executed with an optional note (feeds the learning loop)
+   */
+  async executeTrigger(id: number, note?: string): Promise<Trigger> {
+    return this.fetch<Trigger>(`/triggers/${id}/execute`, {
+      method: 'POST',
+      body: JSON.stringify({ note: note ?? null }),
+    });
+  }
+
+  /**
+   * Re-arm an executed trigger back to active
+   */
+  async rearmTrigger(id: number): Promise<Trigger> {
+    return this.fetch<Trigger>(`/triggers/${id}/rearm`, {
+      method: 'POST',
+    });
   }
 
   // Trade methods

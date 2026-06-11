@@ -21,6 +21,7 @@ import {
   LineChart,
   Calendar,
   Newspaper,
+  Target,
 } from 'lucide-react';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useDebounce } from '@/lib/hooks/useDebounce';
@@ -34,6 +35,7 @@ const NAV_ITEMS = [
   { href: '/news', label: 'News', icon: Newspaper },
   { href: '/calendar', label: 'Calendar', icon: Calendar },
   { href: '/alerts', label: 'Alerts', icon: Bell },
+  { href: '/playbook', label: 'Playbook', icon: Target },
   { href: '/trades', label: 'Trades', icon: LineChart },
 ];
 

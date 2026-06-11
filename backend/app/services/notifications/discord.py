@@ -111,7 +111,7 @@ class DiscordNotificationService:
     ) -> str:
         """Get human-readable condition description."""
         threshold_str = self._format_price(threshold) if condition_type not in (
-            "percent_up", "percent_down"
+            "percent_up", "percent_down", "percent_from_high"
         ) else f"{threshold}%"
 
         descriptions = {
@@ -121,6 +121,7 @@ class DiscordNotificationService:
             "crosses_below": f"crossed below {threshold_str}",
             "percent_up": f"up {threshold}% in {comparison_period}",
             "percent_down": f"down {threshold}% in {comparison_period}",
+            "percent_from_high": f"down {threshold}% from {comparison_period or '1y'} high",
         }
         return descriptions.get(condition_type, f"{condition_type} {threshold_str}")
 

@@ -3,6 +3,7 @@
 import asyncio
 import atexit
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from decimal import Decimal
@@ -62,6 +63,50 @@ async def run_in_executor(func, *args) -> Any:
     return await loop.run_in_executor(_get_executor(), func, *args)
 
 
+# ISO 4217 codes for currencies users realistically reference. Used to map bare
+# currency codes to Yahoo's forex ticker format (issue #49).
+_CURRENCY_CODES = {
+    "EUR", "JPY", "GBP", "CHF", "CAD", "AUD", "NZD", "CNY", "CNH", "HKD",
+    "SGD", "KRW", "INR", "MXN", "BRL", "ZAR", "SEK", "NOK", "DKK", "TRY",
+}
+
+_PAIR_RE = re.compile(r"^([A-Z]{3})/([A-Z]{3})$")
+_JOINED_PAIR_RE = re.compile(r"^([A-Z]{3})([A-Z]{3})$")
+
+
+def normalize_symbol(symbol: str) -> str:
+    """Map forex-style symbols to Yahoo Finance ticker format (issue #49).
+
+    - "USD/JPY" or "USDJPY"  -> "USDJPY=X"   (Yahoo also accepts "JPY=X" for USD base)
+    - bare non-USD code "JPY" -> "JPY=X"      (Yahoo convention: USD/JPY)
+    - everything else passes through unchanged (equities, futures "BZ=F",
+      indices "^VIX", crypto "BTC-USD", existing "=X" tickers).
+
+    A bare "USD" has no meaning as a price and is passed through (it will fail
+    lookup upstream, which is the honest outcome).
+    """
+    s = symbol.strip().upper()
+    if s.endswith("=X"):
+        return s
+
+    m = _PAIR_RE.match(s)
+    if m and (m.group(1) in _CURRENCY_CODES or m.group(1) == "USD") and (
+        m.group(2) in _CURRENCY_CODES or m.group(2) == "USD"
+    ):
+        return f"{m.group(1)}{m.group(2)}=X"
+
+    m = _JOINED_PAIR_RE.match(s)
+    if m and (m.group(1) in _CURRENCY_CODES or m.group(1) == "USD") and (
+        m.group(2) in _CURRENCY_CODES or m.group(2) == "USD"
+    ):
+        return f"{s}=X"
+
+    if s in _CURRENCY_CODES:
+        return f"{s}=X"
+
+    return symbol
+
+
 def _safe_decimal(value: Any) -> Optional[Decimal]:
     """Safely convert value to Decimal."""
     if value is None or value != value:  # NaN check
@@ -99,8 +144,10 @@ class YahooFinanceProvider:
             logger.warning(f"Cache read error for {symbol}: {e}")
 
         # Fetch from Yahoo
+        yahoo_symbol = normalize_symbol(symbol)
+
         def _fetch_quote() -> Optional[dict]:
-            ticker = yf.Ticker(symbol)
+            ticker = yf.Ticker(yahoo_symbol)
             info = ticker.info
             if not info or "regularMarketPrice" not in info:
                 return None
@@ -149,8 +196,10 @@ class YahooFinanceProvider:
     ) -> List[OHLCVData]:
         """Fetch historical OHLCV data."""
 
+        yahoo_symbol = normalize_symbol(symbol)
+
         def _fetch_history() -> list:
-            ticker = yf.Ticker(symbol)
+            ticker = yf.Ticker(yahoo_symbol)
             df = ticker.history(period=period, interval=interval)
             return [
                 {

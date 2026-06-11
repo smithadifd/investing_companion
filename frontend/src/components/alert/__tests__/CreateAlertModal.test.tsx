@@ -67,7 +67,7 @@ describe('CreateAlertModal', () => {
     render(<CreateAlertModal isOpen={true} onClose={onClose} />);
     const conditionSelect = screen.getByDisplayValue('Above');
     expect(conditionSelect).toBeInTheDocument();
-    expect(conditionSelect.querySelectorAll('option')).toHaveLength(6);
+    expect(conditionSelect.querySelectorAll('option')).toHaveLength(7);
   });
 
   it('shows Equity target type by default', () => {

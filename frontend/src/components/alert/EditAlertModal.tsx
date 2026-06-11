@@ -18,12 +18,16 @@ const CONDITION_OPTIONS: { value: AlertConditionType; label: string; description
   { value: 'crosses_below', label: 'Crosses Below', description: 'Triggers when value crosses below threshold' },
   { value: 'percent_up', label: 'Percent Up', description: 'Triggers on % increase over period' },
   { value: 'percent_down', label: 'Percent Down', description: 'Triggers on % decrease over period' },
+  { value: 'percent_from_high', label: 'Drawdown From High', description: 'Triggers when price falls X% below its period high' },
 ];
 
 const PERIOD_OPTIONS = [
   { value: '1d', label: '1 Day' },
   { value: '1w', label: '1 Week' },
   { value: '1m', label: '1 Month' },
+  { value: '3m', label: '3 Months' },
+  { value: '6m', label: '6 Months' },
+  { value: '1y', label: '1 Year' },
 ];
 
 // Short labels for auto-generated alert names
@@ -34,6 +38,7 @@ const CONDITION_NAME_LABELS: Record<AlertConditionType, string> = {
   crosses_below: 'Crosses Below',
   percent_up: '% Up',
   percent_down: '% Down',
+  percent_from_high: '% From High',
 };
 
 function generateAlertName(
@@ -43,7 +48,10 @@ function generateAlertName(
 ): string {
   if (!symbol) return '';
   const label = CONDITION_NAME_LABELS[conditionType];
-  const isPercent = conditionType === 'percent_up' || conditionType === 'percent_down';
+  const isPercent =
+    conditionType === 'percent_up' ||
+    conditionType === 'percent_down' ||
+    conditionType === 'percent_from_high';
   if (!thresholdValue) return `${symbol} ${label}`;
   const formattedThreshold = isPercent ? `${thresholdValue}%` : `$${thresholdValue}`;
   return `${symbol} ${label} ${formattedThreshold}`;
@@ -64,7 +72,10 @@ export function EditAlertModal({ alert, onClose }: EditAlertModalProps) {
 
   const updateAlert = useUpdateAlert();
 
-  const isPercentCondition = conditionType === 'percent_up' || conditionType === 'percent_down';
+  const isPercentCondition =
+    conditionType === 'percent_up' ||
+    conditionType === 'percent_down' ||
+    conditionType === 'percent_from_high';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

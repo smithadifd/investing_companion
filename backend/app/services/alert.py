@@ -28,8 +28,20 @@ from app.schemas.alert import (
 from app.services.data_providers.yahoo import YahooFinanceProvider
 from app.services.equity import EquityService
 from app.services.notifications.discord import discord_service
+from app.services.price_history import PriceHistoryService
 
 logger = logging.getLogger(__name__)
+
+# Lookback windows for percent-change reference values and percent-from-high
+# reference highs. Keys are the allowed comparison_period values.
+PERIOD_LOOKBACK = {
+    "1d": timedelta(days=1),
+    "1w": timedelta(days=7),
+    "1m": timedelta(days=30),
+    "3m": timedelta(days=90),
+    "6m": timedelta(days=180),
+    "1y": timedelta(days=365),
+}
 
 
 class AlertService:
@@ -39,6 +51,7 @@ class AlertService:
         self.db = db
         self.yahoo = YahooFinanceProvider()
         self.equity_service = EquityService(db)
+        self.price_history_service = PriceHistoryService(db, provider=self.yahoo)
 
     async def list_alerts(
         self,
@@ -585,6 +598,28 @@ class AlertService:
                 desc = f"Down {abs(pct_change):.2f}% over {period} (threshold: -{threshold:.2f}%, ref: {reference_value:.4f})"
             return triggered, desc
 
+        elif condition == "percent_from_high":
+            period = alert.comparison_period or "1y"
+            period_high = await self._get_period_high(alert)
+            if period_high is None or period_high == 0:
+                return False, f"No price history for {period} high"
+            # The current price may itself be the period high (history is
+            # persisted daily, the quote is live)
+            effective_high = max(period_high, current_value)
+            drawdown = ((effective_high - current_value) / effective_high) * 100
+            triggered = drawdown >= threshold
+            if triggered:
+                desc = (
+                    f"Down {drawdown:.2f}% from {period} high {effective_high:.4f} "
+                    f"(threshold: -{threshold:.2f}%)"
+                )
+            else:
+                desc = (
+                    f"Only {drawdown:.2f}% below {period} high {effective_high:.4f} "
+                    f"(threshold: -{threshold:.2f}%)"
+                )
+            return triggered, desc
+
         return False, f"Unknown condition type: {condition}"
 
     async def _get_historical_reference_value(
@@ -596,9 +631,8 @@ class AlertService:
         for the close price nearest to (now - lookback). For ratio alerts,
         computes the historical ratio from both symbols' price history.
         """
-        period_map = {"1d": timedelta(days=1), "1w": timedelta(days=7), "1m": timedelta(days=30)}
         period = alert.comparison_period or "1d"
-        lookback = period_map.get(period)
+        lookback = PERIOD_LOOKBACK.get(period)
         if lookback is None:
             logger.warning(f"Alert {alert.id}: unknown comparison_period '{period}'")
             return None
@@ -606,7 +640,12 @@ class AlertService:
         target_time = datetime.now(timezone.utc) - lookback
 
         if alert.equity_id:
-            return await self._get_closest_close(alert.equity_id, target_time)
+            close = await self._get_closest_close(alert.equity_id, target_time)
+            if close is None:
+                # No stored coverage yet - backfill on demand and retry once
+                await self._backfill_equity_history(alert.equity_id)
+                close = await self._get_closest_close(alert.equity_id, target_time)
+            return close
 
         elif alert.ratio_id:
             # Ratio alert: look up both symbols' historical prices
@@ -635,6 +674,12 @@ class AlertService:
                 self._get_closest_close(num_equity.id, target_time),
                 self._get_closest_close(den_equity.id, target_time),
             )
+            if num_close is None:
+                await self._backfill_equity_history(num_equity.id)
+                num_close = await self._get_closest_close(num_equity.id, target_time)
+            if den_close is None:
+                await self._backfill_equity_history(den_equity.id)
+                den_close = await self._get_closest_close(den_equity.id, target_time)
             if num_close is None or den_close is None or den_close == 0:
                 logger.warning(
                     f"Alert {alert.id}: no price history for ratio components at {target_time}"
@@ -671,6 +716,55 @@ class AlertService:
             )
             return None
         return Decimal(str(row.close))
+
+    async def _get_period_high(self, alert: Alert) -> Optional[Decimal]:
+        """Get the highest stored price over the alert's comparison_period.
+
+        Used by percent_from_high. Equity alerts only - ratio alerts would
+        need a joint history series, which isn't supported.
+        """
+        if not alert.equity_id:
+            logger.warning(
+                f"Alert {alert.id}: percent_from_high is not supported for ratio alerts"
+            )
+            return None
+
+        period = alert.comparison_period or "1y"
+        lookback = PERIOD_LOOKBACK.get(period)
+        if lookback is None:
+            logger.warning(f"Alert {alert.id}: unknown comparison_period '{period}'")
+            return None
+
+        since = datetime.now(timezone.utc) - lookback
+        stmt = select(func.max(PriceHistory.high)).where(
+            PriceHistory.equity_id == alert.equity_id,
+            PriceHistory.timestamp >= since,
+        )
+        high = await self.db.scalar(stmt)
+        if high is None:
+            await self._backfill_equity_history(alert.equity_id)
+            high = await self.db.scalar(stmt)
+        return Decimal(str(high)) if high is not None else None
+
+    async def _backfill_equity_history(self, equity_id: int) -> None:
+        """On-demand price history backfill when the evaluator finds no coverage."""
+        stmt = select(Equity).where(Equity.id == equity_id)
+        result = await self.db.execute(stmt)
+        equity = result.scalar_one_or_none()
+        if not equity:
+            return
+        try:
+            # commit=False: this runs inside the alert-processing transaction;
+            # flushed rows are visible to the retry query and the caller's
+            # commit (or rollback) decides their fate
+            rows = await self.price_history_service.sync_equity(
+                equity.id, equity.symbol, commit=False
+            )
+            logger.info(
+                f"On-demand history backfill for {equity.symbol}: {rows} rows"
+            )
+        except Exception as e:
+            logger.warning(f"On-demand history backfill failed for {equity.symbol}: {e}")
 
     def _check_cooldown(self, alert: Alert) -> bool:
         """Check if alert is past cooldown period."""

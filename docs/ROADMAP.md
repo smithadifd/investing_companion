@@ -14,6 +14,16 @@
 | 6.5 | Calendar & Events | Earnings, macro events | 1 week | Event-aware trading |
 | 6.6 | Deployment Prep | Security, Synology deploy | 1 week | Production-ready |
 | 7 | Advanced AI | AI integrations | TBD | AI-powered automation |
+| 8 | Alert Trust & Quick Wins | Alert correctness + UX | 3-5 days | Every alert works |
+| 9 | Extended Hours & Overnight | Pre/post-market data, futures proxy | 1-2 weeks | No more overnight blindness |
+| 10 | Daily Command Center | Dashboard + notifications overhaul | 1-2 weeks | Actionable daily driver |
+| 11 | Metrics That Matter | Risk, drawdown, exposure metrics | 1 week | Honest portfolio picture |
+
+**Recommended order (2026-06-11):** 8 → 9 → 10 → 7 → 11. Phase 8 fixes the trust
+foundation (crisis-playbook alerts are currently non-functional), Phase 9 builds the data layer
+Phases 10 and 7 consume, and Phase 7's AI features land best once the command center gives them
+surfaces to render into. Maintenance track (Next.js 16 upgrade, dependency bumps, issue #10 git
+history scrub) interleaves between phases.
 
 ---
 
@@ -313,6 +323,7 @@ alert_history
 | `CROSSES_BELOW` | Price crosses below 50 MA |
 | `PERCENT_UP` | +5% in 24h |
 | `PERCENT_DOWN` | -5% in 24h |
+| `PERCENT_FROM_HIGH` | -10% from 52-week high (added Phase 8) |
 | `RATIO_ABOVE` | Gold/Silver > 85 |
 | `RATIO_BELOW` | Gold/Silver < 70 |
 
@@ -616,15 +627,21 @@ See [Session Notes](./sessions/2026-02-01-synology-deployment.md) for details.
 
 ---
 
-## Phase 7: Advanced AI (Future)
+## Phase 7: Advanced AI
 **Goal**: AI-powered analysis, automation, and integrations
-**Depends on**: Resolving Claude OAuth/API access (see [Issue #001](./issues/001-claude-oauth-support.md))
+**Status**: UNBLOCKED (decision 2026-06-11) — recommended after Phase 10
 
-### Prerequisites
-Before starting Phase 7, one of the following must be completed:
-1. Set up a Claude API proxy (OpenClawd, CLIProxyAPI)
-2. Subscribe to standard Anthropic API billing
-3. Anthropic adds OAuth token support for third-party integrations
+### Prerequisites — RESOLVED
+Original blocker: Claude Max OAuth tokens are not accepted by the Anthropic API (see
+[Issue #001](./issues/001-claude-oauth-support.md)). Decision (2026-06-11): use a **standard
+API key from console.anthropic.com with a hard monthly spend cap** (~$5-10). Cost controls:
+- Spend cap configured in the Anthropic console (hard limit, not advisory)
+- Default to Haiku for scheduled/routine summaries (morning brief, EOD recap)
+- Sonnet or better only for on-demand deep analysis the user explicitly triggers
+- Keep the existing 1-hour response cache; track token usage in a `usage_log` table and
+  surface month-to-date spend in Settings
+- API key remains per-user and optional (encrypted in `user_settings`) — AI features degrade
+  gracefully when absent, consistent with the free-core principle (see Phase 8 preamble)
 
 ### Potential Features
 
@@ -657,6 +674,142 @@ Before starting Phase 7, one of the following must be completed:
 - Weekly portfolio summary generated automatically
 - Ask AI "What are the risks to my uranium thesis?"
 - Claude Code can query "What's my current exposure to energy sector?"
+
+---
+
+## Product Principles (codified 2026-06-11)
+
+These govern Phases 8+ and any future feature decisions:
+
+1. **Free core, opt-in depth.** A working install never requires a paid subscription or an
+   external account. Yahoo Finance + Finnhub free tiers power the base experience. Anything
+   that costs money (Anthropic API key) or requires an account the user may not have (Schwab
+   brokerage for extended-hours data) is *additive*: configured per-user in Settings, with
+   graceful degradation when absent. No feature gates the base experience behind a paid dep.
+2. **Actionable over informational.** Every dashboard card and notification should answer
+   "what, if anything, should I do?" — with a deep link to the place to act, not just data.
+3. **Alerts must be trustworthy.** A silently broken alert is worse than no alert (false
+   confidence during exactly the scenario it was built for). Alert-correctness bugs outrank
+   new features.
+
+---
+
+## Phase 8: Alert Trust & Quick Wins
+**Goal**: Every configured alert actually works, and acting on one takes a single click
+
+### Deliverables
+
+#### Alert Correctness
+- [ ] Fix `percent_up`/`percent_down` ignoring `comparison_period` (#48 — closed but fix not
+      verified on prod; unblocks the 4 crisis-playbook SPY/HYG alerts)
+- [ ] Fix forex symbol resolution in ratios (#49 — map `USD/JPY` → yfinance `JPY=X` format)
+- [ ] New condition type: `PERCENT_FROM_HIGH` (#50 — drawdown from 52-week high; completes
+      the crisis-playbook tier system)
+- [ ] New condition type: `TARGET_PRICE` hit (watchlist items already store `target_price`;
+      nothing alerts when it's reached)
+- [ ] Backtest harness: replay historical prices through the evaluator to prove conditions
+      fire when they should (regression suite for alert logic)
+
+#### Alert UX
+- [ ] Alert history filtering (symbol, date range, status) — currently 1000+ unfiltered rows
+- [ ] Deep links: Discord notification and dashboard feed entries link to the equity page
+      with alert context (threshold vs triggered value, attached notes/thesis)
+- [ ] Discord batching: multiple alerts triggering in the same check cycle send one grouped
+      message (no webhook spam during a broad selloff — exactly when alerts cluster)
+- [ ] Timezone setting in UI (morning pulse / EOD wrap times are currently hardcoded ET)
+
+### Success Criteria
+- "SPY -7% (1m)" crisis alert fires correctly against replayed historical data
+- "CCJ hit target $95" arrives in Discord with a link that opens CCJ with the thesis visible
+- A 10-alert simultaneous trigger produces one Discord message, not ten
+
+---
+
+## Phase 9: Extended Hours & Overnight Awareness
+**Goal**: Know what happened (and what's happening) outside regular trading hours, at $0 base cost
+
+### Background (research 2026-06-11)
+True overnight (8pm-4am ET) single-stock data is Blue Ocean ATS, redistributed only at
+enterprise pricing (Databento/QUODD/Bloomberg, $500+/mo) — out of scope. The pragmatic stack:
+- **Pre/post-market (4am-9:30am, 4pm-8pm):** yfinance `prepost=True` (free, unofficial) and
+  Finnhub free tier (real-time last price, 60 req/min, WebSocket up to 50 symbols) cover the
+  base. **Schwab Trader API** (free with a brokerage account, 120 req/min, `schwab-py`) is the
+  premium opt-in: real-time Level 1 quotes across all sessions.
+- **Overnight (8pm-4am):** futures as proxy (ES/NQ/RTY — already fetched for the morning
+  pulse) for market direction; individual-stock overnight moves are caught at 4am via
+  pre-market data.
+
+### Deliverables
+
+#### Data Layer
+- [ ] Session-aware quote model: extend provider interface with `get_extended_quote()`
+      returning session (pre/regular/post), extended-hours price, and change vs regular close
+- [ ] Finnhub quote provider (key already wired for news; add quotes with graceful fallback)
+- [ ] Schwab provider as **opt-in authenticated provider** (per-user OAuth setup in Settings,
+      `schwab-py`; app fully functional without it per free-core principle)
+- [ ] Store extended-hours snapshots (new `session` column on `price_history` or a dedicated
+      hypertable) so pre-market moves are queryable, not just observed
+- [ ] Capture overnight futures session (ES/NQ/RTY 6pm-9:30am range) as stored snapshots
+
+#### Features on Top
+- [ ] Morning pulse v2: pre-market movers from watchlists (gap up/down vs prior close),
+      overnight futures summary, earnings-reaction flags ("XYZ reported last night, -8% pre")
+- [ ] Extended-hours alert checks: opt-in `check_extended_hours` flag per alert (evaluated
+      during pre/post sessions via Finnhub/Schwab)
+- [ ] Equity page: pre/post-market price line when outside regular hours
+
+### Success Criteria
+- 8:00 AM pulse shows "CCJ -6.2% pre-market on earnings" before the open, with a link
+- An `ABOVE` alert with extended-hours enabled fires at 7 AM, not 9:35 AM
+- A user with no Schwab account and no Finnhub key still gets the futures-based pulse
+
+---
+
+## Phase 10: Daily Command Center
+**Goal**: The dashboard and notifications answer "what needs my attention right now"
+
+### Deliverables
+
+#### Dashboard
+- [ ] "Needs attention" triage stack as the primary dashboard element: ranked cards for
+      triggered alerts, target-price hits, watchlist earnings today, outsized movers with a
+      thesis attached — each with context and a one-click path to act
+- [ ] Deep links everywhere: every mover/event/alert card opens the equity page with the
+      relevant panel (thesis, alert, calendar) focused
+- [ ] Quick actions on cards: log trade, snooze/adjust alert, edit target — without leaving
+      the dashboard
+- [ ] Data freshness indicators (last-sync stamps; manual refresh for calendar events instead
+      of waiting for the 10 PM UTC batch)
+
+#### Notifications
+- [ ] In-app notification center with parity to Discord (morning pulse and EOD wrap rendered
+      in-app, not webhook-only)
+- [ ] EOD wrap v2: portfolio day P&L, alert summary, after-hours movers, tomorrow's calendar
+- [ ] Per-category notification routing (which events go to Discord vs in-app only)
+
+### Success Criteria
+- Opening the dashboard at 9 AM answers "what changed and what should I look at" in one screen
+- Acting on a triggered alert (view → decide → log trade or adjust alert) takes ≤2 clicks
+
+---
+
+## Phase 11: Metrics That Matter
+**Goal**: An honest picture of risk and progress, not just P&L
+
+### Deliverables
+- [ ] Position drawdown tracking: peak-since-entry and current drawdown per position
+- [ ] Target progress: price vs `target_price` on watchlist items (and % to target)
+- [ ] Exposure view: portfolio concentration by sector and by watchlist theme (uranium, REE,
+      precious metals, …) vs cash/dry powder
+- [ ] R-multiple per trade (risk defined at entry via position sizer → realized R on close)
+      and expectancy in performance analytics
+- [ ] Ratio precompute: nightly Celery task materializes ratio history (fixes slow first
+      load; on-demand fallback stays)
+- [ ] Portfolio max-drawdown and equity curve from trade history
+
+### Success Criteria
+- "What's my uranium exposure as % of portfolio?" answered by a dashboard card
+- Performance page shows expectancy and average R, not just win rate
 
 ---
 

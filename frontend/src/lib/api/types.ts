@@ -378,7 +378,8 @@ export type AlertConditionType =
   | 'crosses_above'
   | 'crosses_below'
   | 'percent_up'
-  | 'percent_down';
+  | 'percent_down'
+  | 'percent_from_high';
 
 export type AlertTargetType = 'equity' | 'ratio';
 

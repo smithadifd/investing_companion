@@ -17,6 +17,10 @@ class AlertConditionType(str, Enum):
     CROSSES_BELOW = "crosses_below"
     PERCENT_UP = "percent_up"
     PERCENT_DOWN = "percent_down"
+    PERCENT_FROM_HIGH = "percent_from_high"
+
+
+VALID_COMPARISON_PERIODS = ("1d", "1w", "1m", "3m", "6m", "1y")
 
 
 class AlertTargetType(str, Enum):
@@ -33,15 +37,17 @@ class AlertBase(BaseModel):
     notes: Optional[str] = None
     condition_type: AlertConditionType
     threshold_value: Decimal
-    comparison_period: Optional[str] = None  # For percent change: "1d", "1w", "1m"
+    comparison_period: Optional[str] = None  # For percent conditions: see VALID_COMPARISON_PERIODS
     cooldown_minutes: int = 60
 
     @field_validator("comparison_period")
     @classmethod
     def validate_comparison_period(cls, v: Optional[str], info) -> Optional[str]:
         """Validate comparison_period for percent change conditions."""
-        if v is not None and v not in ("1d", "1w", "1m"):
-            raise ValueError("comparison_period must be one of: 1d, 1w, 1m")
+        if v is not None and v not in VALID_COMPARISON_PERIODS:
+            raise ValueError(
+                f"comparison_period must be one of: {', '.join(VALID_COMPARISON_PERIODS)}"
+            )
         return v
 
     @field_validator("cooldown_minutes")
@@ -74,7 +80,7 @@ class AlertCreate(AlertBase):
 
     @model_validator(mode="after")
     def validate_percent_change(self) -> "AlertCreate":
-        """Ensure comparison_period is set for percent change conditions."""
+        """Ensure comparison_period is set for percent conditions."""
         if self.condition_type in (
             AlertConditionType.PERCENT_UP,
             AlertConditionType.PERCENT_DOWN,
@@ -83,6 +89,10 @@ class AlertCreate(AlertBase):
                 raise ValueError(
                     "comparison_period is required for percent change conditions"
                 )
+        elif self.condition_type == AlertConditionType.PERCENT_FROM_HIGH:
+            if not self.comparison_period:
+                # Default to the 52-week high, the standard drawdown reference
+                self.comparison_period = "1y"
         return self
 
 
@@ -101,8 +111,10 @@ class AlertUpdate(BaseModel):
     @classmethod
     def validate_comparison_period(cls, v: Optional[str]) -> Optional[str]:
         """Validate comparison_period for percent change conditions."""
-        if v is not None and v not in ("1d", "1w", "1m"):
-            raise ValueError("comparison_period must be one of: 1d, 1w, 1m")
+        if v is not None and v not in VALID_COMPARISON_PERIODS:
+            raise ValueError(
+                f"comparison_period must be one of: {', '.join(VALID_COMPARISON_PERIODS)}"
+            )
         return v
 
     @field_validator("cooldown_minutes")

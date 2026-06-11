@@ -36,6 +36,7 @@ class AlertConditionType(str, Enum):
     CROSSES_BELOW = "crosses_below"  # Price crosses below threshold (was above, now below)
     PERCENT_UP = "percent_up"  # +X% change in comparison_period
     PERCENT_DOWN = "percent_down"  # -X% change in comparison_period
+    PERCENT_FROM_HIGH = "percent_from_high"  # X% drawdown from comparison_period high
 
 
 class Alert(Base, TimestampMixin):

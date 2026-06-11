@@ -72,6 +72,7 @@ const CONDITION_LABELS: Record<string, string> = {
   crosses_below: 'Crosses Below',
   percent_up: '% Up',
   percent_down: '% Down',
+  percent_from_high: '% From High',
 };
 
 // Condition type icons

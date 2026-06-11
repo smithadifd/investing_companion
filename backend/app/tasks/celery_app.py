@@ -53,6 +53,12 @@ else:
             "task": "events.refresh_all_watchlist_events",
             "schedule": crontab(hour=22, minute=0),
         },
+        # Persist daily OHLCV bars after market close. Percent-change and
+        # percent-from-high alerts read their reference values from this data.
+        "sync-price-history-daily": {
+            "task": "price_history.sync_all",
+            "schedule": crontab(hour=21, minute=15),
+        },
     }
 
 # Auto-discover tasks from these modules

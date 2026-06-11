@@ -22,12 +22,16 @@ const CONDITION_OPTIONS: { value: AlertConditionType; label: string; description
   { value: 'crosses_below', label: 'Crosses Below', description: 'Triggers when value crosses below threshold' },
   { value: 'percent_up', label: 'Percent Up', description: 'Triggers on % increase over period' },
   { value: 'percent_down', label: 'Percent Down', description: 'Triggers on % decrease over period' },
+  { value: 'percent_from_high', label: 'Drawdown From High', description: 'Triggers when price falls X% below its period high' },
 ];
 
 const PERIOD_OPTIONS = [
   { value: '1d', label: '1 Day' },
   { value: '1w', label: '1 Week' },
   { value: '1m', label: '1 Month' },
+  { value: '3m', label: '3 Months' },
+  { value: '6m', label: '6 Months' },
+  { value: '1y', label: '1 Year' },
 ];
 
 // Short labels for auto-generated alert names
@@ -38,6 +42,7 @@ const CONDITION_NAME_LABELS: Record<AlertConditionType, string> = {
   crosses_below: 'Crosses Below',
   percent_up: '% Up',
   percent_down: '% Down',
+  percent_from_high: '% From High',
 };
 
 /**
@@ -51,7 +56,10 @@ function generateAlertName(
 ): string {
   if (!symbol) return '';
   const label = CONDITION_NAME_LABELS[conditionType];
-  const isPercent = conditionType === 'percent_up' || conditionType === 'percent_down';
+  const isPercent =
+    conditionType === 'percent_up' ||
+    conditionType === 'percent_down' ||
+    conditionType === 'percent_from_high';
 
   if (!thresholdValue) return `${symbol} ${label}`;
 
@@ -88,7 +96,10 @@ export function CreateAlertModal({
   const { data: ratios } = useRatios();
   const createAlert = useCreateAlert();
 
-  const isPercentCondition = conditionType === 'percent_up' || conditionType === 'percent_down';
+  const isPercentCondition =
+    conditionType === 'percent_up' ||
+    conditionType === 'percent_down' ||
+    conditionType === 'percent_from_high';
 
   // Auto-update name when symbol, condition, or threshold changes
   const updateAutoName = useCallback(
@@ -249,6 +260,10 @@ export function CreateAlertModal({
               onChange={(e) => {
                 const newCondition = e.target.value as AlertConditionType;
                 setConditionType(newCondition);
+                // Drawdown alerts default to the 52-week high reference
+                if (newCondition === 'percent_from_high' && comparisonPeriod === '1d') {
+                  setComparisonPeriod('1y');
+                }
                 updateAutoName(currentSymbol, newCondition, thresholdValue);
               }}
               className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"

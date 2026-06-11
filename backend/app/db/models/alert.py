@@ -16,7 +16,7 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
@@ -37,6 +37,7 @@ class AlertConditionType(str, Enum):
     PERCENT_UP = "percent_up"  # +X% change in comparison_period
     PERCENT_DOWN = "percent_down"  # -X% change in comparison_period
     PERCENT_FROM_HIGH = "percent_from_high"  # X% drawdown from comparison_period high
+    ENTRY_ZONE = "entry_zone"  # Price enters a tiered entry zone on the linked watchlist item
 
 
 class Alert(Base, TimestampMixin):
@@ -95,6 +96,18 @@ class Alert(Base, TimestampMixin):
         Boolean, nullable=True, default=None
     )
 
+    # Entry-zone alerts: the watchlist item whose entry_zones are evaluated.
+    # The equity_id is copied from the item at creation for target display.
+    watchlist_item_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("watchlist_items.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    # Per-tier dedup state: {tier: {"armed": bool, "last_fired_at": iso|null}}.
+    # A tier fires once on entry, disarms, and re-arms only when price exits
+    # out the entry side - so a deeper tier firing never re-fires this one.
+    zone_state: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
     # Sustained confirmation for crossing alerts: require the condition to
     # hold for N consecutive checks before firing ("sustained sub-$60").
     # None = fire on the cross (default behavior).
@@ -124,6 +137,7 @@ class Alert(Base, TimestampMixin):
         Index("idx_alerts_equity_id", "equity_id"),
         Index("idx_alerts_ratio_id", "ratio_id"),
         Index("idx_alerts_user_id", "user_id"),
+        Index("idx_alerts_watchlist_item_id", "watchlist_item_id"),
     )
 
     def __repr__(self) -> str:

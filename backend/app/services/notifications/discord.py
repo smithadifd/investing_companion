@@ -122,6 +122,7 @@ class DiscordNotificationService:
             "percent_up": f"up {threshold}% in {comparison_period}",
             "percent_down": f"down {threshold}% in {comparison_period}",
             "percent_from_high": f"down {threshold}% from {comparison_period or '1y'} high",
+            "entry_zone": "in a tiered entry zone",
         }
         return descriptions.get(condition_type, f"{condition_type} {threshold_str}")
 
@@ -136,6 +137,7 @@ class DiscordNotificationService:
         comparison_period: Optional[str] = None,
         is_ratio: bool = False,
         notes: Optional[str] = None,
+        condition_override: Optional[str] = None,
     ) -> tuple[bool, Optional[str]]:
         """Send an alert notification to Discord.
 
@@ -149,6 +151,8 @@ class DiscordNotificationService:
             comparison_period: Period for percent change conditions
             is_ratio: Whether this is a ratio alert
             notes: Optional notes to include
+            condition_override: Pre-built condition description (entry-zone
+                alerts pass the tier name and price band here)
 
         Returns:
             Tuple of (success, error_message)
@@ -159,12 +163,15 @@ class DiscordNotificationService:
 
         try:
             # Build the embed
-            condition_desc = self._get_condition_description(
+            condition_desc = condition_override or self._get_condition_description(
                 condition_type, threshold_value, comparison_period
             )
 
             # Color based on condition
-            if condition_type in ("above", "crosses_above", "percent_up"):
+            if condition_type == "entry_zone":
+                color = 0xF59E0B  # Amber - a buy zone, not a warning
+                emoji = "🎯"
+            elif condition_type in ("above", "crosses_above", "percent_up"):
                 color = 0x00FF00  # Green
                 emoji = "🟢"
             else:

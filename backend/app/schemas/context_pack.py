@@ -12,7 +12,9 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-SCHEMA_VERSION = "1.2"
+from app.schemas.watchlist import EntryZoneStatus
+
+SCHEMA_VERSION = "1.3"
 
 
 class PackPosition(BaseModel):
@@ -76,7 +78,7 @@ class PackTrigger(BaseModel):
 
 
 class PackWatchlistItem(BaseModel):
-    """A watchlist item with target-price status."""
+    """A watchlist item with target-price and entry-zone status."""
 
     symbol: str
     watchlist: str
@@ -84,6 +86,14 @@ class PackWatchlistItem(BaseModel):
     latest_close: Optional[Decimal] = None
     percent_to_target: Optional[Decimal] = Field(
         None, description="Percent move from latest close to the target (negative = target below)"
+    )
+    entry_zones: List[EntryZoneStatus] = Field(
+        default_factory=list,
+        description=(
+            "Tiered entry zones with live status vs the latest close: "
+            "in_zone | approaching (within 3% of the entry edge) | above | "
+            "below | unknown (no stored close)"
+        ),
     )
     thesis: Optional[str] = None
 

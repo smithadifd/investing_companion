@@ -13,6 +13,7 @@ from app.db.models.alert import Alert, AlertHistory
 from app.db.models.equity import Equity
 from app.db.models.price_history import PriceHistory
 from app.db.models.ratio import Ratio
+from app.db.models.watchlist import WatchlistItem
 from app.schemas.alert import (
     AlertCheckResult,
     AlertConditionType,
@@ -26,6 +27,7 @@ from app.schemas.alert import (
     AlertWithHistoryResponse,
 )
 from app.services.data_providers.yahoo import YahooFinanceProvider
+from app.services.entry_zones import is_in_zone, parse_zones, zone_entry_edge
 from app.services.equity import EquityService
 from app.services.notifications.discord import discord_service
 from app.services.price_history import PriceHistoryService
@@ -129,11 +131,26 @@ class AlertService:
                 raise ValueError(f"Invalid equity symbol: {data.equity_symbol}")
             equity_id = equity.id
 
+        # entry_zone alerts target a watchlist item; copy its equity for
+        # quote fetching and target display
+        if data.watchlist_item_id:
+            item = await self.db.scalar(
+                select(WatchlistItem).where(
+                    WatchlistItem.id == data.watchlist_item_id
+                )
+            )
+            if not item:
+                raise ValueError(
+                    f"Watchlist item {data.watchlist_item_id} not found"
+                )
+            equity_id = item.equity_id
+
         alert = Alert(
             name=data.name,
             notes=data.notes,
             equity_id=equity_id,
             ratio_id=data.ratio_id,
+            watchlist_item_id=data.watchlist_item_id,
             condition_type=data.condition_type.value,
             threshold_value=data.threshold_value,
             comparison_period=data.comparison_period,
@@ -158,6 +175,18 @@ class AlertService:
 
         if not alert:
             return None
+
+        # entry_zone alerts evaluate the linked item's zones; a different
+        # condition type would orphan that link - create a new alert instead
+        if (
+            alert.condition_type == "entry_zone"
+            and data.condition_type is not None
+            and data.condition_type.value != "entry_zone"
+        ):
+            raise ValueError(
+                "Cannot change an entry_zone alert to another condition; "
+                "create a new alert instead"
+            )
 
         # Update fields
         if data.name is not None:
@@ -290,6 +319,9 @@ class AlertService:
 
         Returns AlertCheckResult with trigger status and details.
         """
+        if alert.condition_type == "entry_zone":
+            return await self._check_zone_alert(alert)
+
         # Get current value (plus intraday high/low for crossing detection)
         current_value, target_info, intraday_high, intraday_low = (
             await self._get_current_value(alert)
@@ -328,6 +360,9 @@ class AlertService:
 
         Returns (was_triggered, error_message)
         """
+        if alert.condition_type == "entry_zone":
+            return await self._process_zone_alert(alert)
+
         try:
             result = await self.check_alert(alert)
 
@@ -450,6 +485,8 @@ class AlertService:
             notes=alert.notes,
             equity_id=alert.equity_id,
             ratio_id=alert.ratio_id,
+            watchlist_item_id=alert.watchlist_item_id,
+            zone_state=alert.zone_state,
             condition_type=AlertConditionType(alert.condition_type),
             threshold_value=alert.threshold_value,
             comparison_period=alert.comparison_period,
@@ -705,6 +742,206 @@ class AlertService:
             f"Still {direction} {threshold:.4f} "
             f"(confirmed {count - needed} checks ago, no re-fire)"
         )
+
+    # ==================== Entry-zone evaluation ====================
+    #
+    # An entry_zone alert watches the tiered entry zones on its linked
+    # watchlist item and fires per tier. Dedup state lives in
+    # alert.zone_state: {tier: {"armed": bool, "last_fired_at": iso|null}}.
+    #
+    # Per-tier state machine (check-time price only - the 5-minute check
+    # cadence makes intraday-extreme detection unnecessary, and a zone the
+    # price only wicked through isn't an actionable entry):
+    # - first sight of a tier: baseline, no fire (armed unless already in it)
+    # - fires when armed and the price is in the zone (per-tier cooldown)
+    # - disarms after firing
+    # - re-arms only when the price exits out the entry side (above the high
+    #   for high-bounded zones, below the low for low-only zones), so a
+    #   deeper tier firing - or the price passing through to one - never
+    #   re-fires this tier.
+
+    async def _get_zone_item(self, alert: Alert) -> Optional[WatchlistItem]:
+        if not alert.watchlist_item_id:
+            return None
+        return await self.db.scalar(
+            select(WatchlistItem).where(WatchlistItem.id == alert.watchlist_item_id)
+        )
+
+    def _evaluate_zone_transitions(
+        self, alert: Alert, zones: list, price: Decimal
+    ) -> Tuple[dict, list]:
+        """Compute the next zone_state and the tiers that fire this check.
+
+        Pure state-transition logic; persistence and notifications happen in
+        _process_zone_alert. Tiers removed from the item drop out of state;
+        new (or renamed) tiers baseline without firing.
+        """
+        now = datetime.now(timezone.utc)
+        old_state = alert.zone_state or {}
+        new_state: dict = {}
+        fired: list = []
+
+        for zone in zones:
+            state = old_state.get(zone.tier)
+            in_now = is_in_zone(price, zone)
+            last_fired_at = state.get("last_fired_at") if state else None
+
+            if state is None:
+                # First sight: baseline. If price is already in the zone,
+                # don't fire (mirrors crossing-alert baseline behavior).
+                armed = not in_now
+            else:
+                armed = bool(state.get("armed", True))
+                exited_entry_side = not in_now and (
+                    (zone.high is not None and price > zone.high)
+                    or (zone.high is None and zone.low is not None and price < zone.low)
+                )
+                if exited_entry_side:
+                    armed = True
+
+            if armed and in_now and self._zone_cooldown_passed(alert, last_fired_at):
+                fired.append(zone)
+                armed = False
+                last_fired_at = now.isoformat()
+
+            new_state[zone.tier] = {
+                "armed": armed,
+                "last_fired_at": last_fired_at,
+            }
+
+        return new_state, fired
+
+    def _zone_cooldown_passed(
+        self, alert: Alert, last_fired_at: Optional[str]
+    ) -> bool:
+        """Per-tier cooldown so one tier firing never blocks another."""
+        if not last_fired_at:
+            return True
+        fired_at = datetime.fromisoformat(last_fired_at)
+        cooldown_end = fired_at + timedelta(minutes=alert.cooldown_minutes)
+        return datetime.now(timezone.utc) >= cooldown_end
+
+    @staticmethod
+    def _zone_range_desc(zone) -> str:
+        if zone.low is not None and zone.high is not None:
+            return f"{zone.low}-{zone.high}"
+        if zone.high is not None:
+            return f"<= {zone.high}"
+        return f">= {zone.low}"
+
+    async def _check_zone_alert(self, alert: Alert) -> AlertCheckResult:
+        """Read-only check for an entry_zone alert (no state mutation)."""
+        item = await self._get_zone_item(alert)
+        zones = parse_zones(item.entry_zones if item else None)
+        threshold = Decimal(str(alert.threshold_value))
+
+        if not zones:
+            return AlertCheckResult(
+                alert_id=alert.id,
+                is_triggered=False,
+                current_value=Decimal(0),
+                threshold_value=threshold,
+                condition_met="No entry zones configured on the watchlist item",
+                should_notify=False,
+                value_available=False,
+            )
+
+        current_value, _, _, _ = await self._get_current_value(alert)
+        if current_value is None:
+            return AlertCheckResult(
+                alert_id=alert.id,
+                is_triggered=False,
+                current_value=Decimal(0),
+                threshold_value=threshold,
+                condition_met="Unable to fetch current value",
+                should_notify=False,
+                value_available=False,
+            )
+
+        _, fired = self._evaluate_zone_transitions(alert, zones, current_value)
+        if fired:
+            tiers = ", ".join(z.tier for z in fired)
+            desc = f"Entered zone(s): {tiers} at {current_value:.4f}"
+        else:
+            parts = [
+                f"{z.tier} ({self._zone_range_desc(z)}): "
+                f"{'in zone' if is_in_zone(current_value, z) else 'out'}"
+                for z in zones
+            ]
+            desc = f"No new zone entry at {current_value:.4f} - " + "; ".join(parts)
+
+        return AlertCheckResult(
+            alert_id=alert.id,
+            is_triggered=bool(fired),
+            current_value=current_value,
+            threshold_value=threshold,
+            condition_met=desc,
+            should_notify=bool(fired),
+        )
+
+    async def _process_zone_alert(self, alert: Alert) -> Tuple[bool, Optional[str]]:
+        """Process an entry_zone alert: fire per tier, advance dedup state."""
+        try:
+            item = await self._get_zone_item(alert)
+            zones = parse_zones(item.entry_zones if item else None)
+            if not zones:
+                return False, None
+
+            current_value, target_info, _, _ = await self._get_current_value(alert)
+            if current_value is None:
+                # Fetch failure: leave zone_state untouched so a transient
+                # outage can't corrupt the per-tier dedup
+                return False, None
+
+            new_state, fired = self._evaluate_zone_transitions(
+                alert, zones, current_value
+            )
+
+            alert.zone_state = new_state
+            alert.last_checked_value = current_value
+
+            for zone in fired:
+                history = AlertHistory(
+                    alert_id=alert.id,
+                    triggered_value=current_value,
+                    threshold_value=zone_entry_edge(zone),
+                    notification_sent=False,
+                )
+                self.db.add(history)
+                alert.last_triggered_at = datetime.now(timezone.utc)
+
+                if target_info:
+                    success, error = await discord_service.send_alert_notification(
+                        alert_name=f"{alert.name} - {zone.tier}",
+                        target_symbol=target_info.symbol,
+                        target_name=target_info.name,
+                        condition_type=alert.condition_type,
+                        threshold_value=zone_entry_edge(zone),
+                        current_value=current_value,
+                        notes=alert.notes,
+                        condition_override=(
+                            f"in entry zone '{zone.tier}' "
+                            f"({self._zone_range_desc(zone)})"
+                        ),
+                    )
+                    history.notification_sent = success
+                    history.notification_channel = "discord" if success else None
+                    history.notification_error = error if not success else None
+
+            await self.db.commit()
+
+            if fired:
+                tiers = ", ".join(z.tier for z in fired)
+                logger.info(
+                    f"Entry-zone alert {alert.id} ({alert.name}) fired: {tiers}"
+                )
+            return bool(fired), None
+
+        except Exception as e:
+            logger.error(
+                f"Error processing entry-zone alert {alert.id}: {e}", exc_info=True
+            )
+            return False, str(e)
 
     async def _get_historical_reference_value(
         self, alert: Alert

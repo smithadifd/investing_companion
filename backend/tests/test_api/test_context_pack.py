@@ -106,6 +106,55 @@ class TestContextPackService:
         assert two.value == Decimal("150")
         assert two.percent_of_portfolio == Decimal("75.0")
 
+    async def test_entry_zones_in_watchlist_targets(
+        self, db: AsyncSession, test_user
+    ):
+        equity = await _seed_state(db)
+        from sqlalchemy import update
+        from app.db.models.watchlist import WatchlistItem
+        await db.execute(
+            update(WatchlistItem)
+            .where(WatchlistItem.equity_id == equity.id)
+            .values(entry_zones=[
+                {"tier": "Half starter", "low": "95", "high": "98"},
+                {"tier": "Aggressive", "low": None, "high": "90"},
+            ])
+        )
+        service = ContextPackService(db)
+
+        pack = await service.build(test_user.id)
+
+        target = next(t for t in pack.watchlist_targets if t.symbol == "CPK1")
+        by_tier = {z.tier: z for z in target.entry_zones}
+        # Latest close 100: ~2% above the 98 entry edge -> approaching
+        assert by_tier["Half starter"].status == "approaching"
+        assert by_tier["Aggressive"].status == "above"
+        # No longer an unsupported feature
+        assert "tiered_entry_zones" not in pack.unsupported_features
+
+        md = render_markdown(pack)
+        assert "zone [approaching] Half starter" in md
+
+    async def test_zone_only_item_appears_without_target(
+        self, db: AsyncSession, test_user
+    ):
+        from tests.factories import create_test_watchlist_item
+        equity = await create_test_equity(db, symbol="CPZ1")
+        wl = await create_test_watchlist(db, name="Zones Only")
+        await create_test_watchlist_item(
+            db, wl, equity,
+            entry_zones=[{"tier": "Add", "low": "230", "high": "235"}],
+        )
+        service = ContextPackService(db)
+
+        pack = await service.build(test_user.id)
+
+        target = next(t for t in pack.watchlist_targets if t.symbol == "CPZ1")
+        assert target.target_price is None
+        assert target.percent_to_target is None
+        # No stored close for CPZ1 -> status unknown
+        assert target.entry_zones[0].status == "unknown"
+
     async def test_render_markdown(self, db: AsyncSession, test_user):
         await _seed_state(db)
         service = ContextPackService(db)

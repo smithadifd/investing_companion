@@ -16,7 +16,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
@@ -76,6 +76,9 @@ class WatchlistItem(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text)
     target_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2))
     thesis: Mapped[Optional[str]] = mapped_column(Text)
+    # Tiered entry zones: [{"tier": "Half starter", "low": "50", "high": "52"}]
+    # Bounds are decimal strings; at least one bound per zone. None = no zones.
+    entry_zones: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     track_calendar: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     added_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

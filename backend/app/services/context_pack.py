@@ -14,7 +14,7 @@ from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -35,6 +35,7 @@ from app.schemas.context_pack import (
     PackWatchlistItem,
 )
 from app.services.economic_event import EconomicEventService
+from app.services.entry_zones import build_zone_statuses, parse_zones
 from app.services.handoff import HandoffService
 from app.services.trade import TradeService
 from app.services.trigger import TriggerService
@@ -50,7 +51,6 @@ UNSUPPORTED_FEATURES = [
     "percent_from_high_on_ratios",
     "options_data",
     "per_account_positions",
-    "tiered_entry_zones",
 ]
 
 
@@ -197,8 +197,13 @@ class ContextPackService:
             distance: Optional[Decimal] = None
             threshold = Decimal(str(a.threshold_value))
             last = Decimal(str(a.last_checked_value)) if a.last_checked_value else None
-            is_percent_condition = a.condition_type.startswith("percent")
-            if last and last != 0 and not is_percent_condition:
+            # No single threshold for percent conditions or entry zones
+            # (zone alerts store 0; their distances live on watchlist_targets)
+            no_distance = (
+                a.condition_type.startswith("percent")
+                or a.condition_type == "entry_zone"
+            )
+            if last and last != 0 and not no_distance:
                 distance = ((threshold - last) / last * 100).quantize(Decimal("0.01"))
 
             if a.last_triggered_at and a.last_triggered_at >= recently:
@@ -246,12 +251,17 @@ class ContextPackService:
         ]
 
     async def watchlist_targets(self) -> List[PackWatchlistItem]:
-        """Items with a target price, plus distance from the latest stored close."""
+        """Items with a target price or entry zones, plus status vs the latest close."""
         stmt = (
             select(WatchlistItem, Watchlist.name, Equity)
             .join(Watchlist, Watchlist.id == WatchlistItem.watchlist_id)
             .join(Equity, Equity.id == WatchlistItem.equity_id)
-            .where(WatchlistItem.target_price.is_not(None))
+            .where(
+                or_(
+                    WatchlistItem.target_price.is_not(None),
+                    WatchlistItem.entry_zones.is_not(None),
+                )
+            )
             .order_by(Watchlist.name, Equity.symbol)
         )
         result = await self.db.execute(stmt)
@@ -266,10 +276,14 @@ class ContextPackService:
                 .limit(1)
             )
             close = Decimal(str(latest_close)) if latest_close is not None else None
-            target = Decimal(str(item.target_price))
+            target = (
+                Decimal(str(item.target_price))
+                if item.target_price is not None
+                else None
+            )
             pct = (
                 ((target - close) / close * 100).quantize(Decimal("0.1"))
-                if close
+                if close and target is not None
                 else None
             )
             packed.append(
@@ -279,6 +293,9 @@ class ContextPackService:
                     target_price=target,
                     latest_close=close,
                     percent_to_target=pct,
+                    entry_zones=build_zone_statuses(
+                        close, parse_zones(item.entry_zones)
+                    ),
                     thesis=item.thesis,
                 )
             )
@@ -347,12 +364,30 @@ def render_markdown(pack: ContextPack) -> str:
             )
 
     if pack.watchlist_targets:
-        lines += ["", "## Watchlist targets"]
+        lines += ["", "## Watchlist targets & entry zones"]
         for w in pack.watchlist_targets:
-            lines.append(
-                f"- {w.symbol} ({w.watchlist}): target {money(w.target_price)}, "
-                f"close {money(w.latest_close)} ({pct(w.percent_to_target)} to target)"
-            )
+            if w.target_price is not None:
+                lines.append(
+                    f"- {w.symbol} ({w.watchlist}): target {money(w.target_price)}, "
+                    f"close {money(w.latest_close)} ({pct(w.percent_to_target)} to target)"
+                )
+            else:
+                lines.append(
+                    f"- {w.symbol} ({w.watchlist}): close {money(w.latest_close)}"
+                )
+            for z in w.entry_zones:
+                if z.low is not None and z.high is not None:
+                    band = f"{money(z.low)}-{money(z.high)}"
+                elif z.high is not None:
+                    band = f"<= {money(z.high)}"
+                else:
+                    band = f">= {money(z.low)}"
+                dist = (
+                    f", {z.distance_percent:+.1f}% to entry"
+                    if z.distance_percent is not None
+                    else ""
+                )
+                lines.append(f"  - zone [{z.status}] {z.tier}: {band}{dist}")
 
     if pack.upcoming_events:
         lines += ["", "## Next 14 days"]

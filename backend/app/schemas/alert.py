@@ -18,6 +18,7 @@ class AlertConditionType(str, Enum):
     PERCENT_UP = "percent_up"
     PERCENT_DOWN = "percent_down"
     PERCENT_FROM_HIGH = "percent_from_high"
+    ENTRY_ZONE = "entry_zone"
 
 
 VALID_COMPARISON_PERIODS = ("1d", "1w", "1m", "3m", "6m", "1y")
@@ -36,7 +37,9 @@ class AlertBase(BaseModel):
     name: str
     notes: Optional[str] = None
     condition_type: AlertConditionType
-    threshold_value: Decimal
+    # Required for every condition except entry_zone (which evaluates the
+    # linked watchlist item's zones and stores 0 here)
+    threshold_value: Optional[Decimal] = None
     comparison_period: Optional[str] = None  # For percent conditions: see VALID_COMPARISON_PERIODS
     cooldown_minutes: int = 60
     # Crossing conditions only: hold for N consecutive checks before firing
@@ -75,17 +78,43 @@ class AlertCreate(AlertBase):
     """Schema for creating a new alert."""
 
     # Target - provide either equity_symbol or ratio_id
+    # (entry_zone alerts target a watchlist item instead)
     equity_symbol: Optional[str] = None
     ratio_id: Optional[int] = None
+    watchlist_item_id: Optional[int] = None
     is_active: bool = True
 
     @model_validator(mode="after")
     def validate_target(self) -> "AlertCreate":
         """Ensure exactly one target is specified."""
+        if self.condition_type == AlertConditionType.ENTRY_ZONE:
+            if not self.watchlist_item_id:
+                raise ValueError(
+                    "entry_zone alerts require watchlist_item_id"
+                )
+            if self.equity_symbol or self.ratio_id:
+                raise ValueError(
+                    "entry_zone alerts target a watchlist item; do not set "
+                    "equity_symbol or ratio_id (the equity comes from the item)"
+                )
+            return self
+        if self.watchlist_item_id:
+            raise ValueError(
+                "watchlist_item_id is only valid for entry_zone alerts"
+            )
         if self.equity_symbol and self.ratio_id:
             raise ValueError("Cannot specify both equity_symbol and ratio_id")
         if not self.equity_symbol and not self.ratio_id:
             raise ValueError("Must specify either equity_symbol or ratio_id")
+        return self
+
+    @model_validator(mode="after")
+    def validate_threshold(self) -> "AlertCreate":
+        """threshold_value is required except for entry_zone (stored as 0)."""
+        if self.condition_type == AlertConditionType.ENTRY_ZONE:
+            self.threshold_value = Decimal("0")
+        elif self.threshold_value is None:
+            raise ValueError("threshold_value is required for this condition")
         return self
 
     @model_validator(mode="after")
@@ -119,7 +148,11 @@ class AlertCreate(AlertBase):
 
 
 class AlertUpdate(BaseModel):
-    """Schema for updating an alert."""
+    """Schema for updating an alert.
+
+    condition_type cannot be changed to or from entry_zone (create a new
+    alert instead) - the service enforces the "from" direction.
+    """
 
     name: Optional[str] = None
     notes: Optional[str] = None
@@ -130,6 +163,19 @@ class AlertUpdate(BaseModel):
     is_active: Optional[bool] = None
     # Explicit null clears (exclude_unset semantics in the service)
     confirm_checks: Optional[int] = None
+
+    @field_validator("condition_type")
+    @classmethod
+    def reject_entry_zone(
+        cls, v: Optional[AlertConditionType]
+    ) -> Optional[AlertConditionType]:
+        """Existing alerts cannot become entry_zone alerts."""
+        if v == AlertConditionType.ENTRY_ZONE:
+            raise ValueError(
+                "Cannot change an alert to entry_zone; create a new alert "
+                "with a watchlist_item_id instead"
+            )
+        return v
 
     @field_validator("confirm_checks")
     @classmethod
@@ -198,6 +244,9 @@ class AlertResponse(AlertBase):
     id: int
     equity_id: Optional[int] = None
     ratio_id: Optional[int] = None
+    watchlist_item_id: Optional[int] = None
+    # entry_zone alerts: per-tier dedup state {tier: {armed, last_fired_at}}
+    zone_state: Optional[dict] = None
     is_active: bool
     last_triggered_at: Optional[datetime] = None
     last_checked_value: Optional[Decimal] = None

@@ -9,6 +9,7 @@ from app.db.models.economic_event import (
 )
 from app.db.models.equity import Equity
 from app.db.models.fundamentals import EquityFundamentals
+from app.db.models.handoff import HandoffLog
 from app.db.models.price_history import PriceHistory
 from app.db.models.ratio import Ratio
 from app.db.models.session import Session
@@ -27,6 +28,7 @@ __all__ = [
     "EventType",
     "Equity",
     "EquityFundamentals",
+    "HandoffLog",
     "PriceHistory",
     "Ratio",
     "Session",

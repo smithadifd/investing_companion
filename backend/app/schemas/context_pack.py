@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 
 
 class PackPosition(BaseModel):
@@ -110,6 +110,17 @@ class PackTradeSummary(BaseModel):
     total_unrealized_pnl: Optional[Decimal] = None
 
 
+class PackHandoff(BaseModel):
+    """A recent handoff execution receipt (conversation->app feedback)."""
+
+    received_at: datetime
+    source: str
+    summary: str
+    applied_count: int
+    skipped_count: int
+    flagged_count: int
+
+
 class ContextPack(BaseModel):
     """The full versioned export."""
 
@@ -124,6 +135,10 @@ class ContextPack(BaseModel):
     watchlist_targets: List[PackWatchlistItem]
     upcoming_events: List[PackEvent]
     trade_summary: PackTradeSummary
+    recent_handoffs: List[PackHandoff] = Field(
+        default_factory=list,
+        description="Execution receipts for recent advisor handoff blocks",
+    )
     unsupported_features: List[str] = Field(
         ..., description="Capabilities an advisor must not emit handoff actions for"
     )

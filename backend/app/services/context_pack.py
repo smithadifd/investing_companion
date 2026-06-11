@@ -27,12 +27,14 @@ from app.schemas.context_pack import (
     PackAlert,
     PackEvent,
     PackExposure,
+    PackHandoff,
     PackPosition,
     PackTradeSummary,
     PackTrigger,
     PackWatchlistItem,
 )
 from app.services.economic_event import EconomicEventService
+from app.services.handoff import HandoffService
 from app.services.trade import TradeService
 
 logger = logging.getLogger(__name__)
@@ -57,6 +59,7 @@ class ContextPackService:
         self.db = db
         self.trade_service = TradeService(db)
         self.event_service = EconomicEventService(db)
+        self.handoff_service = HandoffService(db)
 
     async def build(self, user_id: UUID) -> ContextPack:
         portfolio = await self.trade_service.get_portfolio(user_id)
@@ -82,6 +85,17 @@ class ContextPackService:
         triggers = await self._recent_triggers()
         targets = await self._watchlist_targets()
         events = await self._upcoming_events(user_id)
+        handoffs = [
+            PackHandoff(
+                received_at=r.created_at,
+                source=r.source,
+                summary=r.summary,
+                applied_count=r.applied_count,
+                skipped_count=r.skipped_count,
+                flagged_count=r.flagged_count,
+            )
+            for r in await self.handoff_service.recent(limit=5)
+        ]
 
         return ContextPack(
             generated_at=datetime.now(timezone.utc),
@@ -93,6 +107,7 @@ class ContextPackService:
             recent_triggers=triggers,
             watchlist_targets=targets,
             upcoming_events=events,
+            recent_handoffs=handoffs,
             trade_summary=PackTradeSummary(
                 total_trades=performance.metrics.total_trades,
                 win_rate=performance.metrics.win_rate,
@@ -329,6 +344,15 @@ def render_markdown(pack: ContextPack) -> str:
             sym = f" [{ev.symbol}]" if ev.symbol else ""
             lines.append(
                 f"- {ev.event_date} (+{ev.days_away}d, {ev.importance}){sym} {ev.title}"
+            )
+
+    if pack.recent_handoffs:
+        lines += ["", "## Recent handoff receipts"]
+        for h in pack.recent_handoffs:
+            lines.append(
+                f"- {h.received_at.strftime('%m-%d')} [{h.source}] {h.summary} "
+                f"(applied {h.applied_count}, skipped {h.skipped_count}, "
+                f"flagged {h.flagged_count})"
             )
 
     ts = pack.trade_summary

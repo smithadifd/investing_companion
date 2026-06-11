@@ -88,9 +88,12 @@ def send_morning_pulse():
         from sqlalchemy import func, select
 
         from app.db.models.alert import Alert, AlertHistory
-        from app.services.context_pack import ContextPackService
         from app.services.data_providers.yahoo import YahooFinanceProvider
         from app.services.economic_event import EconomicEventService
+        from app.services.needs_attention import (
+            build_needs_attention,
+            format_needs_attention_lines,
+        )
         from app.services.notifications.formatters import MorningData, format_morning_pulse
         from app.services.watchlist import WatchlistService
 
@@ -206,30 +209,12 @@ def send_morning_pulse():
             ) or 0
 
             # --- Needs attention: decisions first, data second ---
+            # Shared with GET /api/v1/dashboard/needs-attention so the pulse
+            # and the dashboard can never drift apart.
             needs_attention: list[str] = []
             try:
-                cp = ContextPackService(session)
-                for a in await cp.active_alerts():
-                    if a.status == "triggered_recently":
-                        line = f"🔔 {a.name} triggered"
-                        if a.notes:
-                            note = a.notes.strip().splitlines()[0]
-                            line += f" — {note[:90]}"
-                        needs_attention.append(line)
-                    elif a.status == "approaching":
-                        needs_attention.append(
-                            f"⚠️ {a.name} — {a.distance_percent:+.1f}% away "
-                            f"(last {a.last_checked_value})"
-                        )
-                for t in await cp.watchlist_targets():
-                    if (
-                        t.percent_to_target is not None
-                        and abs(t.percent_to_target) <= 5
-                    ):
-                        needs_attention.append(
-                            f"🎯 {t.symbol} within {abs(t.percent_to_target):.1f}% "
-                            f"of target ${t.target_price} ({t.watchlist})"
-                        )
+                items = await build_needs_attention(session)
+                needs_attention = format_needs_attention_lines(items)
             except Exception as e:
                 logger.warning(f"Failed to build needs-attention section: {e}")
 

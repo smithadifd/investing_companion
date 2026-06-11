@@ -30,6 +30,7 @@ import type {
   EquitySearchResult,
   HistoryData,
   MarketOverview,
+  NeedsAttentionResponse,
   NotificationStatus,
   PaginatedMeta,
   PasswordChange,
@@ -822,6 +823,15 @@ class ApiClient {
    */
   async getNotificationStatus(): Promise<NotificationStatus> {
     return this.fetch<NotificationStatus>('/alerts/notifications/status');
+  }
+
+  // Dashboard methods
+
+  /**
+   * Get the needs-attention list (the morning pulse's ⚡ section)
+   */
+  async getNeedsAttention(): Promise<NeedsAttentionResponse> {
+    return this.fetch<NeedsAttentionResponse>('/dashboard/needs-attention');
   }
 
   // Trigger playbook methods

@@ -467,6 +467,24 @@ export interface NotificationStatus {
   };
 }
 
+// Dashboard types
+export type NeedsAttentionKind = 'alert_triggered' | 'alert_approaching' | 'target_near';
+
+export interface NeedsAttentionItem {
+  kind: NeedsAttentionKind;
+  title: string;
+  symbol: string | null;
+  detail: string | null;
+  distance_percent: number | string | null;
+  last_checked_value: number | string | null;
+  target_price: number | string | null;
+  last_triggered_at: string | null;
+}
+
+export interface NeedsAttentionResponse {
+  items: NeedsAttentionItem[];
+}
+
 // Trigger playbook types
 export type TriggerStatus = 'active' | 'executed' | 'retired';
 

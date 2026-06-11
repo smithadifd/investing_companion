@@ -327,7 +327,9 @@ def send_eod_wrap():
                 )
                 cond = alert.condition_type
                 threshold = float(h.threshold_value)
-                if "below" in cond or "down" in cond:
+                if cond == "percent_from_high":
+                    name = f"{symbol} -{threshold:.0f}% from high"
+                elif "below" in cond or "down" in cond:
                     name = f"{symbol} < {threshold:.2f}"
                 else:
                     name = f"{symbol} > {threshold:.2f}"

@@ -295,7 +295,11 @@ class TestEvaluateConditionPercent:
         assert triggered is False
 
     async def test_percent_up_no_history(self, db: AsyncSession):
-        """No price_history => skip, don't trigger."""
+        """No price_history => skip, don't trigger.
+
+        The on-demand backfill fallback is stubbed to return nothing so the
+        test never reaches the network.
+        """
         equity = await create_test_equity(db, symbol="PU3")
         alert = await create_test_alert(
             db, equity,
@@ -304,6 +308,9 @@ class TestEvaluateConditionPercent:
             comparison_period="1d",
         )
         service = AlertService(db)
+        service.price_history_service.provider = AsyncMock(
+            get_history=AsyncMock(return_value=[])
+        )
 
         triggered, desc = await service._evaluate_condition(alert, Decimal("106"))
         assert triggered is False
@@ -359,6 +366,121 @@ class TestEvaluateConditionPercent:
         triggered, desc = await service._evaluate_condition(alert, Decimal("88"))
         assert triggered is True
         assert "1w" in desc
+
+
+class TestEvaluateConditionPercentFromHigh:
+    """Tests for the percent_from_high (drawdown) condition."""
+
+    async def _insert_price_history(
+        self,
+        db: AsyncSession,
+        equity_id: int,
+        timestamp: datetime,
+        close: float,
+        high: float | None = None,
+    ):
+        from app.db.models.price_history import PriceHistory
+        bar_high = high if high is not None else close
+        ph = PriceHistory(
+            equity_id=equity_id,
+            timestamp=timestamp,
+            open=close, high=bar_high, low=close, close=close,
+        )
+        db.add(ph)
+        await db.flush()
+
+    async def test_drawdown_triggered(self, db: AsyncSession):
+        equity = await create_test_equity(db, symbol="PFH1")
+        high_time = datetime.now(timezone.utc) - timedelta(days=30)
+        await self._insert_price_history(db, equity.id, high_time, 95.0, high=100.0)
+
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="percent_from_high",
+            threshold_value=10.0,
+            comparison_period="1y",
+        )
+        service = AlertService(db)
+
+        # 88 is 12% below the 100 high
+        triggered, desc = await service._evaluate_condition(alert, Decimal("88"))
+        assert triggered is True
+        assert "Down 12.00%" in desc
+
+    async def test_drawdown_not_triggered(self, db: AsyncSession):
+        equity = await create_test_equity(db, symbol="PFH2")
+        high_time = datetime.now(timezone.utc) - timedelta(days=30)
+        await self._insert_price_history(db, equity.id, high_time, 95.0, high=100.0)
+
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="percent_from_high",
+            threshold_value=10.0,
+            comparison_period="1y",
+        )
+        service = AlertService(db)
+
+        # 95 is only 5% below the high
+        triggered, _ = await service._evaluate_condition(alert, Decimal("95"))
+        assert triggered is False
+
+    async def test_current_price_is_the_high(self, db: AsyncSession):
+        """A live price above all stored highs means zero drawdown."""
+        equity = await create_test_equity(db, symbol="PFH3")
+        high_time = datetime.now(timezone.utc) - timedelta(days=30)
+        await self._insert_price_history(db, equity.id, high_time, 95.0, high=100.0)
+
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="percent_from_high",
+            threshold_value=5.0,
+            comparison_period="1y",
+        )
+        service = AlertService(db)
+
+        triggered, desc = await service._evaluate_condition(alert, Decimal("120"))
+        assert triggered is False
+        assert "0.00%" in desc
+
+    async def test_lookback_window_excludes_old_highs(self, db: AsyncSession):
+        """Highs outside the comparison_period must not be the reference."""
+        equity = await create_test_equity(db, symbol="PFH4")
+        now = datetime.now(timezone.utc)
+        # Old spike outside the 1y window, recent high inside it
+        await self._insert_price_history(db, equity.id, now - timedelta(days=400), 195.0, high=200.0)
+        await self._insert_price_history(db, equity.id, now - timedelta(days=30), 95.0, high=100.0)
+
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="percent_from_high",
+            threshold_value=10.0,
+            comparison_period="1y",
+        )
+        service = AlertService(db)
+
+        triggered, desc = await service._evaluate_condition(alert, Decimal("88"))
+        assert triggered is True
+        # Reference must be the in-window 100 high, not the 200 spike
+        assert "100" in desc
+        assert "Down 12.00%" in desc
+
+    async def test_no_history(self, db: AsyncSession):
+        """No stored or fetchable history => skip, don't trigger."""
+        equity = await create_test_equity(db, symbol="PFH5")
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="percent_from_high",
+            threshold_value=10.0,
+            comparison_period="1y",
+        )
+        service = AlertService(db)
+        service.price_history_service.provider = AsyncMock(
+            get_history=AsyncMock(return_value=[])
+        )
+
+        triggered, desc = await service._evaluate_condition(alert, Decimal("88"))
+        assert triggered is False
+        assert "No price history" in desc
 
 
 # ---------------------------------------------------------------------------

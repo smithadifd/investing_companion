@@ -1,6 +1,7 @@
 """Watchlist service - business logic for watchlist operations."""
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import List, Optional
 
 from sqlalchemy import func, select
@@ -10,8 +11,10 @@ from sqlalchemy.orm import selectinload
 
 from app.db.models.equity import Equity
 from app.db.models.watchlist import Watchlist, WatchlistItem
+from app.schemas.equity import QuoteResponse
 from app.schemas.watchlist import (
     AllWatchlistMovers,
+    EntryZone,
     MoverItem,
     WatchlistCreate,
     WatchlistExport,
@@ -25,7 +28,43 @@ from app.schemas.watchlist import (
     WatchlistSummary,
     WatchlistUpdate,
 )
+from app.services.entry_zones import build_zone_statuses, parse_zones
 from app.services.equity import EquityService
+
+
+def _zones_to_json(zones: Optional[List[EntryZone]]) -> Optional[list]:
+    """Serialize zones for JSONB storage (Decimal bounds become strings)."""
+    if not zones:
+        return None
+    return [z.model_dump(mode="json") for z in zones]
+
+
+def _item_response(
+    item: WatchlistItem,
+    equity: Equity,
+    quote: Optional[QuoteResponse],
+) -> WatchlistItemResponse:
+    """Build an item response with zone statuses from the quote price."""
+    zones = parse_zones(item.entry_zones)
+    price = (
+        Decimal(str(quote.price))
+        if quote and quote.price is not None
+        else None
+    )
+    return WatchlistItemResponse(
+        id=item.id,
+        watchlist_id=item.watchlist_id,
+        equity_id=item.equity_id,
+        notes=item.notes,
+        target_price=item.target_price,
+        thesis=item.thesis,
+        track_calendar=item.track_calendar,
+        entry_zones=zones,
+        zone_statuses=build_zone_statuses(price, zones),
+        added_at=item.added_at,
+        equity=WatchlistItemEquity.model_validate(equity),
+        quote=quote,
+    )
 
 
 class WatchlistService:
@@ -83,19 +122,7 @@ class WatchlistService:
             if include_quotes:
                 quote = await self.equity_service.get_quote(item.equity.symbol)
 
-            items.append(
-                WatchlistItemResponse(
-                    id=item.id,
-                    watchlist_id=item.watchlist_id,
-                    equity_id=item.equity_id,
-                    notes=item.notes,
-                    target_price=item.target_price,
-                    thesis=item.thesis,
-                    added_at=item.added_at,
-                    equity=WatchlistItemEquity.model_validate(item.equity),
-                    quote=quote,
-                )
-            )
+            items.append(_item_response(item, item.equity, quote))
 
         return WatchlistResponse(
             id=watchlist.id,
@@ -200,6 +227,7 @@ class WatchlistService:
             notes=data.notes,
             target_price=data.target_price,
             thesis=data.thesis,
+            entry_zones=_zones_to_json(data.entry_zones),
         )
 
         try:
@@ -213,17 +241,7 @@ class WatchlistService:
 
         quote = await self.equity_service.get_quote(equity.symbol)
 
-        return WatchlistItemResponse(
-            id=item.id,
-            watchlist_id=item.watchlist_id,
-            equity_id=item.equity_id,
-            notes=item.notes,
-            target_price=item.target_price,
-            thesis=item.thesis,
-            added_at=item.added_at,
-            equity=WatchlistItemEquity.model_validate(equity),
-            quote=quote,
-        )
+        return _item_response(item, equity, quote)
 
     async def update_item(
         self, watchlist_id: int, item_id: int, data: WatchlistItemUpdate
@@ -251,24 +269,17 @@ class WatchlistService:
             item.thesis = data.thesis
         if data.track_calendar is not None:
             item.track_calendar = data.track_calendar
+        # exclude_unset semantics: an explicit null (or []) clears the zones,
+        # an omitted field leaves them unchanged (the tier:null PUT lesson)
+        if "entry_zones" in data.model_fields_set:
+            item.entry_zones = _zones_to_json(data.entry_zones)
 
         await self.db.commit()
         await self.db.refresh(item)
 
         quote = await self.equity_service.get_quote(item.equity.symbol)
 
-        return WatchlistItemResponse(
-            id=item.id,
-            watchlist_id=item.watchlist_id,
-            equity_id=item.equity_id,
-            notes=item.notes,
-            target_price=item.target_price,
-            thesis=item.thesis,
-            track_calendar=item.track_calendar,
-            added_at=item.added_at,
-            equity=WatchlistItemEquity.model_validate(item.equity),
-            quote=quote,
-        )
+        return _item_response(item, item.equity, quote)
 
     async def remove_item(self, watchlist_id: int, item_id: int) -> bool:
         """Remove an item from a watchlist."""
@@ -306,6 +317,7 @@ class WatchlistService:
                 notes=item.notes,
                 target_price=item.target_price,
                 thesis=item.thesis,
+                entry_zones=parse_zones(item.entry_zones) or None,
                 added_at=item.added_at,
             )
             for item in watchlist.items
@@ -340,6 +352,7 @@ class WatchlistService:
                     notes=item_data.notes,
                     target_price=item_data.target_price,
                     thesis=item_data.thesis,
+                    entry_zones=_zones_to_json(item_data.entry_zones),
                 )
                 self.db.add(item)
 

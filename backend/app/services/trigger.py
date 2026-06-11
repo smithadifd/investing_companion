@@ -29,7 +29,9 @@ HIT_WINDOW = timedelta(hours=48)
 
 def _alert_distance(alert: Alert) -> Optional[Decimal]:
     """Percent move from last checked value to threshold (None for percent conditions)."""
-    if alert.condition_type.startswith("percent"):
+    # Percent conditions and entry zones have no single threshold to
+    # measure against (zone alerts store 0)
+    if alert.condition_type.startswith("percent") or alert.condition_type == "entry_zone":
         return None
     if not alert.last_checked_value:
         return None
@@ -102,10 +104,14 @@ class TriggerService:
         trigger = await self._get(trigger_id)
         if not trigger:
             return None
-        for field in ("name", "rule", "action", "tier", "display_order"):
+        for field in ("name", "rule", "action", "display_order"):
             value = getattr(data, field)
             if value is not None:
                 setattr(trigger, field, value)
+        # exclude_unset semantics so an explicit tier:null clears the tier
+        # (omitted leaves it unchanged) - same lesson as alerts' confirm_checks
+        if "tier" in data.model_fields_set:
+            trigger.tier = data.tier
         if data.alert_ids is not None:
             await self._set_alert_links(trigger, data.alert_ids)
         await self.db.commit()

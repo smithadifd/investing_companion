@@ -31,6 +31,7 @@ import type {
   HistoryData,
   MarketOverview,
   NeedsAttentionResponse,
+  TradeReadinessResponse,
   NotificationStatus,
   PaginatedMeta,
   PasswordChange,
@@ -832,6 +833,13 @@ class ApiClient {
    */
   async getNeedsAttention(): Promise<NeedsAttentionResponse> {
     return this.fetch<NeedsAttentionResponse>('/dashboard/needs-attention');
+  }
+
+  /**
+   * Get actionable triggers (hit/approaching) with position and event context
+   */
+  async getTradeReadiness(): Promise<TradeReadinessResponse> {
+    return this.fetch<TradeReadinessResponse>('/dashboard/trade-readiness');
   }
 
   // Trigger playbook methods

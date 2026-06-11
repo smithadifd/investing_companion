@@ -96,6 +96,25 @@ export interface WatchlistItemEquity {
   sector: string | null;
 }
 
+// Tiered entry zones
+export interface EntryZone {
+  tier: string;
+  low: number | string | null;
+  high: number | string | null;
+}
+
+export type ZoneStatusValue =
+  | 'in_zone'
+  | 'approaching'
+  | 'above'
+  | 'below'
+  | 'unknown';
+
+export interface EntryZoneStatus extends EntryZone {
+  status: ZoneStatusValue;
+  distance_percent: number | string | null;
+}
+
 export interface WatchlistItem {
   id: number;
   watchlist_id: number;
@@ -104,6 +123,8 @@ export interface WatchlistItem {
   target_price: number | string | null;
   thesis: string | null;
   track_calendar: boolean;
+  entry_zones: EntryZone[];
+  zone_statuses: EntryZoneStatus[];
   added_at: string;
   equity: WatchlistItemEquity;
   quote: Quote | null;
@@ -148,6 +169,7 @@ export interface WatchlistItemCreate {
   target_price?: number;
   thesis?: string;
   track_calendar?: boolean;
+  entry_zones?: EntryZone[];
 }
 
 export interface WatchlistItemUpdate {
@@ -155,6 +177,8 @@ export interface WatchlistItemUpdate {
   target_price?: number;
   thesis?: string;
   track_calendar?: boolean;
+  // Explicit null clears the zones; omitted leaves them unchanged
+  entry_zones?: EntryZone[] | null;
 }
 
 export interface WatchlistExportItem {
@@ -379,7 +403,8 @@ export type AlertConditionType =
   | 'crosses_below'
   | 'percent_up'
   | 'percent_down'
-  | 'percent_from_high';
+  | 'percent_from_high'
+  | 'entry_zone';
 
 export type AlertTargetType = 'equity' | 'ratio';
 
@@ -396,6 +421,12 @@ export interface Alert {
   notes: string | null;
   equity_id: number | null;
   ratio_id: number | null;
+  // entry_zone alerts: the linked watchlist item + per-tier dedup state
+  watchlist_item_id?: number | null;
+  zone_state?: Record<
+    string,
+    { armed: boolean; last_fired_at: string | null }
+  > | null;
   condition_type: AlertConditionType;
   threshold_value: number | string;
   comparison_period: string | null;
@@ -415,8 +446,10 @@ export interface AlertCreate {
   notes?: string;
   equity_symbol?: string;
   ratio_id?: number;
+  // entry_zone alerts target a watchlist item; threshold is not used
+  watchlist_item_id?: number;
   condition_type: AlertConditionType;
-  threshold_value: number;
+  threshold_value?: number;
   comparison_period?: string;
   cooldown_minutes?: number;
   confirm_checks?: number;

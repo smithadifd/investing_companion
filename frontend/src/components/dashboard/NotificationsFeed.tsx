@@ -48,6 +48,8 @@ function getConditionLabel(conditionType: string): string {
       return 'rose by';
     case 'percent_down':
       return 'fell by';
+    case 'entry_zone':
+      return 'entered a zone at';
     default:
       return 'triggered at';
   }

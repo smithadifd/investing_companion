@@ -383,6 +383,25 @@ def send_eod_wrap():
             except Exception as e:
                 logger.warning(f"Failed to build approaching section: {e}")
 
+            # --- Trigger playbook: pre-committed decisions with live signal ---
+            playbook_status: list[str] = []
+            try:
+                from app.services.trigger import TriggerService
+
+                for t in await TriggerService(session).list_triggers():
+                    if t.status.value == "active" and t.signal.value in (
+                        "hit",
+                        "approaching",
+                    ):
+                        action = t.action.strip().splitlines()[0]
+                        if len(action) > 80:
+                            action = action[:77] + "..."
+                        playbook_status.append(
+                            f"• [{t.signal.value.upper()}] {t.name} → {action}"
+                        )
+            except Exception as e:
+                logger.warning(f"Failed to build playbook section: {e}")
+
             # --- Tomorrow's calendar ---
             event_service = EconomicEventService(session)
             tomorrow = date.today() + timedelta(days=1)
@@ -421,6 +440,7 @@ def send_eod_wrap():
                 alerts_triggered=alerts_triggered,
                 active_alerts=active_count,
                 approaching=approaching,
+                playbook_status=playbook_status,
                 tomorrow_events=tomorrow_events,
             )
             message = format_eod_wrap(data)

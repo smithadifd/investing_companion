@@ -14,6 +14,7 @@ from app.db.models.price_history import PriceHistory
 from app.db.models.ratio import Ratio
 from app.db.models.session import Session
 from app.db.models.trade import Trade, TradePair, TradeType
+from app.db.models.trigger import Trigger, TriggerAlertLink, TriggerLifecycle
 from app.db.models.user import User
 from app.db.models.user_settings import UserSetting
 from app.db.models.watchlist import Watchlist, WatchlistItem
@@ -35,6 +36,9 @@ __all__ = [
     "Trade",
     "TradePair",
     "TradeType",
+    "Trigger",
+    "TriggerAlertLink",
+    "TriggerLifecycle",
     "User",
     "UserSetting",
     "Watchlist",

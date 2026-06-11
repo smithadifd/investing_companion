@@ -8,6 +8,7 @@ from app.tasks.alerts import (
     send_morning_pulse,
     send_eod_wrap,
 )
+from app.tasks.price_history import sync_all_price_history
 
 __all__ = [
     "celery_app",
@@ -16,4 +17,5 @@ __all__ = [
     "check_notification_schedule",
     "send_morning_pulse",
     "send_eod_wrap",
+    "sync_all_price_history",
 ]

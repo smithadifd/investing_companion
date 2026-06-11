@@ -1,9 +1,16 @@
 'use client';
 
 import { useState } from 'react';
-import { Loader2, Calendar } from 'lucide-react';
+import { Loader2, Calendar, Bell, Layers } from 'lucide-react';
 import { useUpdateWatchlistItem } from '@/lib/hooks/useWatchlist';
+import { useAlerts, useCreateAlert, useDeleteAlert } from '@/lib/hooks/useAlert';
 import { Modal } from '@/components/ui/Modal';
+import {
+  EntryZoneEditor,
+  validateZoneDrafts,
+  zoneDraftsToApi,
+  type ZoneDraft,
+} from './EntryZoneEditor';
 import type { WatchlistItem } from '@/lib/api/types';
 
 interface EditItemModalProps {
@@ -23,11 +30,46 @@ export function EditItemModal({
   );
   const [thesis, setThesis] = useState(item.thesis || '');
   const [trackCalendar, setTrackCalendar] = useState(item.track_calendar ?? false);
+  const [zones, setZones] = useState<ZoneDraft[]>(
+    (item.entry_zones ?? []).map((z) => ({
+      tier: z.tier,
+      low: z.low !== null && z.low !== undefined ? String(z.low) : '',
+      high: z.high !== null && z.high !== undefined ? String(z.high) : '',
+    }))
+  );
+  const [zoneError, setZoneError] = useState<string | null>(null);
+
+  // The zone-hit alert for this item, if one exists. The toggle and save
+  // wait for this query so a slow load can't misreport (and delete) an
+  // existing alert.
+  const { data: equityAlerts, isLoading: alertsLoading } = useAlerts(
+    false,
+    item.equity_id
+  );
+  const existingZoneAlert = equityAlerts?.find(
+    (a) => a.condition_type === 'entry_zone' && a.watchlist_item_id === item.id
+  );
+  const [zoneAlertEnabled, setZoneAlertEnabled] = useState<boolean | null>(null);
+  const zoneAlertOn = zoneAlertEnabled ?? Boolean(existingZoneAlert);
 
   const updateMutation = useUpdateWatchlistItem();
+  const createAlertMutation = useCreateAlert();
+  const deleteAlertMutation = useDeleteAlert();
+
+  const isPending =
+    alertsLoading ||
+    updateMutation.isPending ||
+    createAlertMutation.isPending ||
+    deleteAlertMutation.isPending;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const validationError = validateZoneDrafts(zones);
+    setZoneError(validationError);
+    if (validationError) return;
+
+    const apiZones = zoneDraftsToApi(zones);
 
     try {
       await updateMutation.mutateAsync({
@@ -38,8 +80,21 @@ export function EditItemModal({
           target_price: targetPrice ? parseFloat(targetPrice) : undefined,
           thesis: thesis.trim() || undefined,
           track_calendar: trackCalendar,
+          // null clears the zones; a list replaces them
+          entry_zones: apiZones.length ? apiZones : null,
         },
       });
+
+      if (zoneAlertOn && !existingZoneAlert && apiZones.length) {
+        await createAlertMutation.mutateAsync({
+          name: `${item.equity.symbol} entry zones`,
+          condition_type: 'entry_zone',
+          watchlist_item_id: item.id,
+        });
+      } else if (!zoneAlertOn && existingZoneAlert) {
+        await deleteAlertMutation.mutateAsync(existingZoneAlert.id);
+      }
+
       onClose();
     } catch (error) {
       console.error('Failed to update item:', error);
@@ -102,6 +157,56 @@ export function EditItemModal({
           />
         </div>
 
+        {/* Tiered entry zones */}
+        <div className="p-3 bg-neutral-50 dark:bg-neutral-700/50 rounded-lg space-y-3">
+          <div className="flex items-center gap-3">
+            <Layers className="h-5 w-5 text-amber-500" />
+            <div>
+              <p className="text-sm font-medium text-neutral-900 dark:text-neutral-50">
+                Entry Zones
+              </p>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                Tiered buy zones (e.g., $50–52 half starter, sub-46 aggressive).
+                Leave low empty for &quot;sub-X&quot; tiers.
+              </p>
+            </div>
+          </div>
+
+          <EntryZoneEditor zones={zones} onChange={setZones} />
+
+          {zoneError && (
+            <p className="text-sm text-red-500" role="alert">
+              {zoneError}
+            </p>
+          )}
+
+          <div className="flex items-center justify-between pt-1">
+            <div className="flex items-center gap-2">
+              <Bell className="h-4 w-4 text-blue-500" />
+              <p className="text-sm text-neutral-900 dark:text-neutral-50">
+                Alert when price enters a zone
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={zoneAlertOn}
+              aria-label="Alert when price enters a zone"
+              disabled={alertsLoading}
+              onClick={() => setZoneAlertEnabled(!zoneAlertOn)}
+              className={`relative w-11 h-6 rounded-full transition-colors disabled:opacity-50 ${
+                zoneAlertOn ? 'bg-blue-500' : 'bg-neutral-300 dark:bg-neutral-600'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                  zoneAlertOn ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+
         {/* Calendar tracking toggle */}
         <div className="flex items-center justify-between p-3 bg-neutral-50 dark:bg-neutral-700/50 rounded-lg">
           <div className="flex items-center gap-3">
@@ -140,13 +245,11 @@ export function EditItemModal({
           </button>
           <button
             type="submit"
-            disabled={updateMutation.isPending}
+            disabled={isPending}
             className="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-500/50 text-white rounded-lg font-medium transition-colors"
           >
-            {updateMutation.isPending && (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            )}
-            {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
+            {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+            {isPending ? 'Saving...' : 'Save Changes'}
           </button>
         </div>
       </form>

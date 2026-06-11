@@ -43,6 +43,8 @@ const CONDITION_NAME_LABELS: Record<AlertConditionType, string> = {
   percent_up: '% Up',
   percent_down: '% Down',
   percent_from_high: '% From High',
+  // Created from the watchlist item editor, not this modal
+  entry_zone: 'Entry Zones',
 };
 
 /**

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Pencil, Trash2, Calendar } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils/format';
 import { PriceChange } from '@/components/ui/PriceChange';
+import { ZoneStatusChips } from './ZoneStatusChips';
 import type { WatchlistItem } from '@/lib/api/types';
 
 interface WatchlistItemRowProps {
@@ -73,6 +74,11 @@ export function WatchlistItemRow({ item, onEdit, onRemove }: WatchlistItemRowPro
           </span>
         ) : (
           <span className="text-neutral-500 dark:text-neutral-400">--</span>
+        )}
+        {(item.zone_statuses ?? []).length > 0 && (
+          <div className="flex justify-end mt-1">
+            <ZoneStatusChips zones={item.zone_statuses} />
+          </div>
         )}
       </td>
       <td className="p-4 hidden md:table-cell">

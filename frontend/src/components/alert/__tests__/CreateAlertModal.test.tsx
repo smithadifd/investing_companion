@@ -183,4 +183,47 @@ describe('CreateAlertModal', () => {
     render(<CreateAlertModal isOpen={true} onClose={onClose} prefillRatioId={1} />);
     expect(screen.getByText('Select a ratio...')).toBeInTheDocument();
   });
+
+  it('shows sustained confirmation only for crossing conditions', async () => {
+    const user = userEvent.setup();
+    render(<CreateAlertModal isOpen={true} onClose={onClose} />);
+
+    // Not shown for the default 'above' condition
+    expect(screen.queryByText(/Sustained for/)).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByDisplayValue('Above'), 'crosses_below');
+    expect(screen.getByText(/Sustained for/)).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByDisplayValue('Crosses Below'), 'percent_up');
+    expect(screen.queryByText(/Sustained for/)).not.toBeInTheDocument();
+  });
+
+  it('submits confirm_checks for a crossing condition', async () => {
+    const user = userEvent.setup();
+    render(<CreateAlertModal isOpen={true} onClose={onClose} />);
+
+    const searchInput = screen.getByTestId('equity-search');
+    await user.type(searchInput, 'AAPL');
+    await user.click(searchInput); // triggers onSelect
+
+    await user.selectOptions(screen.getByDisplayValue('Above'), 'crosses_below');
+
+    const thresholdInput = screen.getByPlaceholderText('e.g., 200.00');
+    await user.type(thresholdInput, '60');
+
+    const confirmInput = screen.getByPlaceholderText('Fire on the cross (default)');
+    await user.type(confirmInput, '4');
+
+    await user.click(screen.getByRole('button', { name: /Create Alert/i }));
+
+    await waitFor(() => {
+      expect(mockMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          condition_type: 'crosses_below',
+          threshold_value: 60,
+          confirm_checks: 4,
+        })
+      );
+    });
+  });
 });

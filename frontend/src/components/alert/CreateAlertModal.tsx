@@ -89,6 +89,7 @@ export function CreateAlertModal({
   const [thresholdValue, setThresholdValue] = useState('');
   const [comparisonPeriod, setComparisonPeriod] = useState('1d');
   const [cooldownMinutes, setCooldownMinutes] = useState('60');
+  const [confirmChecks, setConfirmChecks] = useState('');
   const [isActive, setIsActive] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -100,6 +101,9 @@ export function CreateAlertModal({
     conditionType === 'percent_up' ||
     conditionType === 'percent_down' ||
     conditionType === 'percent_from_high';
+
+  const isCrossingCondition =
+    conditionType === 'crosses_above' || conditionType === 'crosses_below';
 
   // Auto-update name when symbol, condition, or threshold changes
   const updateAutoName = useCallback(
@@ -148,6 +152,8 @@ export function CreateAlertModal({
       threshold_value: parseFloat(thresholdValue),
       comparison_period: isPercentCondition ? comparisonPeriod : undefined,
       cooldown_minutes: parseInt(cooldownMinutes) || 60,
+      confirm_checks:
+        isCrossingCondition && confirmChecks ? parseInt(confirmChecks) : undefined,
       is_active: isActive,
     };
 
@@ -170,6 +176,7 @@ export function CreateAlertModal({
     setThresholdValue('');
     setComparisonPeriod('1d');
     setCooldownMinutes('60');
+    setConfirmChecks('');
     setIsActive(true);
     setSearchQuery('');
     onClose();
@@ -338,6 +345,29 @@ export function CreateAlertModal({
                   </option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {/* Sustained confirmation (crossing conditions only) */}
+          {isCrossingCondition && (
+            <div>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                Sustained for (checks, optional)
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="30"
+                value={confirmChecks}
+                onChange={(e) => setConfirmChecks(e.target.value)}
+                placeholder="Fire on the cross (default)"
+                className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <p className="text-xs text-neutral-500 mt-1">
+                Only fire after the condition holds for N consecutive checks
+                (~2 checks/day, so 4 ≈ 2 days). Intraday dips that recover
+                don&apos;t count.
+              </p>
             </div>
           )}
 

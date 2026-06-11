@@ -35,7 +35,8 @@ class TestHandoffService:
 
         pack = await ContextPackService(db).build(test_user.id)
 
-        assert pack.schema_version == "1.1"
+        from app.schemas.context_pack import SCHEMA_VERSION
+        assert pack.schema_version == SCHEMA_VERSION
         assert len(pack.recent_handoffs) == 1
         assert pack.recent_handoffs[0].summary == "Test handoff block"
         assert pack.recent_handoffs[0].applied_count == 1

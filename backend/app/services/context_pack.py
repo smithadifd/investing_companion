@@ -29,6 +29,7 @@ from app.schemas.context_pack import (
     PackExposure,
     PackHandoff,
     PackPosition,
+    PackPlaybookTrigger,
     PackTradeSummary,
     PackTrigger,
     PackWatchlistItem,
@@ -36,6 +37,7 @@ from app.schemas.context_pack import (
 from app.services.economic_event import EconomicEventService
 from app.services.handoff import HandoffService
 from app.services.trade import TradeService
+from app.services.trigger import TriggerService
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,7 @@ class ContextPackService:
         self.trade_service = TradeService(db)
         self.event_service = EconomicEventService(db)
         self.handoff_service = HandoffService(db)
+        self.trigger_service = TriggerService(db)
 
     async def build(self, user_id: UUID) -> ContextPack:
         portfolio = await self.trade_service.get_portfolio(user_id)
@@ -96,6 +99,18 @@ class ContextPackService:
             )
             for r in await self.handoff_service.recent(limit=5)
         ]
+        playbook = [
+            PackPlaybookTrigger(
+                name=t.name,
+                rule=t.rule,
+                action=t.action,
+                tier=t.tier,
+                status=t.status.value,
+                signal=t.signal.value,
+                executed_at=t.executed_at,
+            )
+            for t in await self.trigger_service.list_triggers()
+        ]
 
         return ContextPack(
             generated_at=datetime.now(timezone.utc),
@@ -107,6 +122,7 @@ class ContextPackService:
             recent_triggers=triggers,
             watchlist_targets=targets,
             upcoming_events=events,
+            triggers=playbook,
             recent_handoffs=handoffs,
             trade_summary=PackTradeSummary(
                 total_trades=performance.metrics.total_trades,
@@ -344,6 +360,14 @@ def render_markdown(pack: ContextPack) -> str:
             sym = f" [{ev.symbol}]" if ev.symbol else ""
             lines.append(
                 f"- {ev.event_date} (+{ev.days_away}d, {ev.importance}){sym} {ev.title}"
+            )
+
+    if pack.triggers:
+        lines += ["", "## Trigger playbook (standing orders)"]
+        for t in pack.triggers:
+            tier = f" [{t.tier}]" if t.tier else ""
+            lines.append(
+                f"- [{t.signal}/{t.status}]{tier} {t.name}: IF {t.rule} THEN {t.action}"
             )
 
     if pack.recent_handoffs:

@@ -314,6 +314,8 @@ class EODData:
     active_alerts: int = 0
     # Pre-formatted status lines for standing triggers near their thresholds
     approaching: list[str] = field(default_factory=list)
+    # Pre-formatted playbook lines (triggers whose signal is hit/approaching)
+    playbook_status: list[str] = field(default_factory=list)
     # Tomorrow's calendar: [{event_time, title, importance, event_type, symbol}, ...]
     tomorrow_events: list[dict] = field(default_factory=list)
 
@@ -471,6 +473,16 @@ def format_eod_wrap(data: EODData) -> str:
     except Exception as e:
         warnings.append("alerts")
         logger.warning(f"Error formatting alerts: {e}")
+
+    # -- Trigger Playbook (standing decisions with live signal) --
+    try:
+        if data.playbook_status:
+            lines = ["TRIGGER PLAYBOOK"]
+            lines.extend(data.playbook_status[:5])
+            sections.append("\n".join(lines))
+    except Exception as e:
+        warnings.append("playbook")
+        logger.warning(f"Error formatting playbook: {e}")
 
     # -- Tomorrow's Calendar --
     tomorrow_section = ""

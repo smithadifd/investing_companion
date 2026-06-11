@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-SCHEMA_VERSION = "1.1"
+SCHEMA_VERSION = "1.2"
 
 
 class PackPosition(BaseModel):
@@ -110,6 +110,18 @@ class PackTradeSummary(BaseModel):
     total_unrealized_pnl: Optional[Decimal] = None
 
 
+class PackPlaybookTrigger(BaseModel):
+    """A standing order from the trigger playbook."""
+
+    name: str
+    rule: str
+    action: str
+    tier: Optional[str] = None
+    status: str
+    signal: str
+    executed_at: Optional[datetime] = None
+
+
 class PackHandoff(BaseModel):
     """A recent handoff execution receipt (conversation->app feedback)."""
 
@@ -135,6 +147,10 @@ class ContextPack(BaseModel):
     watchlist_targets: List[PackWatchlistItem]
     upcoming_events: List[PackEvent]
     trade_summary: PackTradeSummary
+    triggers: List[PackPlaybookTrigger] = Field(
+        default_factory=list,
+        description="The trigger playbook: pre-committed if-X-then-Y decisions",
+    )
     recent_handoffs: List[PackHandoff] = Field(
         default_factory=list,
         description="Execution receipts for recent advisor handoff blocks",

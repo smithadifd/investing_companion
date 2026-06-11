@@ -1,4 +1,4 @@
-# Handoff Loop Schema (v1.1)
+# Handoff Loop Schema (v1.2)
 
 The handoff loop connects an external AI advisor (e.g. a Claude project) to the app in both
 directions. This document is the contract; give it to the advisor verbatim.
@@ -26,6 +26,7 @@ Top-level fields (`schema_version: "1.1"`):
 | `recent_triggers` | Alert fires from the last 7 days |
 | `watchlist_targets` | Items with a `target_price`: latest stored daily close + percent to target + thesis |
 | `upcoming_events` | Next 14 days of earnings/macro/custom events with `days_away` |
+| `triggers` | The trigger playbook: pre-committed "if X then I do Y" standing orders with `tier`, lifecycle `status` (active/executed/retired), and live `signal` (armed/approaching/hit/unwatched, derived from linked alerts). Advisors can propose new triggers via handoff (`ADD_TRIGGER` with name, rule, action, tier, linked alert names) |
 | `recent_handoffs` | Execution receipts for the last 5 handoff blocks (see below) |
 | `trade_summary` | Trade count, win rate, profit factor, realized/unrealized P&L |
 | `unsupported_features` | **Never emit handoff actions requiring anything listed here.** Shrinks as features ship |
@@ -73,3 +74,4 @@ fields); a major bump may rename or remove. Changes are recorded here.
 |---------|--------|
 | 1.0 | Initial pack: positions, exposures, alerts, triggers, targets, events, trade summary, unsupported_features |
 | 1.1 | Added `recent_handoffs` + the receipts endpoint |
+| 1.2 | Added `triggers` (the trigger playbook) + `/api/v1/triggers` CRUD |

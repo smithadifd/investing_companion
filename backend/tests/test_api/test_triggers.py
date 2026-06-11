@@ -120,17 +120,17 @@ class TestTriggerEndpoints:
             "alert_ids": [alert.id],
         })
         assert created.status_code == 201
-        body = created.json()
+        body = created.json()["data"]
         assert body["signal"] == "approaching"
         trigger_id = body["id"]
 
         listed = await authed_client.get("/api/v1/triggers")
-        assert any(t["id"] == trigger_id for t in listed.json())
+        assert any(t["id"] == trigger_id for t in listed.json()["data"])
 
         executed = await authed_client.post(
             f"/api/v1/triggers/{trigger_id}/execute", json={"note": "added 5 shares"}
         )
-        assert executed.json()["status"] == "executed"
+        assert executed.json()["data"]["status"] == "executed"
 
         deleted = await authed_client.delete(f"/api/v1/triggers/{trigger_id}")
         assert deleted.status_code == 204

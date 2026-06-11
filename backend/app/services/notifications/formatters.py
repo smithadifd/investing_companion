@@ -3,6 +3,7 @@
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, time
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,8 @@ class MorningData:
     # Alert stats
     active_alerts: int = 0
     triggered_overnight: int = 0
+    # Pre-formatted "what needs a decision today" lines - shown first
+    needs_attention: list[str] = field(default_factory=list)
 
 
 def format_morning_pulse(data: MorningData) -> str:
@@ -96,6 +99,16 @@ def format_morning_pulse(data: MorningData) -> str:
     now_et = _get_et_now()
     header = f"☀️ Morning Pulse - {now_et.strftime('%b %d, %Y')}"
     sections.append(header)
+
+    # -- Needs Attention (leads the briefing: decisions, not data) --
+    try:
+        if data.needs_attention:
+            lines = ["⚡ NEEDS ATTENTION"]
+            lines.extend(data.needs_attention[:8])
+            sections.append("\n".join(lines))
+    except Exception as e:
+        warnings.append("needs attention")
+        logger.warning(f"Error formatting needs attention: {e}")
 
     # -- Futures & Pre-Market --
     try:
@@ -280,6 +293,9 @@ class AlertTrigger:
     """A single alert trigger event."""
     name: str = ""
     triggered_value: float = 0.0
+    # The alert's notes carry the pre-committed action ("trim VOO", "run the
+    # checklist") - surfacing them attaches the decision to the trigger
+    notes: Optional[str] = None
 
 
 @dataclass
@@ -296,6 +312,8 @@ class EODData:
     # Alerts
     alerts_triggered: list[AlertTrigger] = field(default_factory=list)
     active_alerts: int = 0
+    # Pre-formatted status lines for standing triggers near their thresholds
+    approaching: list[str] = field(default_factory=list)
     # Tomorrow's calendar: [{event_time, title, importance, event_type, symbol}, ...]
     tomorrow_events: list[dict] = field(default_factory=list)
 
@@ -439,9 +457,16 @@ def format_eod_wrap(data: EODData) -> str:
             f"🔔 {triggered_count} triggered today | {data.active_alerts} active"
         )
         for trigger in data.alerts_triggered[:5]:
-            lines.append(
-                f"• {trigger.name}: Triggered at {_fmt_price(trigger.triggered_value)}"
-            )
+            line = f"• {trigger.name}: Triggered at {_fmt_price(trigger.triggered_value)}"
+            if trigger.notes:
+                note = trigger.notes.strip().splitlines()[0]
+                if len(note) > 110:
+                    note = note[:107] + "..."
+                line += f"\n  ↳ {note}"
+            lines.append(line)
+        if data.approaching:
+            lines.append("Approaching:")
+            lines.extend(data.approaching[:5])
         sections.append("\n".join(lines))
     except Exception as e:
         warnings.append("alerts")

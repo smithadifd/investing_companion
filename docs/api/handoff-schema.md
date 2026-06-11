@@ -1,0 +1,75 @@
+# Handoff Loop Schema (v1.1)
+
+The handoff loop connects an external AI advisor (e.g. a Claude project) to the app in both
+directions. This document is the contract; give it to the advisor verbatim.
+
+```
+advisor --(handoff block)--> executor (Claude Code) --(API calls)--> IC
+   ^                                                                  |
+   |                                                                  v
+   +---- context pack (incl. execution receipts) <---- GET /export/context-pack
+```
+
+## App -> conversation: the context pack
+
+`GET /api/v1/export/context-pack` (auth required). `?format=markdown` renders for pasting
+into a conversation; the default JSON is for tooling.
+
+Top-level fields (`schema_version: "1.1"`):
+
+| Field | Contents |
+|-------|----------|
+| `positions` | Open positions from the trade log: symbol, quantity, avg cost, current price/value, unrealized/realized P&L |
+| `portfolio_value`, `total_invested` | Portfolio rollups |
+| `exposures` | Position value per theme watchlist. **Overlapping by design** — one position can count toward several themes; do not sum |
+| `active_alerts` | Every active alert with `last_checked_value` (≤5 min stale), `distance_percent` to threshold (null for percent conditions), and `status`: `armed` / `approaching` (within 3%) / `triggered_recently` (last 48h) |
+| `recent_triggers` | Alert fires from the last 7 days |
+| `watchlist_targets` | Items with a `target_price`: latest stored daily close + percent to target + thesis |
+| `upcoming_events` | Next 14 days of earnings/macro/custom events with `days_away` |
+| `recent_handoffs` | Execution receipts for the last 5 handoff blocks (see below) |
+| `trade_summary` | Trade count, win rate, profit factor, realized/unrealized P&L |
+| `unsupported_features` | **Never emit handoff actions requiring anything listed here.** Shrinks as features ship |
+
+Staleness: the pack makes no live market-data calls. Prices are at most one alert-check
+cycle (5 min) old; daily closes are from the last completed sync.
+
+## Conversation -> app: handoff blocks
+
+Handoff blocks are markdown action lists executed by Claude Code against the API
+(see the action table in the executor's local config). Conventions:
+
+- Reference targets by **name/symbol, never raw IDs** — the executor resolves IDs.
+- Mark actions needing explicit sign-off; the executor skips them absent approval.
+- Check `unsupported_features` in the latest pack before emitting an action type.
+
+## Execution receipts
+
+After executing a block, the executor posts:
+
+`POST /api/v1/export/handoff-receipts` (auth; blocked in demo mode)
+
+```json
+{
+  "summary": "Q4 deferred items: defense watchlist + carry tiers",
+  "source": "investing_hub",
+  "actions": [
+    {"action": "ADD_ALERT", "target": "KTOS", "result": "applied", "detail": "alert id 32"},
+    {"action": "ADD_TO_WATCHLIST", "target": "RCAT", "result": "skipped", "detail": "dropped per user amendment"},
+    {"action": "ADD_RATIO", "target": "USD/JPY", "result": "flagged", "detail": "needs forex fix"}
+  ]
+}
+```
+
+`result` is one of `applied` | `skipped` | `flagged`. Receipts appear in the next context
+pack's `recent_handoffs`, closing the loop: the advisor learns what actually happened
+without being told.
+
+## Versioning
+
+`schema_version` is MAJOR.MINOR. Minor bumps add fields (advisors must tolerate unknown
+fields); a major bump may rename or remove. Changes are recorded here.
+
+| Version | Change |
+|---------|--------|
+| 1.0 | Initial pack: positions, exposures, alerts, triggers, targets, events, trade summary, unsupported_features |
+| 1.1 | Added `recent_handoffs` + the receipts endpoint |

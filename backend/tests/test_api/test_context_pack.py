@@ -7,7 +7,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.price_history import PriceHistory
-from app.schemas.context_pack import PackPosition
+from app.schemas.context_pack import SCHEMA_VERSION, PackPosition
 from app.services.context_pack import ContextPackService, render_markdown
 from tests.factories import (
     create_test_alert,
@@ -51,7 +51,7 @@ class TestContextPackService:
 
         pack = await service.build(test_user.id)
 
-        assert pack.schema_version == "1.0"
+        assert pack.schema_version == SCHEMA_VERSION
         assert pack.positions == []
         assert pack.trade_summary.total_trades == 0
         assert pack.unsupported_features
@@ -129,7 +129,7 @@ class TestContextPackEndpoint:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["schema_version"] == "1.0"
+        assert body["schema_version"] == SCHEMA_VERSION
         assert any(a["symbol"] == "CPK1" for a in body["active_alerts"])
 
     async def test_returns_markdown(self, authed_client: AsyncClient, db: AsyncSession):

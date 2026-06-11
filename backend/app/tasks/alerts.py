@@ -88,6 +88,7 @@ def send_morning_pulse():
         from sqlalchemy import func, select
 
         from app.db.models.alert import Alert, AlertHistory
+        from app.services.context_pack import ContextPackService
         from app.services.data_providers.yahoo import YahooFinanceProvider
         from app.services.economic_event import EconomicEventService
         from app.services.notifications.formatters import MorningData, format_morning_pulse
@@ -204,6 +205,34 @@ def send_morning_pulse():
                 )
             ) or 0
 
+            # --- Needs attention: decisions first, data second ---
+            needs_attention: list[str] = []
+            try:
+                cp = ContextPackService(session)
+                for a in await cp.active_alerts():
+                    if a.status == "triggered_recently":
+                        line = f"🔔 {a.name} triggered"
+                        if a.notes:
+                            note = a.notes.strip().splitlines()[0]
+                            line += f" — {note[:90]}"
+                        needs_attention.append(line)
+                    elif a.status == "approaching":
+                        needs_attention.append(
+                            f"⚠️ {a.name} — {a.distance_percent:+.1f}% away "
+                            f"(last {a.last_checked_value})"
+                        )
+                for t in await cp.watchlist_targets():
+                    if (
+                        t.percent_to_target is not None
+                        and abs(t.percent_to_target) <= 5
+                    ):
+                        needs_attention.append(
+                            f"🎯 {t.symbol} within {abs(t.percent_to_target):.1f}% "
+                            f"of target ${t.target_price} ({t.watchlist})"
+                        )
+            except Exception as e:
+                logger.warning(f"Failed to build needs-attention section: {e}")
+
             # --- Build and send ---
             data = MorningData(
                 futures=futures_data,
@@ -214,6 +243,7 @@ def send_morning_pulse():
                 premarket_movers=premarket_movers,
                 active_alerts=active_count,
                 triggered_overnight=triggered_overnight,
+                needs_attention=needs_attention,
             )
             message = format_morning_pulse(data)
             success, error = await discord_service.send_plain_text(message)
@@ -336,7 +366,22 @@ def send_eod_wrap():
                 alerts_triggered.append(AlertTrigger(
                     name=name,
                     triggered_value=float(h.triggered_value),
+                    notes=alert.notes,
                 ))
+
+            # --- Standing triggers approaching their thresholds ---
+            approaching: list[str] = []
+            try:
+                from app.services.context_pack import ContextPackService
+
+                cp = ContextPackService(session)
+                for a in await cp.active_alerts():
+                    if a.status == "approaching":
+                        approaching.append(
+                            f"• {a.name} — {a.distance_percent:+.1f}% away"
+                        )
+            except Exception as e:
+                logger.warning(f"Failed to build approaching section: {e}")
 
             # --- Tomorrow's calendar ---
             event_service = EconomicEventService(session)
@@ -375,6 +420,7 @@ def send_eod_wrap():
                 big_movers=all_movers,
                 alerts_triggered=alerts_triggered,
                 active_alerts=active_count,
+                approaching=approaching,
                 tomorrow_events=tomorrow_events,
             )
             message = format_eod_wrap(data)

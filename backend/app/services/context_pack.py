@@ -81,9 +81,9 @@ class ContextPackService:
         ]
 
         exposures = await self._exposures(positions, portfolio.current_value)
-        alerts = await self._active_alerts()
+        alerts = await self.active_alerts()
         triggers = await self._recent_triggers()
-        targets = await self._watchlist_targets()
+        targets = await self.watchlist_targets()
         events = await self._upcoming_events(user_id)
         handoffs = [
             PackHandoff(
@@ -160,7 +160,7 @@ class ContextPackService:
             )
         return exposures
 
-    async def _active_alerts(self) -> List[PackAlert]:
+    async def active_alerts(self) -> List[PackAlert]:
         stmt = (
             select(Alert)
             .options(selectinload(Alert.equity), selectinload(Alert.ratio))
@@ -229,7 +229,7 @@ class ContextPackService:
             for h in result.scalars().all()
         ]
 
-    async def _watchlist_targets(self) -> List[PackWatchlistItem]:
+    async def watchlist_targets(self) -> List[PackWatchlistItem]:
         """Items with a target price, plus distance from the latest stored close."""
         stmt = (
             select(WatchlistItem, Watchlist.name, Equity)

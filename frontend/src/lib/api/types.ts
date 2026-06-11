@@ -467,6 +467,52 @@ export interface NotificationStatus {
   };
 }
 
+// Trigger playbook types
+export type TriggerStatus = 'active' | 'executed' | 'retired';
+
+export type TriggerSignal = 'armed' | 'approaching' | 'hit' | 'unwatched';
+
+export interface TriggerAlertSummary {
+  id: number;
+  name: string;
+  is_active: boolean;
+  distance_percent: number | string | null;
+  last_triggered_at: string | null;
+}
+
+export interface Trigger {
+  id: number;
+  name: string;
+  rule: string;
+  action: string;
+  tier: string | null;
+  display_order: number;
+  status: TriggerStatus;
+  signal: TriggerSignal;
+  executed_at: string | null;
+  execution_note: string | null;
+  alerts: TriggerAlertSummary[];
+  created_at: string;
+}
+
+export interface TriggerCreate {
+  name: string;
+  rule: string;
+  action: string;
+  tier?: string;
+  display_order?: number;
+  alert_ids?: number[];
+}
+
+export interface TriggerUpdate {
+  name?: string;
+  rule?: string;
+  action?: string;
+  tier?: string;
+  display_order?: number;
+  alert_ids?: number[];
+}
+
 // Auth types
 export interface User {
   id: string;

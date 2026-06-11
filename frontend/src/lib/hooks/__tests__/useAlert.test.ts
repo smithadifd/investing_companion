@@ -57,6 +57,8 @@ const mockAlert: Alert = {
   is_active: true,
   last_triggered_at: null,
   last_checked_value: 195.5,
+  confirm_checks: null,
+  consecutive_met_count: 0,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
   target: { type: 'equity', id: 1, symbol: 'AAPL', name: 'Apple Inc.' },

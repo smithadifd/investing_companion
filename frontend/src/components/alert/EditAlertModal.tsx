@@ -68,6 +68,9 @@ export function EditAlertModal({ alert, onClose }: EditAlertModalProps) {
   );
   const [comparisonPeriod, setComparisonPeriod] = useState(alert.comparison_period || '1d');
   const [cooldownMinutes, setCooldownMinutes] = useState(alert.cooldown_minutes.toString());
+  const [confirmChecks, setConfirmChecks] = useState(
+    alert.confirm_checks != null ? alert.confirm_checks.toString() : ''
+  );
   const [isActive, setIsActive] = useState(alert.is_active);
 
   const updateAlert = useUpdateAlert();
@@ -76,6 +79,9 @@ export function EditAlertModal({ alert, onClose }: EditAlertModalProps) {
     conditionType === 'percent_up' ||
     conditionType === 'percent_down' ||
     conditionType === 'percent_from_high';
+
+  const isCrossingCondition =
+    conditionType === 'crosses_above' || conditionType === 'crosses_below';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,6 +95,9 @@ export function EditAlertModal({ alert, onClose }: EditAlertModalProps) {
       threshold_value: parseFloat(thresholdValue),
       comparison_period: isPercentCondition ? comparisonPeriod : undefined,
       cooldown_minutes: parseInt(cooldownMinutes) || 60,
+      // Explicit null clears the confirmation on the backend
+      confirm_checks:
+        isCrossingCondition && confirmChecks ? parseInt(confirmChecks) : null,
       is_active: isActive,
     };
 
@@ -204,6 +213,28 @@ export function EditAlertModal({ alert, onClose }: EditAlertModalProps) {
                   </option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {/* Sustained confirmation (crossing conditions only) */}
+          {isCrossingCondition && (
+            <div>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                Sustained for (checks, optional)
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="30"
+                value={confirmChecks}
+                onChange={(e) => setConfirmChecks(e.target.value)}
+                placeholder="Fire on the cross (default)"
+                className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <p className="text-xs text-neutral-500 mt-1">
+                Only fire after the condition holds for N consecutive checks
+                (~2 checks/day, so 4 ≈ 2 days). Clear to fire on the cross.
+              </p>
             </div>
           )}
 

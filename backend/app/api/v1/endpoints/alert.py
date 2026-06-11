@@ -70,6 +70,8 @@ async def create_alert(
     - `crosses_below`: Triggers when value crosses below threshold
     - `percent_up`: Triggers when value increases by threshold % (requires comparison_period)
     - `percent_down`: Triggers when value decreases by threshold % (requires comparison_period)
+    - `entry_zone`: Fires per tier as price enters the linked watchlist item's
+      entry zones (requires `watchlist_item_id` instead of a symbol/ratio)
     """
     try:
         alert = await service.create_alert(data)
@@ -139,7 +141,13 @@ async def update_alert(
     """
     Update an alert.
     """
-    alert = await service.update_alert(alert_id, data)
+    try:
+        alert = await service.update_alert(alert_id, data)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     if not alert:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

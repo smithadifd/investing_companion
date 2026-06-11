@@ -108,6 +108,8 @@ async def create_test_alert(
     was_above_threshold: Optional[bool] = None,
     last_triggered_at: Optional[datetime] = None,
     confirm_checks: Optional[int] = None,
+    watchlist_item_id: Optional[int] = None,
+    zone_state: Optional[dict] = None,
     user_id: Optional[uuid.UUID] = None,
 ) -> Alert:
     """Create an alert attached to an equity."""
@@ -123,11 +125,37 @@ async def create_test_alert(
         was_above_threshold=was_above_threshold,
         last_triggered_at=last_triggered_at,
         confirm_checks=confirm_checks,
+        watchlist_item_id=watchlist_item_id,
+        zone_state=zone_state,
         user_id=user_id,
     )
     db.add(alert)
     await db.flush()
     return alert
+
+
+async def create_test_watchlist_item(
+    db: AsyncSession,
+    watchlist: Watchlist,
+    equity: Equity,
+    *,
+    notes: Optional[str] = None,
+    target_price: Optional[Decimal] = None,
+    thesis: Optional[str] = None,
+    entry_zones: Optional[list] = None,
+) -> WatchlistItem:
+    """Create a watchlist item (entry_zones as raw JSON: [{tier, low, high}])."""
+    item = WatchlistItem(
+        watchlist_id=watchlist.id,
+        equity_id=equity.id,
+        notes=notes,
+        target_price=target_price,
+        thesis=thesis,
+        entry_zones=entry_zones,
+    )
+    db.add(item)
+    await db.flush()
+    return item
 
 
 async def create_test_trade(

@@ -1,4 +1,4 @@
-# Handoff Loop Schema (v1.2)
+# Handoff Loop Schema (v1.3)
 
 The handoff loop connects an external AI advisor (e.g. a Claude project) to the app in both
 directions. This document is the contract; give it to the advisor verbatim.
@@ -15,7 +15,7 @@ advisor --(handoff block)--> executor (Claude Code) --(API calls)--> IC
 `GET /api/v1/export/context-pack` (auth required). `?format=markdown` renders for pasting
 into a conversation; the default JSON is for tooling.
 
-Top-level fields (`schema_version: "1.1"`):
+Top-level fields (`schema_version: "1.3"`):
 
 | Field | Contents |
 |-------|----------|
@@ -24,7 +24,7 @@ Top-level fields (`schema_version: "1.1"`):
 | `exposures` | Position value per theme watchlist. **Overlapping by design** — one position can count toward several themes; do not sum |
 | `active_alerts` | Every active alert with `last_checked_value` (≤5 min stale), `distance_percent` to threshold (null for percent conditions), and `status`: `armed` / `approaching` (within 3%) / `triggered_recently` (last 48h) |
 | `recent_triggers` | Alert fires from the last 7 days |
-| `watchlist_targets` | Items with a `target_price`: latest stored daily close + percent to target + thesis |
+| `watchlist_targets` | Items with a `target_price` and/or `entry_zones`: latest stored daily close, percent to target, thesis, and per-tier zone status. Each zone is `{tier, low, high, status, distance_percent}` with `status`: `in_zone` / `approaching` (within 3% of the entry edge) / `above` / `below` / `unknown` (no stored close). Zones are set via the watchlist item PUT (`entry_zones: [{tier, low, high}]`, ≥1 bound per zone; explicit `null` clears). A per-tier zone-hit alert exists: `ADD_ALERT` with `condition_type: entry_zone` + the watchlist item (no threshold) — it fires once per tier on entry and re-arms only when price exits out the entry side |
 | `upcoming_events` | Next 14 days of earnings/macro/custom events with `days_away` |
 | `triggers` | The trigger playbook: pre-committed "if X then I do Y" standing orders with `tier`, lifecycle `status` (active/executed/retired), and live `signal` (armed/approaching/hit/unwatched, derived from linked alerts). Advisors can propose new triggers via handoff (`ADD_TRIGGER` with name, rule, action, tier, linked alert names) |
 | `recent_handoffs` | Execution receipts for the last 5 handoff blocks (see below) |
@@ -75,3 +75,4 @@ fields); a major bump may rename or remove. Changes are recorded here.
 | 1.0 | Initial pack: positions, exposures, alerts, triggers, targets, events, trade summary, unsupported_features |
 | 1.1 | Added `recent_handoffs` + the receipts endpoint |
 | 1.2 | Added `triggers` (the trigger playbook) + `/api/v1/triggers` CRUD |
+| 1.3 | `watchlist_targets` includes items with `entry_zones` + per-tier zone status; `entry_zone` alert condition; `tiered_entry_zones` removed from `unsupported_features` |

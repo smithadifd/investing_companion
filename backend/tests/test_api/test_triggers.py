@@ -5,7 +5,8 @@ from datetime import datetime, timedelta, timezone
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.schemas.trigger import TriggerCreate, TriggerSignal
+from app.schemas.context_pack import SCHEMA_VERSION
+from app.schemas.trigger import TriggerCreate, TriggerSignal, TriggerUpdate
 from app.services.context_pack import ContextPackService
 from app.services.trigger import TriggerService
 from tests.factories import create_test_alert, create_test_equity
@@ -97,8 +98,23 @@ class TestLifecycle:
 
         pack = await ContextPackService(db).build(test_user.id)
 
-        assert pack.schema_version == "1.2"
+        assert pack.schema_version == SCHEMA_VERSION
         assert any(t.name == "Pack trigger" for t in pack.triggers)
+
+    async def test_update_tier_null_clears(self, db: AsyncSession):
+        """Explicit tier:null clears the tier; an omitted tier is unchanged."""
+        service = TriggerService(db)
+        trigger = await _make_trigger(db, [], tier="orange")
+
+        updated = await service.update_trigger(
+            trigger.id, TriggerUpdate(name="renamed")
+        )
+        assert updated.tier == "orange"
+
+        cleared = await service.update_trigger(
+            trigger.id, TriggerUpdate(tier=None)
+        )
+        assert cleared.tier is None
 
 
 class TestTriggerEndpoints:

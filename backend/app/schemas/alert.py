@@ -39,6 +39,16 @@ class AlertBase(BaseModel):
     threshold_value: Decimal
     comparison_period: Optional[str] = None  # For percent conditions: see VALID_COMPARISON_PERIODS
     cooldown_minutes: int = 60
+    # Crossing conditions only: hold for N consecutive checks before firing
+    confirm_checks: Optional[int] = None
+
+    @field_validator("confirm_checks")
+    @classmethod
+    def validate_confirm_checks(cls, v: Optional[int]) -> Optional[int]:
+        """Validate the sustained-confirmation count is reasonable."""
+        if v is not None and not 1 <= v <= 30:
+            raise ValueError("confirm_checks must be between 1 and 30")
+        return v
 
     @field_validator("comparison_period")
     @classmethod
@@ -79,6 +89,18 @@ class AlertCreate(AlertBase):
         return self
 
     @model_validator(mode="after")
+    def validate_confirm_checks_condition(self) -> "AlertCreate":
+        """Sustained confirmation only applies to crossing conditions."""
+        if self.confirm_checks is not None and self.condition_type not in (
+            AlertConditionType.CROSSES_ABOVE,
+            AlertConditionType.CROSSES_BELOW,
+        ):
+            raise ValueError(
+                "confirm_checks is only supported for crossing conditions"
+            )
+        return self
+
+    @model_validator(mode="after")
     def validate_percent_change(self) -> "AlertCreate":
         """Ensure comparison_period is set for percent conditions."""
         if self.condition_type in (
@@ -106,6 +128,38 @@ class AlertUpdate(BaseModel):
     comparison_period: Optional[str] = None
     cooldown_minutes: Optional[int] = None
     is_active: Optional[bool] = None
+    # Explicit null clears (exclude_unset semantics in the service)
+    confirm_checks: Optional[int] = None
+
+    @field_validator("confirm_checks")
+    @classmethod
+    def validate_confirm_checks(cls, v: Optional[int]) -> Optional[int]:
+        """Validate the sustained-confirmation count is reasonable."""
+        if v is not None and not 1 <= v <= 30:
+            raise ValueError("confirm_checks must be between 1 and 30")
+        return v
+
+    @model_validator(mode="after")
+    def validate_confirm_checks_condition(self) -> "AlertUpdate":
+        """Sustained confirmation only applies to crossing conditions.
+
+        Only checkable here when both fields are in the payload; the service
+        clears confirm_checks when the condition changes to a non-crossing
+        type, covering updates that send condition_type alone.
+        """
+        if (
+            self.confirm_checks is not None
+            and self.condition_type is not None
+            and self.condition_type
+            not in (
+                AlertConditionType.CROSSES_ABOVE,
+                AlertConditionType.CROSSES_BELOW,
+            )
+        ):
+            raise ValueError(
+                "confirm_checks is only supported for crossing conditions"
+            )
+        return self
 
     @field_validator("comparison_period")
     @classmethod
@@ -147,6 +201,7 @@ class AlertResponse(AlertBase):
     is_active: bool
     last_triggered_at: Optional[datetime] = None
     last_checked_value: Optional[Decimal] = None
+    consecutive_met_count: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -186,6 +241,7 @@ class AlertCheckResult(BaseModel):
     threshold_value: Decimal
     condition_met: str  # Human-readable description
     should_notify: bool  # Considering cooldown
+    value_available: bool = True  # False when the price fetch failed
 
 
 class AlertStats(BaseModel):

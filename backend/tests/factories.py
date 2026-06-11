@@ -107,6 +107,7 @@ async def create_test_alert(
     last_checked_value: Optional[float] = None,
     was_above_threshold: Optional[bool] = None,
     last_triggered_at: Optional[datetime] = None,
+    confirm_checks: Optional[int] = None,
     user_id: Optional[uuid.UUID] = None,
 ) -> Alert:
     """Create an alert attached to an equity."""
@@ -121,6 +122,7 @@ async def create_test_alert(
         last_checked_value=last_checked_value,
         was_above_threshold=was_above_threshold,
         last_triggered_at=last_triggered_at,
+        confirm_checks=confirm_checks,
         user_id=user_id,
     )
     db.add(alert)

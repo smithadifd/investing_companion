@@ -7,6 +7,7 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.account import Account
 from app.db.models.alert import Alert
 from app.db.models.equity import Equity
 from app.db.models.lesson import Lesson
@@ -183,6 +184,30 @@ async def create_test_lesson(
     return record
 
 
+async def create_test_account(
+    db: AsyncSession,
+    user: User,
+    *,
+    name: str = "Roth",
+    broker: Optional[str] = "Schwab",
+    account_type: Optional[str] = "roth",
+    risk_profile: Optional[str] = "aggressive",
+    display_order: int = 0,
+) -> Account:
+    """Create a brokerage account owned by a user."""
+    account = Account(
+        user_id=user.id,
+        name=name,
+        broker=broker,
+        account_type=account_type,
+        risk_profile=risk_profile,
+        display_order=display_order,
+    )
+    db.add(account)
+    await db.flush()
+    return account
+
+
 async def create_test_trade(
     db: AsyncSession,
     equity: Equity,
@@ -194,6 +219,7 @@ async def create_test_trade(
     fees: Decimal = Decimal("0"),
     executed_at: Optional[datetime] = None,
     notes: Optional[str] = None,
+    account_id: Optional[int] = None,
 ) -> Trade:
     """Create a trade record."""
     trade = Trade(
@@ -205,6 +231,7 @@ async def create_test_trade(
         fees=fees,
         executed_at=executed_at or datetime.now(timezone.utc),
         notes=notes,
+        account_id=account_id,
     )
     db.add(trade)
     await db.flush()

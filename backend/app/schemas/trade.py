@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.db.models.trade import TradeType
+from app.schemas.account import AccountRef
 
 
 class TradeEquity(BaseModel):
@@ -39,6 +40,9 @@ class TradeCreate(TradeBase):
     equity_id: Optional[int] = Field(None, description="ID of existing equity")
     symbol: Optional[str] = Field(None, description="Symbol to look up if equity_id not provided")
     watchlist_item_id: Optional[int] = Field(None, description="Link to watchlist thesis")
+    account_id: Optional[int] = Field(
+        None, description="Account this trade belongs to (null = unassigned)"
+    )
 
     @field_validator("symbol", "equity_id")
     @classmethod
@@ -58,6 +62,9 @@ class TradeUpdate(BaseModel):
     executed_at: Optional[datetime] = None
     notes: Optional[str] = Field(None, max_length=5000)
     watchlist_item_id: Optional[int] = None
+    account_id: Optional[int] = Field(
+        None, description="Reassign to an account (explicit null unassigns)"
+    )
 
 
 class TradeResponse(TradeBase):
@@ -67,6 +74,8 @@ class TradeResponse(TradeBase):
     user_id: UUID
     equity_id: int
     watchlist_item_id: Optional[int] = None
+    account_id: Optional[int] = None
+    account: Optional[AccountRef] = None
     equity: TradeEquity
     total_value: Decimal
     total_cost: Decimal
@@ -100,10 +109,16 @@ class TradePairResponse(BaseModel):
 
 
 class PositionSummary(BaseModel):
-    """Current position in an equity."""
+    """Current position in an equity (optionally scoped to one account)."""
 
     equity_id: int
     equity: TradeEquity
+    account_id: Optional[int] = Field(
+        None, description="Set on per-account positions; null = aggregate or unassigned"
+    )
+    account: Optional[AccountRef] = Field(
+        None, description="Account context on per-account positions"
+    )
     quantity: Decimal = Field(..., description="Net shares held (can be negative for short)")
     avg_cost_basis: Decimal = Field(..., description="Average cost per share")
     total_cost: Decimal = Field(..., description="Total invested")

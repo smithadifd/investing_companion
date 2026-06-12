@@ -125,6 +125,7 @@ export interface WatchlistItem {
   track_calendar: boolean;
   entry_zones: EntryZone[];
   zone_statuses: EntryZoneStatus[];
+  catalyst_tags: string[];
   added_at: string;
   equity: WatchlistItemEquity;
   quote: Quote | null;
@@ -170,6 +171,7 @@ export interface WatchlistItemCreate {
   thesis?: string;
   track_calendar?: boolean;
   entry_zones?: EntryZone[];
+  catalyst_tags?: string[];
 }
 
 export interface WatchlistItemUpdate {
@@ -179,6 +181,8 @@ export interface WatchlistItemUpdate {
   track_calendar?: boolean;
   // Explicit null clears the zones; omitted leaves them unchanged
   entry_zones?: EntryZone[] | null;
+  // Explicit null (or []) clears catalyst tags; omitted leaves them unchanged
+  catalyst_tags?: string[] | null;
 }
 
 export interface WatchlistExportItem {
@@ -591,6 +595,24 @@ export interface ReadinessLesson {
   recorded_at: string;
 }
 
+export interface ReadinessCorrelation {
+  catalyst: string;
+  held_symbols: string[];
+}
+
+// Catalyst-cluster exposure (held value grouped by single catalyst)
+export interface CatalystCluster {
+  catalyst: string;
+  symbols: string[];
+  value: number | string | null;
+  percent_of_portfolio: number | string | null;
+  position_count: number;
+}
+
+export interface ExposureResponse {
+  catalysts: CatalystCluster[];
+}
+
 export interface TradeReadinessItem {
   trigger_id: number;
   name: string;
@@ -605,6 +627,7 @@ export interface TradeReadinessItem {
   upcoming_events: ReadinessEvent[];
   inactive_alert_count: number;
   lessons: ReadinessLesson[];
+  correlations: ReadinessCorrelation[];
 }
 
 export interface TradeReadinessResponse {
@@ -686,6 +709,40 @@ export interface AppSettingsUpdate {
   eod_notification_time?: string;
 }
 
+// Account types (multi-account positions)
+export interface Account {
+  id: number;
+  name: string;
+  broker: string | null;
+  account_type: string | null;
+  risk_profile: string | null;
+  display_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AccountCreate {
+  name: string;
+  broker?: string | null;
+  account_type?: string | null;
+  risk_profile?: string | null;
+  display_order?: number;
+}
+
+export interface AccountUpdate {
+  name?: string;
+  broker?: string | null;
+  account_type?: string | null;
+  risk_profile?: string | null;
+  display_order?: number;
+}
+
+export interface AccountRef {
+  id: number;
+  name: string;
+  account_type: string | null;
+}
+
 // Trade types
 export type TradeType = 'buy' | 'sell' | 'short' | 'cover';
 
@@ -708,6 +765,8 @@ export interface Trade {
   executed_at: string;
   notes: string | null;
   watchlist_item_id: number | null;
+  account_id: number | null;
+  account: AccountRef | null;
   equity: TradeEquity;
   total_value: number | string;
   total_cost: number | string;
@@ -727,6 +786,7 @@ export interface TradeCreate {
   executed_at: string;
   notes?: string;
   watchlist_item_id?: number;
+  account_id?: number | null;
 }
 
 export interface TradeUpdate {
@@ -737,6 +797,7 @@ export interface TradeUpdate {
   executed_at?: string;
   notes?: string;
   watchlist_item_id?: number;
+  account_id?: number | null;
 }
 
 export interface TradePair {
@@ -785,6 +846,8 @@ export interface LessonUpdate {
 export interface PositionSummary {
   equity_id: number;
   equity: TradeEquity;
+  account_id: number | null;
+  account: AccountRef | null;
   quantity: number | string;
   avg_cost_basis: number | string;
   total_cost: number | string;

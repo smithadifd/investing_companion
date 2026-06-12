@@ -16,6 +16,7 @@ from tests.factories import (
     create_test_lesson,
     create_test_trade,
     create_test_watchlist,
+    create_test_watchlist_item,
 )
 
 
@@ -232,6 +233,52 @@ class TestBuildTradeReadiness:
 
         items = await build_trade_readiness(db, test_user.id)
         assert [les.lesson for les in items[0].lessons] == ["theme peer lesson"]
+
+    async def test_correlation_flags_already_loaded_catalyst(
+        self, db: AsyncSession, test_user
+    ):
+        # A trigger on URA, and a held CCJ position - both tagged "uranium
+        # restart" - should flag the concentration.
+        ura = await create_test_equity(db, symbol="URA")
+        ccj = await create_test_equity(db, symbol="CCJ")
+        wl = await create_test_watchlist(db, name="Uranium")
+        await create_test_watchlist_item(
+            db, wl, ura, catalyst_tags=["uranium restart"]
+        )
+        await create_test_watchlist_item(
+            db, wl, ccj, catalyst_tags=["uranium restart"]
+        )
+        await create_test_trade(db, ccj, test_user, quantity=Decimal("10"))
+        alert = await create_test_alert(
+            db, ura, threshold_value=100.0, last_checked_value=98.0
+        )
+        await _make_trigger(db, [alert.id], name="URA add")
+
+        items = await build_trade_readiness(db, test_user.id)
+        assert len(items) == 1
+        correlations = items[0].correlations
+        assert len(correlations) == 1
+        assert correlations[0].catalyst == "uranium restart"
+        assert correlations[0].held_symbols == ["CCJ"]
+
+    async def test_no_correlation_when_cluster_unheld(
+        self, db: AsyncSession, test_user
+    ):
+        # Trigger symbol carries a catalyst, but nothing in that cluster is
+        # held - no flag.
+        ura = await create_test_equity(db, symbol="URA2")
+        ccj = await create_test_equity(db, symbol="CCJ2")
+        wl = await create_test_watchlist(db, name="Uranium2")
+        await create_test_watchlist_item(db, wl, ura, catalyst_tags=["u-restart"])
+        await create_test_watchlist_item(db, wl, ccj, catalyst_tags=["u-restart"])
+        # No position held in the cluster
+        alert = await create_test_alert(
+            db, ura, threshold_value=100.0, last_checked_value=98.0
+        )
+        await _make_trigger(db, [alert.id], name="URA2 add")
+
+        items = await build_trade_readiness(db, test_user.id)
+        assert items[0].correlations == []
 
 
 class TestTradeReadinessEndpoint:

@@ -33,6 +33,10 @@ import type {
   LessonCreate,
   LessonUpdate,
   MarketOverview,
+  Account,
+  AccountCreate,
+  AccountUpdate,
+  ExposureResponse,
   NeedsAttentionResponse,
   TradeReadinessResponse,
   NotificationStatus,
@@ -920,6 +924,8 @@ class ApiClient {
     trade_type?: TradeType;
     start_date?: string;
     end_date?: string;
+    account_id?: number;
+    unassigned?: boolean;
     limit?: number;
     offset?: number;
   }): Promise<{ trades: Trade[]; total: number }> {
@@ -928,6 +934,8 @@ class ApiClient {
     if (params?.trade_type) queryParams.append('trade_type', params.trade_type);
     if (params?.start_date) queryParams.append('start_date', params.start_date);
     if (params?.end_date) queryParams.append('end_date', params.end_date);
+    if (params?.account_id) queryParams.append('account_id', params.account_id.toString());
+    if (params?.unassigned) queryParams.append('unassigned', 'true');
     if (params?.limit) queryParams.append('limit', params.limit.toString());
     if (params?.offset) queryParams.append('offset', params.offset.toString());
 
@@ -1035,8 +1043,42 @@ class ApiClient {
   /**
    * Get portfolio summary
    */
-  async getPortfolio(): Promise<PortfolioSummary> {
-    return this.fetch<PortfolioSummary>('/trades/portfolio');
+  async getPortfolio(byAccount = false): Promise<PortfolioSummary> {
+    const url = byAccount
+      ? '/trades/portfolio?by_account=true'
+      : '/trades/portfolio';
+    return this.fetch<PortfolioSummary>(url);
+  }
+
+  // Account methods (multi-account positions)
+
+  async getAccounts(): Promise<Account[]> {
+    return this.fetch<Account[]>('/accounts');
+  }
+
+  async createAccount(data: AccountCreate): Promise<Account> {
+    return this.fetch<Account>('/accounts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateAccount(id: number, data: AccountUpdate): Promise<Account> {
+    return this.fetch<Account>(`/accounts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteAccount(id: number): Promise<void> {
+    await this.fetch(`/accounts/${id}`, { method: 'DELETE' });
+  }
+
+  /**
+   * Held exposure grouped by single-catalyst cluster
+   */
+  async getExposure(): Promise<ExposureResponse> {
+    return this.fetch<ExposureResponse>('/dashboard/exposure');
   }
 
   /**

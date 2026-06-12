@@ -1,4 +1,4 @@
-# Handoff Loop Schema (v1.4)
+# Handoff Loop Schema (v1.5)
 
 The handoff loop connects an external AI advisor (e.g. a Claude project) to the app in both
 directions. This document is the contract; give it to the advisor verbatim.
@@ -15,13 +15,14 @@ advisor --(handoff block)--> executor (Claude Code) --(API calls)--> IC
 `GET /api/v1/export/context-pack` (auth required). `?format=markdown` renders for pasting
 into a conversation; the default JSON is for tooling.
 
-Top-level fields (`schema_version: "1.4"`):
+Top-level fields (`schema_version: "1.5"`):
 
 | Field | Contents |
 |-------|----------|
-| `positions` | Open positions from the trade log: symbol, quantity, avg cost, current price/value, unrealized/realized P&L |
-| `portfolio_value`, `total_invested` | Portfolio rollups |
+| `positions` | Open positions from the trade log, **one row per (account, symbol)**: symbol, `account` (account name, or null = unassigned), quantity, avg cost, current price/value, unrealized/realized P&L. The same ticker held in two accounts appears twice |
+| `portfolio_value`, `total_invested` | Portfolio rollups (summed across accounts) |
 | `exposures` | Position value per theme watchlist. **Overlapping by design** — one position can count toward several themes; do not sum |
+| `catalyst_exposures` | Held value grouped by single-catalyst cluster (a `catalyst_tags` tag on a watchlist item, e.g. "uranium restart"): `{catalyst, symbols, value, percent_of_portfolio, position_count}`. **Overlapping** — a symbol can carry several catalysts; do not sum. Catalyst tags are set on watchlist items (`catalyst_tags: [...]`, lowercased) |
 | `active_alerts` | Every active alert with `last_checked_value` (≤5 min stale), `distance_percent` to threshold (null for percent conditions), and `status`: `armed` / `approaching` (within 3%) / `triggered_recently` (last 48h) |
 | `recent_triggers` | Alert fires from the last 7 days |
 | `watchlist_targets` | Items with a `target_price` and/or `entry_zones`: latest stored daily close, percent to target, thesis, and per-tier zone status. Each zone is `{tier, low, high, status, distance_percent}` with `status`: `in_zone` / `approaching` (within 3% of the entry edge) / `above` / `below` / `unknown` (no stored close). Zones are set via the watchlist item PUT (`entry_zones: [{tier, low, high}]`, ≥1 bound per zone; explicit `null` clears). A per-tier zone-hit alert exists: `ADD_ALERT` with `condition_type: entry_zone` + the watchlist item (no threshold) — it fires once per tier on entry and re-arms only when price exits out the entry side |
@@ -78,3 +79,4 @@ fields); a major bump may rename or remove. Changes are recorded here.
 | 1.2 | Added `triggers` (the trigger playbook) + `/api/v1/triggers` CRUD |
 | 1.3 | `watchlist_targets` includes items with `entry_zones` + per-tier zone status; `entry_zone` alert condition; `tiered_entry_zones` removed from `unsupported_features` |
 | 1.4 | Added `lessons` (learning-loop journal) + `/api/v1/lessons` CRUD; trade create responses gain `position_closed` |
+| 1.5 | Multi-account: `positions` are per-account (each gains `account`); added `catalyst_exposures` (single-catalyst cluster rollups) + `catalyst_tags` on watchlist items + `/api/v1/accounts` CRUD + `trades.account_id`; removed `per_account_positions` from `unsupported_features` |

@@ -61,6 +61,7 @@ def _item_response(
         track_calendar=item.track_calendar,
         entry_zones=zones,
         zone_statuses=build_zone_statuses(price, zones),
+        catalyst_tags=item.catalyst_tags or [],
         added_at=item.added_at,
         equity=WatchlistItemEquity.model_validate(equity),
         quote=quote,
@@ -228,6 +229,7 @@ class WatchlistService:
             target_price=data.target_price,
             thesis=data.thesis,
             entry_zones=_zones_to_json(data.entry_zones),
+            catalyst_tags=data.catalyst_tags or None,
         )
 
         try:
@@ -273,6 +275,9 @@ class WatchlistService:
         # an omitted field leaves them unchanged (the tier:null PUT lesson)
         if "entry_zones" in data.model_fields_set:
             item.entry_zones = _zones_to_json(data.entry_zones)
+        # exclude_unset semantics: explicit null/[] clears, omitted leaves as-is
+        if "catalyst_tags" in data.model_fields_set:
+            item.catalyst_tags = data.catalyst_tags or None
 
         await self.db.commit()
         await self.db.refresh(item)

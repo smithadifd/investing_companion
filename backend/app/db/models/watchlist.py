@@ -79,6 +79,10 @@ class WatchlistItem(Base):
     # Tiered entry zones: [{"tier": "Half starter", "low": "50", "high": "52"}]
     # Bounds are decimal strings; at least one bound per zone. None = no zones.
     entry_zones: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    # Single-catalyst cluster tags (lowercase): ["uranium restart", "carry
+    # unwind"]. Drives catalyst-cluster exposure alongside theme exposure.
+    # Watchlists are global (single-user install), so these tags are global too.
+    catalyst_tags: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     track_calendar: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     added_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

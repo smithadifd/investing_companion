@@ -70,6 +70,13 @@ class TradeResponse(TradeBase):
     equity: TradeEquity
     total_value: Decimal
     total_cost: Decimal
+    position_closed: bool = Field(
+        False,
+        description=(
+            "True when this trade zeroed out the position - set on create "
+            "only, to drive the lesson-capture prompt"
+        ),
+    )
     created_at: datetime
     updated_at: datetime
 

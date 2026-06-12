@@ -10,7 +10,12 @@ from app.core.dependencies import get_current_user, require_not_demo
 from app.db.models.trade import TradeType
 from app.db.models.user import User
 from app.db.session import get_db
-from app.schemas.common import DataResponse, PaginatedMeta, ResponseMeta
+from app.schemas.common import (
+    DataResponse,
+    ListResponse,
+    PaginatedMeta,
+    ResponseMeta,
+)
 from app.schemas.trade import (
     PerformanceReport,
     PortfolioSummary,
@@ -32,7 +37,7 @@ def get_trade_service(db: AsyncSession = Depends(get_db)) -> TradeService:
     return TradeService(db)
 
 
-@router.get("", response_model=DataResponse[List[TradeResponse]])
+@router.get("", response_model=ListResponse[TradeResponse])
 async def list_trades(
     equity_id: Optional[int] = Query(None, description="Filter by equity ID"),
     trade_type: Optional[TradeType] = Query(None, description="Filter by trade type"),
@@ -42,7 +47,7 @@ async def list_trades(
     offset: int = Query(0, ge=0, description="Number of results to skip"),
     current_user: User = Depends(get_current_user),
     service: TradeService = Depends(get_trade_service),
-) -> DataResponse[List[TradeResponse]]:
+) -> ListResponse[TradeResponse]:
     """
     List trades for the authenticated user.
 
@@ -60,13 +65,13 @@ async def list_trades(
     )
 
     meta = PaginatedMeta(
-        timestamp=datetime.utcnow(),
         total=total,
-        limit=limit,
-        offset=offset,
+        page=offset // limit + 1,
+        per_page=limit,
+        pages=max(1, -(-total // limit)),
     )
 
-    return DataResponse(data=trades, meta=meta)
+    return ListResponse(data=trades, meta=meta)
 
 
 @router.post("", response_model=DataResponse[TradeResponse], status_code=status.HTTP_201_CREATED)

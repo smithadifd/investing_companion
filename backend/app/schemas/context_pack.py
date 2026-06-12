@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from app.schemas.watchlist import EntryZoneStatus
 
-SCHEMA_VERSION = "1.3"
+SCHEMA_VERSION = "1.4"
 
 
 class PackPosition(BaseModel):
@@ -132,6 +132,18 @@ class PackPlaybookTrigger(BaseModel):
     executed_at: Optional[datetime] = None
 
 
+class PackLesson(BaseModel):
+    """A captured lesson from the learning loop (newest first)."""
+
+    symbol: str
+    thesis_outcome: str = Field(
+        ..., description="played_out | partial | wrong | unclear"
+    )
+    lesson: str
+    tags: List[str] = Field(default_factory=list)
+    recorded_at: datetime
+
+
 class PackHandoff(BaseModel):
     """A recent handoff execution receipt (conversation->app feedback)."""
 
@@ -164,6 +176,10 @@ class ContextPack(BaseModel):
     recent_handoffs: List[PackHandoff] = Field(
         default_factory=list,
         description="Execution receipts for recent advisor handoff blocks",
+    )
+    lessons: List[PackLesson] = Field(
+        default_factory=list,
+        description="Recent lessons from closed trades (the learning loop)",
     )
     unsupported_features: List[str] = Field(
         ..., description="Capabilities an advisor must not emit handoff actions for"

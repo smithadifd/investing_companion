@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.alert import Alert
 from app.db.models.equity import Equity
+from app.db.models.lesson import Lesson
 from app.db.models.trade import Trade, TradeType
 from app.db.models.user import User
 from app.db.models.watchlist import Watchlist, WatchlistItem
@@ -156,6 +157,30 @@ async def create_test_watchlist_item(
     db.add(item)
     await db.flush()
     return item
+
+
+async def create_test_lesson(
+    db: AsyncSession,
+    equity: Equity,
+    user: User,
+    *,
+    thesis_outcome: str = "wrong",
+    lesson: str = "Sized too big into earnings.",
+    tags: Optional[list] = None,
+    trade_id: Optional[int] = None,
+) -> Lesson:
+    """Create a lesson record (tags as a lowercase string list)."""
+    record = Lesson(
+        user_id=user.id,
+        equity_id=equity.id,
+        trade_id=trade_id,
+        thesis_outcome=thesis_outcome,
+        lesson=lesson,
+        tags=tags,
+    )
+    db.add(record)
+    await db.flush()
+    return record
 
 
 async def create_test_trade(

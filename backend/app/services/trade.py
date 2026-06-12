@@ -9,8 +9,10 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.db.models.account import Account
 from app.db.models.equity import Equity
 from app.db.models.trade import Trade, TradePair, TradeType
+from app.schemas.account import AccountRef
 from app.schemas.trade import (
     PerformanceByCategory,
     PerformanceMetrics,
@@ -42,10 +44,16 @@ class TradeService:
         trade_type: Optional[TradeType] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
+        account_id: Optional[int] = None,
+        unassigned: bool = False,
         limit: int = 100,
         offset: int = 0,
     ) -> Tuple[List[TradeResponse], int]:
-        """List trades with optional filters."""
+        """List trades with optional filters.
+
+        ``account_id`` filters to one account; ``unassigned=True`` filters to
+        trades with no account (account_id NULL).
+        """
         conditions = [Trade.user_id == user_id]
 
         if equity_id:
@@ -56,6 +64,10 @@ class TradeService:
             conditions.append(Trade.executed_at >= start_date)
         if end_date:
             conditions.append(Trade.executed_at <= end_date)
+        if unassigned:
+            conditions.append(Trade.account_id.is_(None))
+        elif account_id is not None:
+            conditions.append(Trade.account_id == account_id)
 
         # Count total
         count_stmt = select(func.count(Trade.id)).where(and_(*conditions))
@@ -65,7 +77,7 @@ class TradeService:
         # Fetch trades
         stmt = (
             select(Trade)
-            .options(selectinload(Trade.equity))
+            .options(selectinload(Trade.equity), selectinload(Trade.account))
             .where(and_(*conditions))
             .order_by(Trade.executed_at.desc())
             .limit(limit)
@@ -80,7 +92,7 @@ class TradeService:
         """Get a single trade by ID."""
         stmt = (
             select(Trade)
-            .options(selectinload(Trade.equity))
+            .options(selectinload(Trade.equity), selectinload(Trade.account))
             .where(Trade.id == trade_id, Trade.user_id == user_id)
         )
         result = await self.db.execute(stmt)
@@ -105,6 +117,12 @@ class TradeService:
         if not equity:
             return None
 
+        # An account_id, if given, must belong to this user.
+        if data.account_id is not None and not await self._account_owned(
+            user_id, data.account_id
+        ):
+            return None
+
         trade = Trade(
             user_id=user_id,
             equity_id=equity.id,
@@ -115,6 +133,7 @@ class TradeService:
             executed_at=data.executed_at,
             notes=data.notes,
             watchlist_item_id=data.watchlist_item_id,
+            account_id=data.account_id,
         )
 
         self.db.add(trade)
@@ -124,23 +143,28 @@ class TradeService:
         # Recalculate P&L pairs for this equity
         await self._recalculate_pairs(user_id, equity.id)
 
-        # Reload with equity
+        # Reload with equity + account
         stmt = (
             select(Trade)
-            .options(selectinload(Trade.equity))
+            .options(selectinload(Trade.equity), selectinload(Trade.account))
             .where(Trade.id == trade.id)
         )
         result = await self.db.execute(stmt)
         trade = result.scalar_one()
 
         response = self._trade_to_response(trade)
-        # A closing trade that brings the net position to exactly zero is a
+        # A closing trade that brings the position to exactly zero is a
         # "position closed" event - the lesson-capture prompt keys off this.
+        # Scoped to the trade's own account: zeroing the Roth position is a
+        # close even if a taxable position in the same ticker remains open.
         if trade.is_closing:
             positions = await self._calculate_positions(
-                user_id, equity_id=equity.id, with_quotes=False
+                user_id, equity_id=equity.id, with_quotes=False, by_account=True
             )
-            response.position_closed = bool(positions) and positions[0].quantity == 0
+            response.position_closed = any(
+                p.account_id == trade.account_id and p.quantity == 0
+                for p in positions
+            )
         return response
 
     async def update_trade(
@@ -149,7 +173,7 @@ class TradeService:
         """Update a trade and recalculate P&L pairs."""
         stmt = (
             select(Trade)
-            .options(selectinload(Trade.equity))
+            .options(selectinload(Trade.equity), selectinload(Trade.account))
             .where(Trade.id == trade_id, Trade.user_id == user_id)
         )
         result = await self.db.execute(stmt)
@@ -157,6 +181,14 @@ class TradeService:
 
         if not trade:
             return None
+
+        # Validate the account before mutating anything (explicit null
+        # unassigns; a given id must belong to this user).
+        reassign_account = "account_id" in data.model_fields_set
+        if reassign_account and data.account_id is not None and not await self._account_owned(
+            user_id, data.account_id
+        ):
+            raise ValueError(f"Unknown account id: {data.account_id}")
 
         if data.trade_type is not None:
             trade.trade_type = data.trade_type
@@ -172,14 +204,22 @@ class TradeService:
             trade.notes = data.notes
         if data.watchlist_item_id is not None:
             trade.watchlist_item_id = data.watchlist_item_id
+        if reassign_account:
+            trade.account_id = data.account_id
 
         await self.db.commit()
         await self.db.refresh(trade)
 
-        # Recalculate P&L pairs for this equity
+        # Recalculate P&L pairs for this equity (partitioned by account)
         await self._recalculate_pairs(user_id, trade.equity_id)
 
-        return self._trade_to_response(trade)
+        # Reload with account context for the response
+        result = await self.db.execute(
+            select(Trade)
+            .options(selectinload(Trade.equity), selectinload(Trade.account))
+            .where(Trade.id == trade.id)
+        )
+        return self._trade_to_response(result.scalar_one())
 
     async def delete_trade(self, trade_id: int, user_id: UUID) -> bool:
         """Delete a trade and recalculate P&L pairs."""
@@ -205,14 +245,24 @@ class TradeService:
         positions = await self._calculate_positions(user_id, equity_id=equity_id)
         return positions[0] if positions else None
 
-    async def get_open_positions(self, user_id: UUID) -> List[PositionSummary]:
+    async def get_open_positions(
+        self, user_id: UUID, by_account: bool = False
+    ) -> List[PositionSummary]:
         """Open positions without quote lookups - DB-only context for dashboard surfaces."""
-        positions = await self._calculate_positions(user_id, with_quotes=False)
+        positions = await self._calculate_positions(
+            user_id, with_quotes=False, by_account=by_account
+        )
         return [p for p in positions if p.quantity != 0]
 
-    async def get_portfolio(self, user_id: UUID) -> PortfolioSummary:
-        """Get portfolio summary with all positions."""
-        positions = await self._calculate_positions(user_id)
+    async def get_portfolio(
+        self, user_id: UUID, by_account: bool = False
+    ) -> PortfolioSummary:
+        """Get portfolio summary with all positions.
+
+        With ``by_account`` the positions list is split per (account, equity);
+        the rollup totals are summed from those disjoint partitions.
+        """
+        positions = await self._calculate_positions(user_id, by_account=by_account)
 
         # Sum up totals
         total_invested = sum(p.total_cost for p in positions)
@@ -346,8 +396,23 @@ class TradeService:
             notes=notes,
         )
 
+    async def _account_owned(self, user_id: UUID, account_id: int) -> bool:
+        """Whether an account exists and belongs to this user."""
+        return (
+            await self.db.scalar(
+                select(func.count(Account.id)).where(
+                    Account.id == account_id, Account.user_id == user_id
+                )
+            )
+        ) > 0
+
     async def _recalculate_pairs(self, user_id: UUID, equity_id: int) -> None:
-        """Recalculate all trade pairs for an equity using FIFO method."""
+        """Recalculate all trade pairs for an equity using FIFO method.
+
+        FIFO matching is partitioned by account: a sell in one account only
+        matches buys in that same account. The unassigned bucket (account_id
+        NULL) is its own partition.
+        """
         # Delete existing pairs for this equity
         stmt = select(TradePair).where(
             TradePair.user_id == user_id,
@@ -366,74 +431,84 @@ class TradeService:
         result = await self.db.execute(stmt)
         trades = result.scalars().all()
 
-        # Track open positions (FIFO queue)
-        # For long positions: list of (trade_id, remaining_quantity, price)
-        # For short positions: similar structure
-        long_queue: List[Tuple[int, Decimal, Decimal, datetime]] = []
-        short_queue: List[Tuple[int, Decimal, Decimal, datetime]] = []
+        # FIFO queues keyed by account_id (None = unassigned bucket) so a
+        # close only matches opens in the same account.
+        # Each entry: (trade_id, remaining_quantity, price, executed_at).
+        long_queues: dict[Optional[int], List[Tuple[int, Decimal, Decimal, datetime]]] = {}
+        short_queues: dict[Optional[int], List[Tuple[int, Decimal, Decimal, datetime]]] = {}
 
         for trade in trades:
+            acct = trade.account_id
             if trade.trade_type == TradeType.BUY:
                 # Opening long position
-                long_queue.append((trade.id, trade.quantity, trade.price, trade.executed_at))
+                long_queues.setdefault(acct, []).append(
+                    (trade.id, trade.quantity, trade.price, trade.executed_at)
+                )
             elif trade.trade_type == TradeType.SELL:
-                # Closing long position (FIFO)
+                # Closing long position (FIFO within the account)
+                queue = long_queues.setdefault(acct, [])
                 remaining = trade.quantity
-                while remaining > 0 and long_queue:
-                    open_id, open_qty, open_price, open_date = long_queue[0]
+                while remaining > 0 and queue:
+                    open_id, open_qty, open_price, open_date = queue[0]
                     matched = min(remaining, open_qty)
 
-                    # Calculate P&L for this match
                     pnl = matched * (trade.price - open_price)
                     holding_days = (trade.executed_at - open_date).days
 
-                    pair = TradePair(
-                        user_id=user_id,
-                        equity_id=equity_id,
-                        open_trade_id=open_id,
-                        close_trade_id=trade.id,
-                        quantity_matched=matched,
-                        realized_pnl=pnl,
-                        holding_period_days=holding_days,
+                    self.db.add(
+                        TradePair(
+                            user_id=user_id,
+                            equity_id=equity_id,
+                            account_id=acct,
+                            open_trade_id=open_id,
+                            close_trade_id=trade.id,
+                            quantity_matched=matched,
+                            realized_pnl=pnl,
+                            holding_period_days=holding_days,
+                        )
                     )
-                    self.db.add(pair)
 
                     remaining -= matched
                     if matched >= open_qty:
-                        long_queue.pop(0)
+                        queue.pop(0)
                     else:
-                        long_queue[0] = (open_id, open_qty - matched, open_price, open_date)
+                        queue[0] = (open_id, open_qty - matched, open_price, open_date)
 
             elif trade.trade_type == TradeType.SHORT:
                 # Opening short position
-                short_queue.append((trade.id, trade.quantity, trade.price, trade.executed_at))
+                short_queues.setdefault(acct, []).append(
+                    (trade.id, trade.quantity, trade.price, trade.executed_at)
+                )
             elif trade.trade_type == TradeType.COVER:
-                # Closing short position (FIFO)
+                # Closing short position (FIFO within the account)
+                queue = short_queues.setdefault(acct, [])
                 remaining = trade.quantity
-                while remaining > 0 and short_queue:
-                    open_id, open_qty, open_price, open_date = short_queue[0]
+                while remaining > 0 and queue:
+                    open_id, open_qty, open_price, open_date = queue[0]
                     matched = min(remaining, open_qty)
 
                     # P&L for short: profit when price goes down
                     pnl = matched * (open_price - trade.price)
                     holding_days = (trade.executed_at - open_date).days
 
-                    pair = TradePair(
-                        user_id=user_id,
-                        equity_id=equity_id,
-                        open_trade_id=open_id,
-                        close_trade_id=trade.id,
-                        quantity_matched=matched,
-                        realized_pnl=pnl,
-                        holding_period_days=holding_days,
+                    self.db.add(
+                        TradePair(
+                            user_id=user_id,
+                            equity_id=equity_id,
+                            account_id=acct,
+                            open_trade_id=open_id,
+                            close_trade_id=trade.id,
+                            quantity_matched=matched,
+                            realized_pnl=pnl,
+                            holding_period_days=holding_days,
+                        )
                     )
-                    self.db.add(pair)
 
                     remaining -= matched
                     if matched >= open_qty:
-                        short_queue.pop(0)
+                        queue.pop(0)
                     else:
-                        short_queue[0] = (open_id, open_qty - matched, open_price, open_date)
+                        queue[0] = (open_id, open_qty - matched, open_price, open_date)
 
         await self.db.commit()
 
@@ -442,41 +517,59 @@ class TradeService:
         user_id: UUID,
         equity_id: Optional[int] = None,
         with_quotes: bool = True,
+        by_account: bool = False,
     ) -> List[PositionSummary]:
-        """Calculate current positions from trades."""
+        """Calculate current positions from trades.
+
+        By default positions are aggregated per equity (existing behaviour -
+        the portfolio/performance views depend on it). With ``by_account``,
+        positions are keyed by (account_id, equity): the same ticker held in
+        two accounts becomes two distinct positions, each carrying its account
+        context. The unassigned bucket (account_id NULL) is its own position.
+        """
+        from itertools import groupby
+
         conditions = [Trade.user_id == user_id]
         if equity_id:
             conditions.append(Trade.equity_id == equity_id)
 
-        # Get all trades grouped by equity
+        options = [selectinload(Trade.equity)]
+        order_cols = [Trade.equity_id]
+        if by_account:
+            options.append(selectinload(Trade.account))
+            order_cols.append(Trade.account_id)
+        order_cols.append(Trade.executed_at)
+
         stmt = (
             select(Trade)
-            .options(selectinload(Trade.equity))
+            .options(*options)
             .where(and_(*conditions))
-            .order_by(Trade.equity_id, Trade.executed_at)
+            .order_by(*order_cols)
         )
         result = await self.db.execute(stmt)
         trades = result.scalars().all()
 
-        # Group trades by equity
-        from itertools import groupby
-        from operator import attrgetter
+        def group_key(t: Trade):
+            return (t.equity_id, t.account_id) if by_account else (t.equity_id,)
 
         positions = []
-        for eq_id, equity_trades in groupby(trades, key=attrgetter("equity_id")):
-            equity_trades_list = list(equity_trades)
-            if not equity_trades_list:
+        for _key, group in groupby(trades, key=group_key):
+            group_list = list(group)
+            if not group_list:
                 continue
 
-            equity = equity_trades_list[0].equity
+            equity = group_list[0].equity
+            eq_id = group_list[0].equity_id
+            account_id = group_list[0].account_id if by_account else None
+            account_obj = group_list[0].account if by_account else None
 
             # Calculate net position
             net_quantity = Decimal("0")
             total_cost = Decimal("0")
-            first_trade = equity_trades_list[0].executed_at
-            last_trade = equity_trades_list[-1].executed_at
+            first_trade = group_list[0].executed_at
+            last_trade = group_list[-1].executed_at
 
-            for t in equity_trades_list:
+            for t in group_list:
                 if t.trade_type in (TradeType.BUY, TradeType.COVER):
                     net_quantity += t.quantity
                     total_cost += t.quantity * t.price + t.fees
@@ -484,19 +577,23 @@ class TradeService:
                     net_quantity -= t.quantity
                     total_cost -= t.quantity * t.price - t.fees
 
-            if net_quantity == 0 and total_cost == 0:
-                # Position closed, but include for history
-                pass
-
             # Calculate average cost basis
             avg_cost = abs(total_cost / net_quantity) if net_quantity != 0 else Decimal("0")
 
-            # Get realized P&L
-            pnl_stmt = select(func.sum(TradePair.realized_pnl)).where(
+            # Get realized P&L (scoped to the account when per-account)
+            pnl_conditions = [
                 TradePair.user_id == user_id,
                 TradePair.equity_id == eq_id,
+            ]
+            if by_account:
+                pnl_conditions.append(
+                    TradePair.account_id.is_(None)
+                    if account_id is None
+                    else TradePair.account_id == account_id
+                )
+            pnl_result = await self.db.execute(
+                select(func.sum(TradePair.realized_pnl)).where(and_(*pnl_conditions))
             )
-            pnl_result = await self.db.execute(pnl_stmt)
             realized_pnl = pnl_result.scalar() or Decimal("0")
 
             # Get current price for unrealized P&L
@@ -518,6 +615,8 @@ class TradeService:
                 PositionSummary(
                     equity_id=eq_id,
                     equity=TradeEquity.model_validate(equity),
+                    account_id=account_id,
+                    account=AccountRef.model_validate(account_obj) if account_obj else None,
                     quantity=net_quantity,
                     avg_cost_basis=avg_cost,
                     total_cost=abs(total_cost),
@@ -651,6 +750,8 @@ class TradeService:
             executed_at=trade.executed_at,
             notes=trade.notes,
             watchlist_item_id=trade.watchlist_item_id,
+            account_id=trade.account_id,
+            account=AccountRef.model_validate(trade.account) if trade.account else None,
             equity=TradeEquity.model_validate(trade.equity),
             total_value=trade.total_value,
             total_cost=trade.total_cost,

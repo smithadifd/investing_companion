@@ -1,5 +1,6 @@
 """Database models package."""
 
+from app.db.models.account import Account
 from app.db.models.alert import Alert, AlertConditionType, AlertHistory
 from app.db.models.economic_event import (
     EconomicEvent,
@@ -21,6 +22,7 @@ from app.db.models.user_settings import UserSetting
 from app.db.models.watchlist import Watchlist, WatchlistItem
 
 __all__ = [
+    "Account",
     "Alert",
     "AlertConditionType",
     "AlertHistory",

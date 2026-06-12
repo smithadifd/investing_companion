@@ -11,6 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
+    from app.db.models.account import Account
     from app.db.models.alert import Alert
     from app.db.models.session import Session
     from app.db.models.trade import Trade
@@ -55,6 +56,11 @@ class User(Base, TimestampMixin):
         cascade="all, delete-orphan",
     )
     trades: Mapped[List["Trade"]] = relationship(
+        back_populates="user",
+        lazy="dynamic",
+        cascade="all, delete-orphan",
+    )
+    accounts: Mapped[List["Account"]] = relationship(
         back_populates="user",
         lazy="dynamic",
         cascade="all, delete-orphan",

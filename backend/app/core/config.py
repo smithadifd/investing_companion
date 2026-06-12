@@ -67,6 +67,17 @@ class Settings(BaseSettings):
                     file=sys.stderr,
                 )
 
+            # Check Schwab OAuth URLs (Schwab requires HTTPS callbacks; the
+            # frontend URL is used as a 302 redirect target)
+            if self.SCHWAB_CALLBACK_URL and not self.SCHWAB_CALLBACK_URL.startswith(
+                "https://"
+            ):
+                errors.append(
+                    "SCHWAB_CALLBACK_URL must be an https:// URL in production"
+                )
+            if not self.FRONTEND_URL.startswith(("http://", "https://")):
+                errors.append("FRONTEND_URL must be an http(s):// URL")
+
             if errors:
                 print("\n" + "=" * 60, file=sys.stderr)
                 print("FATAL: Production configuration validation failed!", file=sys.stderr)
@@ -107,6 +118,15 @@ class Settings(BaseSettings):
     POLYGON_API_KEY: str = ""
     FINNHUB_API_KEY: str = ""
     DISCORD_WEBHOOK_URL: str = ""
+
+    # Schwab (opt-in real-time / all-session quotes via OAuth; never required)
+    SCHWAB_APP_KEY: str = ""
+    SCHWAB_APP_SECRET: str = ""
+    # Must exactly match the callback URL registered with the Schwab developer
+    # portal, e.g. https://your-host/api/v1/schwab/callback
+    SCHWAB_CALLBACK_URL: str = ""
+    # Where the OAuth callback redirects the browser after the token exchange
+    FRONTEND_URL: str = "http://localhost:3000"
 
     # AI (fallback, users provide their own)
     CLAUDE_API_KEY: str = ""

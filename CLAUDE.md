@@ -136,6 +136,12 @@ When starting a new session, review the most recent session notes for context.
 | Yahoo Finance | Quotes, fundamentals, history | Unofficial, be gentle |
 | Alpha Vantage | Technical indicators, forex | 5 req/min (free) |
 | Polygon.io | Real-time, alerts (optional) | Paid tier |
+| Schwab | Real-time + pre/post-market quotes for briefings (opt-in OAuth) | Free with brokerage; tokens expire every 7 days |
+
+Schwab is fully opt-in: briefing movers use it when a token is connected
+(Settings → API Keys → Connect Schwab) and silently fall back to Yahoo otherwise.
+Tokens are stored encrypted in `user_settings` (`SCHWAB_TOKEN`); symbols Schwab
+can't quote (futures, forex, indices) delegate per-symbol to Yahoo.
 
 ---
 
@@ -155,6 +161,12 @@ NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 DISCORD_WEBHOOK_URL=  # For notifications
 ALPHA_VANTAGE_API_KEY=  # Free tier available
 POLYGON_API_KEY=  # Optional paid tier
+
+# Schwab (optional, real-time quotes via OAuth — see Data Providers)
+SCHWAB_APP_KEY=
+SCHWAB_APP_SECRET=
+SCHWAB_CALLBACK_URL=  # must match the Schwab developer portal registration
+FRONTEND_URL=http://localhost:3000  # where the OAuth callback redirects
 ```
 
 ---

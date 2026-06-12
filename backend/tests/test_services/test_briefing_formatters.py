@@ -82,3 +82,59 @@ class TestEODWrapDecisions:
 
         assert "Approaching:" in message
         assert "EQT half-starter" in message
+
+
+class TestMorningPulseMoversLabel:
+    def test_pre_session_keeps_premarket_header(self):
+        data = MorningData(
+            premarket_movers=[{"symbol": "EQT", "change_percent": 3.2}],
+            movers_session="pre",
+        )
+
+        message = format_morning_pulse(data)
+
+        assert "WATCHLIST PRE-MARKET MOVERS" in message
+        assert "EQT +3.20%" in message
+        assert "AT CLOSE" not in message
+
+    def test_closed_session_labeled_at_close_not_premarket(self):
+        """Weekend/holiday fallback shows last closes - never calls them
+        pre-market moves (the original mislabel bug)."""
+        data = MorningData(
+            premarket_movers=[{"symbol": "EQT", "change_percent": -2.8}],
+            movers_session="closed",
+        )
+
+        message = format_morning_pulse(data)
+
+        assert "WATCHLIST MOVERS (AT CLOSE)" in message
+        assert "PRE-MARKET MOVERS" not in message
+        assert "EQT -2.80%" in message
+
+    def test_empty_movers_honest_in_both_sessions(self):
+        pre = format_morning_pulse(MorningData(movers_session="pre"))
+        assert "No significant pre-market moves (>2%)" in pre
+
+        closed = format_morning_pulse(MorningData(movers_session="closed"))
+        assert "No significant moves (>2%) at last close" in closed
+        assert "PRE-MARKET" not in closed
+
+
+class TestEODPostMarketMovers:
+    def test_postmarket_section_rendered(self):
+        data = EODData(
+            postmarket_movers=[
+                {"symbol": "EQT", "change_percent": -6.0},
+                {"symbol": "CCJ", "change_percent": 2.4},
+            ],
+        )
+
+        message = format_eod_wrap(data)
+
+        assert "POST-MARKET MOVERS (>2%)" in message
+        assert "⬇️ EQT -6.00%" in message
+        assert "⬆️ CCJ +2.40%" in message
+
+    def test_no_section_when_no_postmarket_data(self):
+        message = format_eod_wrap(EODData())
+        assert "POST-MARKET" not in message

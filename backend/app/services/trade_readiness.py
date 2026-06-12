@@ -23,11 +23,13 @@ from app.db.models.alert import Alert
 from app.db.models.trigger import Trigger, TriggerAlertLink, TriggerLifecycle
 from app.schemas.dashboard import (
     ReadinessEvent,
+    ReadinessLesson,
     ReadinessPosition,
     TradeReadinessItem,
 )
 from app.schemas.trigger import TriggerSignal
 from app.services.economic_event import EconomicEventService
+from app.services.lesson import LessonService
 from app.services.trade import TradeService
 from app.services.trigger import _alert_distance, derive_signal
 
@@ -92,9 +94,25 @@ async def build_trade_readiness(
                 )
             )
 
+    lesson_service = LessonService(db)
+
     items: List[TradeReadinessItem] = []
     for trigger, alerts, signal in actionable:
         symbols = list(dict.fromkeys(a.equity.symbol for a in alerts if a.equity))
+
+        # Lessons from similar past setups (same symbol / shared theme /
+        # matching tag - the rule lives in LessonService)
+        lessons = [
+            ReadinessLesson(
+                id=les.id,
+                symbol=les.symbol,
+                thesis_outcome=les.thesis_outcome.value,
+                lesson=les.lesson,
+                tags=les.tags,
+                recorded_at=les.created_at,
+            )
+            for les in await lesson_service.relevant_lessons(user_id, symbols)
+        ]
 
         distances = [
             d
@@ -132,6 +150,7 @@ async def build_trade_readiness(
                     ev for s in symbols for ev in events_by_symbol.get(s, [])
                 ],
                 inactive_alert_count=sum(1 for a in alerts if not a.is_active),
+                lessons=lessons,
             )
         )
 

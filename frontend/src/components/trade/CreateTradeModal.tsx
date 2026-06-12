@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useCreateTrade } from '@/lib/hooks/useTrade';
 import { EquitySearchInput } from '@/components/equity/EquitySearchInput';
+import { LessonCaptureModal } from '@/components/trade/LessonCaptureModal';
 import { Modal } from '@/components/ui/Modal';
 import type { TradeType, TradeCreate, EquitySearchResult } from '@/lib/api/types';
 
@@ -36,6 +37,11 @@ export function CreateTradeModal({
   const [notes, setNotes] = useState('');
 
   const [searchQuery, setSearchQuery] = useState(prefillSymbol || '');
+  // Set when the logged trade closed the position - swaps the form for the
+  // (optional, skippable) lesson-capture step
+  const [capture, setCapture] = useState<{ symbol: string; tradeId: number } | null>(
+    null
+  );
 
   const createTrade = useCreateTrade();
 
@@ -65,8 +71,12 @@ export function CreateTradeModal({
     };
 
     try {
-      await createTrade.mutateAsync(data);
-      handleClose();
+      const trade = await createTrade.mutateAsync(data);
+      if (trade.position_closed) {
+        setCapture({ symbol: trade.equity.symbol, tradeId: trade.id });
+      } else {
+        handleClose();
+      }
     } catch (error) {
       console.error('Failed to create trade:', error);
     }
@@ -90,6 +100,19 @@ export function CreateTradeModal({
   const totalWithFees = totalValue + (parseFloat(fees) || 0);
 
   if (!isOpen) return null;
+
+  if (capture) {
+    return (
+      <LessonCaptureModal
+        symbol={capture.symbol}
+        tradeId={capture.tradeId}
+        onClose={() => {
+          setCapture(null);
+          handleClose();
+        }}
+      />
+    );
+  }
 
   return (
     <Modal onClose={handleClose} title="Log Trade" maxWidth="lg">

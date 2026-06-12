@@ -10,6 +10,14 @@ vi.mock('@/lib/hooks/useTrade', () => ({
   }),
 }));
 
+const mockCreateLesson = vi.fn();
+vi.mock('@/lib/hooks/useLessons', () => ({
+  useCreateLesson: () => ({
+    mutateAsync: mockCreateLesson,
+    isPending: false,
+  }),
+}));
+
 vi.mock('@/components/equity/EquitySearchInput', () => ({
   EquitySearchInput: ({
     value,
@@ -140,6 +148,33 @@ describe('CreateTradeModal', () => {
       );
     });
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('shows the lesson-capture step when the trade closes a position', async () => {
+    mockMutateAsync.mockResolvedValue({
+      id: 42,
+      position_closed: true,
+      equity: { symbol: 'AAPL' },
+    });
+    const user = userEvent.setup();
+    render(<CreateTradeModal isOpen={true} onClose={onClose} />);
+
+    await user.type(screen.getByTestId('equity-search'), 'AAPL');
+    await user.click(screen.getByText('Sell'));
+    await user.type(screen.getByPlaceholderText('100'), '50');
+    await user.type(screen.getByPlaceholderText('50.00'), '155');
+    await user.click(screen.getByText('Log Sell'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Position closed: AAPL')).toBeInTheDocument();
+    });
+    // The trade modal must not close - the capture step replaced it
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Skipping the capture step closes everything
+    await user.click(screen.getByRole('button', { name: 'Skip' }));
+    expect(onClose).toHaveBeenCalled();
+    expect(mockCreateLesson).not.toHaveBeenCalled();
   });
 
   it('does not submit when required fields are missing', async () => {

@@ -29,6 +29,9 @@ import type {
   EquityDetail,
   EquitySearchResult,
   HistoryData,
+  Lesson,
+  LessonCreate,
+  LessonUpdate,
   MarketOverview,
   NeedsAttentionResponse,
   TradeReadinessResponse,
@@ -979,6 +982,54 @@ class ApiClient {
    */
   async deleteTrade(id: number): Promise<void> {
     await this.fetch(`/trades/${id}`, { method: 'DELETE' });
+  }
+
+  // Lesson (learning loop) methods
+
+  /**
+   * Get lessons, newest first
+   */
+  async getLessons(params?: {
+    symbol?: string;
+    tag?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<Lesson[]> {
+    const queryParams = new URLSearchParams();
+    if (params?.symbol) queryParams.append('symbol', params.symbol);
+    if (params?.tag) queryParams.append('tag', params.tag);
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.offset) queryParams.append('offset', params.offset.toString());
+
+    const queryString = queryParams.toString();
+    return this.fetch<Lesson[]>(queryString ? `/lessons?${queryString}` : '/lessons');
+  }
+
+  /**
+   * Capture a lesson (from a closing trade, or standalone by symbol)
+   */
+  async createLesson(data: LessonCreate): Promise<Lesson> {
+    return this.fetch<Lesson>('/lessons', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Update a lesson
+   */
+  async updateLesson(id: number, data: LessonUpdate): Promise<Lesson> {
+    return this.fetch<Lesson>(`/lessons/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Delete a lesson
+   */
+  async deleteLesson(id: number): Promise<void> {
+    await this.fetch(`/lessons/${id}`, { method: 'DELETE' });
   }
 
   /**

@@ -10,7 +10,13 @@ from app.db.models.economic_event import EconomicEvent
 from app.schemas.trigger import TriggerCreate, TriggerSignal
 from app.services.trade_readiness import build_trade_readiness
 from app.services.trigger import TriggerService
-from tests.factories import create_test_alert, create_test_equity, create_test_trade
+from tests.factories import (
+    create_test_alert,
+    create_test_equity,
+    create_test_lesson,
+    create_test_trade,
+    create_test_watchlist,
+)
 
 
 async def _make_trigger(db: AsyncSession, alert_ids: list[int], **kwargs):
@@ -189,6 +195,43 @@ class TestBuildTradeReadiness:
 
         items = await build_trade_readiness(db, test_user.id)
         assert [i.name for i in items] == ["Hit one", "Approaching one"]
+
+    async def test_relevant_lessons_attached(self, db: AsyncSession, test_user):
+        equity = await create_test_equity(db, symbol="TR11")
+        alert = await create_test_alert(
+            db, equity, threshold_value=100.0, last_checked_value=98.0
+        )
+        await _make_trigger(db, [alert.id], name="TR11 entry")
+        await create_test_lesson(
+            db, equity, test_user,
+            thesis_outcome="wrong",
+            lesson="Bought the first touch; zone broke.",
+        )
+
+        items = await build_trade_readiness(db, test_user.id)
+        assert len(items) == 1
+        lessons = items[0].lessons
+        assert len(lessons) == 1
+        assert lessons[0].symbol == "TR11"
+        assert lessons[0].thesis_outcome == "wrong"
+        assert lessons[0].lesson == "Bought the first touch; zone broke."
+
+    async def test_theme_lesson_attached_unrelated_excluded(
+        self, db: AsyncSession, test_user
+    ):
+        tr12 = await create_test_equity(db, symbol="TR12")
+        peer = await create_test_equity(db, symbol="TR12B")
+        await create_test_watchlist(db, name="TR12 Theme", equities=[tr12, peer])
+        unrelated = await create_test_equity(db, symbol="TR12C")
+        alert = await create_test_alert(
+            db, tr12, threshold_value=100.0, last_checked_value=98.0
+        )
+        await _make_trigger(db, [alert.id])
+        await create_test_lesson(db, peer, test_user, lesson="theme peer lesson")
+        await create_test_lesson(db, unrelated, test_user, lesson="unrelated lesson")
+
+        items = await build_trade_readiness(db, test_user.id)
+        assert [les.lesson for les in items[0].lessons] == ["theme peer lesson"]
 
 
 class TestTradeReadinessEndpoint:

@@ -31,6 +31,16 @@ const mockData: TradeReadinessResponse = {
         },
       ],
       inactive_alert_count: 0,
+      lessons: [
+        {
+          id: 11,
+          symbol: 'LNG',
+          thesis_outcome: 'wrong',
+          lesson: 'Bought the first touch; zone broke.',
+          tags: ['natgas'],
+          recorded_at: '2026-06-01T12:00:00Z',
+        },
+      ],
     },
     {
       trigger_id: 2,
@@ -45,6 +55,7 @@ const mockData: TradeReadinessResponse = {
       positions: [],
       upcoming_events: [],
       inactive_alert_count: 1,
+      lessons: [],
     },
   ],
 };
@@ -112,6 +123,15 @@ describe('TradeReadiness', () => {
     expect(screen.getByText('LNG add level')).toBeInTheDocument();
     expect(screen.getByText('-2.3% away')).toBeInTheDocument();
     expect(screen.getByText('No position')).toBeInTheDocument();
+  });
+
+  it('renders resurfaced lessons with outcome label', () => {
+    mockUseTradeReadiness.mockReturnValue({ data: mockData, isLoading: false, error: null });
+    render(<TradeReadiness />);
+    expect(
+      screen.getByText('Bought the first touch; zone broke.', { exact: false })
+    ).toBeInTheDocument();
+    expect(screen.getByText('(thesis wrong)')).toBeInTheDocument();
   });
 
   it('flags disabled linked alerts', () => {

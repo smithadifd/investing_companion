@@ -29,6 +29,9 @@ export function EditItemModal({
     item.target_price ? String(item.target_price) : ''
   );
   const [thesis, setThesis] = useState(item.thesis || '');
+  const [catalystTags, setCatalystTags] = useState(
+    (item.catalyst_tags ?? []).join(', ')
+  );
   const [trackCalendar, setTrackCalendar] = useState(item.track_calendar ?? false);
   const [zones, setZones] = useState<ZoneDraft[]>(
     (item.entry_zones ?? []).map((z) => ({
@@ -70,6 +73,10 @@ export function EditItemModal({
     if (validationError) return;
 
     const apiZones = zoneDraftsToApi(zones);
+    const apiCatalysts = catalystTags
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
 
     try {
       await updateMutation.mutateAsync({
@@ -82,6 +89,8 @@ export function EditItemModal({
           track_calendar: trackCalendar,
           // null clears the zones; a list replaces them
           entry_zones: apiZones.length ? apiZones : null,
+          // [] clears catalyst tags; backend lowercases + dedupes
+          catalyst_tags: apiCatalysts,
         },
       });
 
@@ -155,6 +164,28 @@ export function EditItemModal({
             rows={4}
             className="w-full px-3 py-2 bg-neutral-100 dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 rounded-lg text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-500 dark:placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
           />
+        </div>
+
+        {/* Catalyst tags */}
+        <div>
+          <label
+            htmlFor="catalystTags"
+            className="block text-sm font-medium text-neutral-900 dark:text-neutral-50 mb-1"
+          >
+            Catalyst Tags
+          </label>
+          <input
+            type="text"
+            id="catalystTags"
+            value={catalystTags}
+            onChange={(e) => setCatalystTags(e.target.value)}
+            placeholder="uranium restart, carry unwind"
+            className="w-full px-3 py-2 bg-neutral-100 dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 rounded-lg text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-500 dark:placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+            Comma-separated single-catalyst clusters. Groups exposure across
+            holdings that share a catalyst.
+          </p>
         </div>
 
         {/* Tiered entry zones */}

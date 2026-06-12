@@ -13,6 +13,7 @@ import {
   ArrowDownRight,
   Trash2,
   Pencil,
+  Users,
 } from 'lucide-react';
 import {
   useTrades,
@@ -21,12 +22,14 @@ import {
   useDeleteTrade,
   useCalculatePositionSize,
 } from '@/lib/hooks/useTrade';
+import { useAccounts } from '@/lib/hooks/useAccount';
 import type { Trade, PositionSummary, PerformanceMetrics } from '@/lib/api/types';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { LabelWithTooltip } from '@/components/ui/Tooltip';
 import { CreateTradeModal } from '@/components/trade/CreateTradeModal';
 import { EditTradeModal } from '@/components/trade/EditTradeModal';
 import { QuickTradeModal } from '@/components/trade/QuickTradeModal';
+import { AccountManager } from '@/components/trade/AccountManager';
 
 // Helper to convert string/number to number
 function toNumber(value: number | string | null | undefined): number {
@@ -159,6 +162,9 @@ function TradeRow({
       <td className="px-4 py-3">
         <TradeTypeBadge type={trade.trade_type} />
       </td>
+      <td className="px-4 py-3 text-sm text-neutral-500 hidden md:table-cell">
+        {trade.account?.name ?? '—'}
+      </td>
       <td className="px-4 py-3 text-right font-medium">
         {toNumber(trade.quantity).toLocaleString()}
       </td>
@@ -208,9 +214,16 @@ function PositionCard({
     <div className="bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 p-4">
       <div className="flex justify-between items-start mb-3">
         <div>
-          <h3 className="font-semibold text-neutral-900 dark:text-neutral-50">
-            {position.equity.symbol}
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-neutral-900 dark:text-neutral-50">
+              {position.equity.symbol}
+            </h3>
+            {position.account && (
+              <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                {position.account.name}
+              </span>
+            )}
+          </div>
           <p className="text-sm text-neutral-500 truncate max-w-[200px]">
             {position.equity.name}
           </p>
@@ -539,14 +552,27 @@ export default function TradesPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
   const [deleteTradeId, setDeleteTradeId] = useState<number | null>(null);
+  const [showAccountManager, setShowAccountManager] = useState(false);
+  // 'all' | 'unassigned' | account id
+  const [accountFilter, setAccountFilter] = useState<'all' | 'unassigned' | number>('all');
+  const [groupByAccount, setGroupByAccount] = useState(false);
   const [quickTrade, setQuickTrade] = useState<{
     symbol: string;
     type: 'buy' | 'sell';
     price?: number;
   } | null>(null);
 
-  const { data: tradesData, isLoading: tradesLoading } = useTrades({ limit: 100 });
-  const { data: portfolio, isLoading: portfolioLoading } = usePortfolio();
+  const { data: accounts } = useAccounts();
+  const hasAccounts = (accounts?.length ?? 0) > 0;
+
+  const { data: tradesData, isLoading: tradesLoading } = useTrades({
+    limit: 100,
+    account_id: typeof accountFilter === 'number' ? accountFilter : undefined,
+    unassigned: accountFilter === 'unassigned',
+  });
+  const { data: portfolio, isLoading: portfolioLoading } = usePortfolio(
+    groupByAccount && hasAccounts
+  );
   const { data: performance, isLoading: performanceLoading } = usePerformance();
   const deleteTrade = useDeleteTrade();
 
@@ -584,13 +610,22 @@ export default function TradesPage() {
               Track your trades, analyze performance, and calculate position sizes
             </p>
           </div>
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <Plus className="h-4 w-4" />
-            Log Trade
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowAccountManager(true)}
+              className="flex items-center gap-2 px-4 py-2 text-neutral-700 dark:text-neutral-300 bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors"
+            >
+              <Users className="h-4 w-4" />
+              Accounts
+            </button>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              Log Trade
+            </button>
+          </div>
         </div>
 
         {/* Portfolio Summary Stats */}
@@ -677,6 +712,34 @@ export default function TradesPage() {
           </button>
         </div>
 
+        {/* Account filter (only once accounts exist) */}
+        {activeTab === 'trades' && hasAccounts && (
+          <div className="flex items-center gap-2 mb-3">
+            <label htmlFor="trade-account-filter" className="text-sm text-neutral-500">
+              Account
+            </label>
+            <select
+              id="trade-account-filter"
+              value={typeof accountFilter === 'number' ? String(accountFilter) : accountFilter}
+              onChange={(e) => {
+                const v = e.target.value;
+                setAccountFilter(
+                  v === 'all' || v === 'unassigned' ? v : parseInt(v, 10)
+                );
+              }}
+              className="px-3 py-1.5 text-sm border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50"
+            >
+              <option value="all">All accounts</option>
+              <option value="unassigned">Unassigned</option>
+              {accounts?.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* Tab Content */}
         {activeTab === 'trades' && (
           <div className="bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden">
@@ -704,6 +767,7 @@ export default function TradesPage() {
                     <tr className="text-left text-sm text-neutral-500">
                       <th className="px-4 py-3 font-medium">Symbol</th>
                       <th className="px-4 py-3 font-medium">Type</th>
+                      <th className="px-4 py-3 font-medium hidden md:table-cell">Account</th>
                       <th className="px-4 py-3 font-medium text-right">Qty</th>
                       <th className="px-4 py-3 font-medium text-right">Price</th>
                       <th className="px-4 py-3 font-medium text-right">Value</th>
@@ -729,13 +793,24 @@ export default function TradesPage() {
 
         {activeTab === 'portfolio' && (
           <div>
+            {hasAccounts && (
+              <label className="flex items-center gap-2 mb-3 text-sm text-neutral-600 dark:text-neutral-400 cursor-pointer w-fit">
+                <input
+                  type="checkbox"
+                  checked={groupByAccount}
+                  onChange={(e) => setGroupByAccount(e.target.checked)}
+                  className="rounded border-neutral-300 dark:border-neutral-600"
+                />
+                Group positions by account
+              </label>
+            )}
             {portfolio && portfolio.positions.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {portfolio.positions
                   .filter((p) => toNumber(p.quantity) !== 0)
                   .map((position) => (
                     <PositionCard
-                      key={position.equity_id}
+                      key={`${position.equity_id}-${position.account_id ?? 'none'}`}
                       position={position}
                       onQuickTrade={(symbol, type, price) =>
                         setQuickTrade({ symbol, type, price })
@@ -819,6 +894,11 @@ export default function TradesPage() {
           suggestedPrice={quickTrade.price}
           onClose={() => setQuickTrade(null)}
         />
+      )}
+
+      {/* Account Manager */}
+      {showAccountManager && (
+        <AccountManager onClose={() => setShowAccountManager(false)} />
       )}
     </div>
   );

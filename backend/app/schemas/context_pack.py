@@ -12,16 +12,20 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
+from app.schemas.exposure import CatalystCluster
 from app.schemas.watchlist import EntryZoneStatus
 
-SCHEMA_VERSION = "1.4"
+SCHEMA_VERSION = "1.5"
 
 
 class PackPosition(BaseModel):
-    """One open position, computed from the trade log."""
+    """One open position, computed from the trade log (per account)."""
 
     symbol: str
     name: Optional[str] = None
+    account: Optional[str] = Field(
+        None, description="Account name; null = unassigned (no account)"
+    )
     quantity: Decimal
     avg_cost_basis: Decimal
     current_price: Optional[Decimal] = None
@@ -164,6 +168,10 @@ class ContextPack(BaseModel):
     portfolio_value: Optional[Decimal] = None
     total_invested: Decimal
     exposures: List[PackExposure]
+    catalyst_exposures: List[CatalystCluster] = Field(
+        default_factory=list,
+        description="Held exposure grouped by single-catalyst cluster (overlapping)",
+    )
     active_alerts: List[PackAlert]
     recent_triggers: List[PackTrigger]
     watchlist_targets: List[PackWatchlistItem]

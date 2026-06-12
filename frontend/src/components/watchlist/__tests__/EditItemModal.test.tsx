@@ -33,6 +33,7 @@ const baseItem: WatchlistItem = {
     { tier: 'Aggressive', low: null, high: '46' },
   ],
   zone_statuses: [],
+  catalyst_tags: [],
   added_at: '2026-05-12T00:00:00Z',
   equity: {
     id: 7,

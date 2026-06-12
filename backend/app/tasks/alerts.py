@@ -90,6 +90,7 @@ def send_morning_pulse():
         from app.db.models.alert import Alert, AlertHistory
         from app.services.data_providers.yahoo import YahooFinanceProvider
         from app.services.economic_event import EconomicEventService
+        from app.services.extended_movers import collect_extended_movers
         from app.services.needs_attention import (
             build_needs_attention,
             format_needs_attention_lines,
@@ -170,28 +171,22 @@ def send_morning_pulse():
                 if (e.importance and e.importance.value in ("medium", "high"))
             ]
 
-            # --- Pre-market movers from watchlists ---
+            # --- Pre-market movers from watchlists (extended-hours quotes) ---
+            # Regular watchlist quotes at 8am ET are yesterday's close, so the
+            # movers come from get_extended_quote. When there's no pre-market
+            # data (weekend, holiday), the section degrades to honest at-close
+            # values and the formatter labels it "AT CLOSE" via movers_session.
             watchlist_service = WatchlistService(session)
             all_watchlists = await watchlist_service.list_watchlists()
-            premarket_movers: list[dict] = []
-            seen_symbols: set[str] = set()
+            watchlist_symbols: list[str] = []
             for wl_summary in all_watchlists:
-                wl = await watchlist_service.get_watchlist(wl_summary.id, include_quotes=True)
+                wl = await watchlist_service.get_watchlist(wl_summary.id, include_quotes=False)
                 if not wl:
                     continue
-                for item in wl.items:
-                    sym = item.equity.symbol
-                    if sym in seen_symbols:
-                        continue
-                    seen_symbols.add(sym)
-                    if item.quote and item.quote.change_percent is not None:
-                        change_pct = float(item.quote.change_percent)
-                        if abs(change_pct) >= 2.0:
-                            premarket_movers.append({
-                                "symbol": sym,
-                                "change_percent": change_pct,
-                            })
-            premarket_movers.sort(key=lambda m: abs(m["change_percent"]), reverse=True)
+                watchlist_symbols.extend(item.equity.symbol for item in wl.items)
+            premarket_movers, movers_session = await collect_extended_movers(
+                watchlist_symbols, yahoo, target_session="pre"
+            )
 
             # --- Alert stats ---
             active_count = await session.scalar(
@@ -226,6 +221,7 @@ def send_morning_pulse():
                 overnight_moves=overnight_moves,
                 calendar_events=calendar_events,
                 premarket_movers=premarket_movers,
+                movers_session=movers_session,
                 active_alerts=active_count,
                 triggered_overnight=triggered_overnight,
                 needs_attention=needs_attention,
@@ -258,6 +254,7 @@ def send_eod_wrap():
         from app.schemas.economic_event import EventFilters
         from app.services.data_providers.yahoo import YahooFinanceProvider
         from app.services.economic_event import EconomicEventService
+        from app.services.extended_movers import collect_extended_movers, dedupe_movers
         from app.services.notifications.formatters import (
             AlertTrigger,
             EODData,
@@ -290,6 +287,8 @@ def send_eod_wrap():
             my_positions: list[dict] = []
             all_movers: list[dict] = []  # for big movers section
 
+            watchlist_symbols: list[str] = []
+
             for wl_summary in all_watchlists:
                 wl = await watchlist_service.get_watchlist(wl_summary.id, include_quotes=True)
                 if not wl:
@@ -297,6 +296,7 @@ def send_eod_wrap():
 
                 positions = []
                 for item in wl.items:
+                    watchlist_symbols.append(item.equity.symbol)
                     if item.quote and item.quote.change_percent is not None:
                         pos = {
                             "symbol": item.equity.symbol,
@@ -314,6 +314,23 @@ def send_eod_wrap():
                         emoji=get_theme_emoji(wl.name),
                         positions=positions,
                     ))
+
+            # A ticker in N watchlists must print once, not N times
+            all_movers = dedupe_movers(all_movers)
+
+            # --- Post-market movers (extended-hours quotes) ---
+            # Only shown when there is genuine post-market data; if the market
+            # is closed the at-close moves are already the BIG MOVERS section,
+            # so the fallback is dropped instead of relabeled.
+            postmarket_movers: list[dict] = []
+            try:
+                movers, post_session = await collect_extended_movers(
+                    watchlist_symbols, yahoo, target_session="post"
+                )
+                if post_session == "post":
+                    postmarket_movers = movers
+            except Exception as e:
+                logger.warning(f"Failed to build post-market movers: {e}")
 
             # --- Alert data ---
             today_start = datetime.now(timezone.utc).replace(
@@ -422,6 +439,7 @@ def send_eod_wrap():
                 themes=themes,
                 my_positions=my_positions,
                 big_movers=all_movers,
+                postmarket_movers=postmarket_movers,
                 alerts_triggered=alerts_triggered,
                 active_alerts=active_count,
                 approaching=approaching,

@@ -84,6 +84,10 @@ class MorningData:
     calendar_events: list[dict] = field(default_factory=list)
     # Pre-market movers: [{symbol, change_percent}, ...]
     premarket_movers: list[dict] = field(default_factory=list)
+    # Session the movers were measured in: 'pre' means genuine pre-market
+    # data; anything else means the values are last regular-session closes
+    # and the section must be labeled "AT CLOSE", not "PRE-MARKET".
+    movers_session: str = "pre"
     # Alert stats
     active_alerts: int = 0
     triggered_overnight: int = 0
@@ -248,14 +252,22 @@ def format_morning_pulse(data: MorningData) -> str:
 
     # -- Watchlist Pre-Market Movers --
     try:
+        if data.movers_session == "pre":
+            header = "WATCHLIST PRE-MARKET MOVERS"
+            empty_line = "No significant pre-market moves (>2%)"
+        else:
+            # No pre-market data (weekend, holiday, pre-open) - these are
+            # last regular-session closes, so say so.
+            header = "WATCHLIST MOVERS (AT CLOSE)"
+            empty_line = "No significant moves (>2%) at last close"
         if data.premarket_movers:
-            lines = ["WATCHLIST PRE-MARKET MOVERS"]
+            lines = [header]
             for m in data.premarket_movers[:5]:
                 arrow = "⬆️" if m["change_percent"] > 0 else "⬇️"
                 lines.append(f"{arrow} {m['symbol']} {_fmt_pct(m['change_percent'])}")
             sections.append("\n".join(lines))
         else:
-            sections.append("WATCHLIST PRE-MARKET MOVERS\nNo significant pre-market moves (>2%)")
+            sections.append(f"{header}\n{empty_line}")
     except Exception as e:
         warnings.append("pre-market movers")
         logger.warning(f"Error formatting pre-market movers: {e}")
@@ -309,6 +321,9 @@ class EODData:
     my_positions: list[dict] = field(default_factory=list)
     # Big movers across all watchlists: [{symbol, change_percent}, ...]
     big_movers: list[dict] = field(default_factory=list)
+    # Post-market movers: [{symbol, change_percent}, ...] - only populated
+    # when there is genuine post-session data, so the section never lies
+    postmarket_movers: list[dict] = field(default_factory=list)
     # Alerts
     alerts_triggered: list[AlertTrigger] = field(default_factory=list)
     active_alerts: int = 0
@@ -450,6 +465,18 @@ def format_eod_wrap(data: EODData) -> str:
     except Exception as e:
         warnings.append("big movers")
         logger.warning(f"Error formatting big movers: {e}")
+
+    # -- Post-Market Movers --
+    try:
+        if data.postmarket_movers:
+            lines = ["POST-MARKET MOVERS (>2%)"]
+            for m in data.postmarket_movers[:5]:
+                arrow = "⬆️" if m["change_percent"] > 0 else "⬇️"
+                lines.append(f"{arrow} {m['symbol']} {_fmt_pct(m['change_percent'])}")
+            sections.append("\n".join(lines))
+    except Exception as e:
+        warnings.append("post-market movers")
+        logger.warning(f"Error formatting post-market movers: {e}")
 
     # -- Alerts --
     try:

@@ -43,6 +43,8 @@ async def list_trades(
     trade_type: Optional[TradeType] = Query(None, description="Filter by trade type"),
     start_date: Optional[datetime] = Query(None, description="Filter trades after this date"),
     end_date: Optional[datetime] = Query(None, description="Filter trades before this date"),
+    account_id: Optional[int] = Query(None, description="Filter by account ID"),
+    unassigned: bool = Query(False, description="Only trades with no account"),
     limit: int = Query(100, ge=1, le=500, description="Max results to return"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
     current_user: User = Depends(get_current_user),
@@ -51,7 +53,7 @@ async def list_trades(
     """
     List trades for the authenticated user.
 
-    Supports filtering by equity, trade type, and date range.
+    Supports filtering by equity, trade type, date range, and account.
     Results are ordered by execution date, newest first.
     """
     trades, total = await service.list_trades(
@@ -60,6 +62,8 @@ async def list_trades(
         trade_type=trade_type,
         start_date=start_date,
         end_date=end_date,
+        account_id=account_id,
+        unassigned=unassigned,
         limit=limit,
         offset=offset,
     )
@@ -106,6 +110,9 @@ async def create_trade(
 
 @router.get("/portfolio", response_model=DataResponse[PortfolioSummary])
 async def get_portfolio(
+    by_account: bool = Query(
+        False, description="Split positions per (account, equity) with account context"
+    ),
     current_user: User = Depends(get_current_user),
     service: TradeService = Depends(get_trade_service),
 ) -> DataResponse[PortfolioSummary]:
@@ -113,9 +120,10 @@ async def get_portfolio(
     Get portfolio summary with all current positions.
 
     Includes total invested, current value, unrealized P&L, and realized P&L.
-    Current prices are fetched for unrealized P&L calculation.
+    Current prices are fetched for unrealized P&L calculation. With
+    `by_account`, the same ticker in two accounts is two distinct positions.
     """
-    portfolio = await service.get_portfolio(current_user.id)
+    portfolio = await service.get_portfolio(current_user.id, by_account=by_account)
     return DataResponse(data=portfolio, meta=ResponseMeta.now())
 
 
@@ -228,7 +236,12 @@ async def update_trade(
 
     P&L pairs are automatically recalculated after the update.
     """
-    trade = await service.update_trade(trade_id, current_user.id, data)
+    try:
+        trade = await service.update_trade(trade_id, current_user.id, data)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
+        )
 
     if not trade:
         raise HTTPException(

@@ -22,6 +22,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
+    from app.db.models.account import Account
     from app.db.models.equity import Equity
     from app.db.models.user import User
     from app.db.models.watchlist import WatchlistItem
@@ -79,11 +80,21 @@ class Trade(Base, TimestampMixin):
         ForeignKey("watchlist_items.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # NULL = unassigned. SET NULL so deleting an account keeps the trade
+    # (it just falls back to the unassigned position bucket).
+    account_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("accounts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     # Relationships
     user: Mapped["User"] = relationship(back_populates="trades")
     equity: Mapped["Equity"] = relationship(lazy="selectin")
     watchlist_item: Mapped[Optional["WatchlistItem"]] = relationship(lazy="selectin")
+    account: Mapped[Optional["Account"]] = relationship(
+        back_populates="trades", lazy="selectin"
+    )
 
     # Trade pairs where this is the opening trade
     opening_pairs: Mapped[List["TradePair"]] = relationship(
@@ -102,6 +113,7 @@ class Trade(Base, TimestampMixin):
         Index("idx_trades_user_equity", "user_id", "equity_id"),
         Index("idx_trades_executed_at", "executed_at"),
         Index("idx_trades_user_executed", "user_id", "executed_at"),
+        Index("idx_trades_user_account_equity", "user_id", "account_id", "equity_id"),
     )
 
     @property
@@ -144,6 +156,12 @@ class TradePair(Base):
         ForeignKey("equities.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
+    )
+    # The account both paired trades belong to (FIFO matches within an
+    # account). NULL = the unassigned bucket. SET NULL mirrors trades.
+    account_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("accounts.id", ondelete="SET NULL"),
+        nullable=True,
     )
     open_trade_id: Mapped[int] = mapped_column(
         ForeignKey("trades.id", ondelete="CASCADE"),
@@ -189,6 +207,7 @@ class TradePair(Base):
         Index("idx_trade_pairs_user_equity", "user_id", "equity_id"),
         Index("idx_trade_pairs_open_trade", "open_trade_id"),
         Index("idx_trade_pairs_close_trade", "close_trade_id"),
+        Index("idx_trade_pairs_user_account_equity", "user_id", "account_id", "equity_id"),
     )
 
     def __repr__(self) -> str:

@@ -60,6 +60,8 @@ const mockTrade: Trade = {
   position_closed: false,
   notes: null,
   watchlist_item_id: null,
+  account_id: null,
+  account: null,
   equity: { id: 1, symbol: 'AAPL', name: 'Apple Inc.', exchange: 'NASDAQ', sector: 'Technology' },
   total_value: 15000,
   total_cost: 15000,
@@ -256,6 +258,8 @@ describe('usePosition', () => {
     mockedApi.getPosition.mockResolvedValue({
       equity_id: 1,
       equity: mockTrade.equity,
+      account_id: null,
+      account: null,
       quantity: 100,
       avg_cost_basis: 150,
       total_cost: 15000,

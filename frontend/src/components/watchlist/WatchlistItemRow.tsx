@@ -50,6 +50,18 @@ export function WatchlistItemRow({ item, onEdit, onRemove }: WatchlistItemRowPro
             {item.equity.name}
           </div>
         </Link>
+        {(item.catalyst_tags ?? []).length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1">
+            {item.catalyst_tags.map((tag) => (
+              <span
+                key={tag}
+                className="px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
       </td>
       <td className="p-4 text-right">
         <span className="font-mono text-neutral-900 dark:text-neutral-50">

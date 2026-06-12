@@ -163,3 +163,22 @@ class TestDashboardEndpoint:
         assert len(items) == 1
         assert items[0]["kind"] == "alert_approaching"
         assert items[0]["title"] == "NA8 entry"
+
+    async def test_exposure_requires_auth(self, client: AsyncClient):
+        assert (await client.get("/api/v1/dashboard/exposure")).status_code == 401
+
+    async def test_exposure_returns_catalyst_clusters(
+        self, authed_client: AsyncClient, db: AsyncSession, test_user
+    ):
+        from tests.factories import create_test_trade, create_test_watchlist_item
+
+        equity = await create_test_equity(db, symbol="EXPO")
+        wl = await create_test_watchlist(db, name="Cat")
+        await create_test_watchlist_item(db, wl, equity, catalyst_tags=["theme z"])
+        await create_test_trade(db, equity, test_user, quantity=Decimal("3"))
+        await db.commit()
+
+        response = await authed_client.get("/api/v1/dashboard/exposure")
+        assert response.status_code == 200
+        catalysts = response.json()["data"]["catalysts"]
+        assert any(c["catalyst"] == "theme z" for c in catalysts)

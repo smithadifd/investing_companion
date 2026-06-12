@@ -41,6 +41,7 @@ const mockData: TradeReadinessResponse = {
           recorded_at: '2026-06-01T12:00:00Z',
         },
       ],
+      correlations: [],
     },
     {
       trigger_id: 2,
@@ -56,6 +57,7 @@ const mockData: TradeReadinessResponse = {
       upcoming_events: [],
       inactive_alert_count: 1,
       lessons: [],
+      correlations: [],
     },
   ],
 };
@@ -115,6 +117,26 @@ describe('TradeReadiness', () => {
     mockUseTradeReadiness.mockReturnValue({ data: mockData, isLoading: false, error: null });
     render(<TradeReadiness />);
     expect(screen.getByText(/EQT earnings in 2d/)).toBeInTheDocument();
+  });
+
+  it('renders a catalyst correlation flag when present', () => {
+    const withCorrelation = {
+      items: [
+        {
+          ...mockData.items[1],
+          correlations: [{ catalyst: 'uranium restart', held_symbols: ['CCJ'] }],
+        },
+      ],
+    };
+    mockUseTradeReadiness.mockReturnValue({
+      data: withCorrelation,
+      isLoading: false,
+      error: null,
+    });
+    render(<TradeReadiness />);
+    expect(
+      screen.getByText(/concentrates uranium restart \(hold CCJ\)/)
+    ).toBeInTheDocument();
   });
 
   it('renders an approaching trigger with distance and no-position context', () => {

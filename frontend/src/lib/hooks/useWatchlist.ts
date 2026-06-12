@@ -129,6 +129,8 @@ export function useUpdateWatchlistItem() {
     }) => api.updateWatchlistItem(watchlistId, itemId, data),
     onSuccess: (_, { watchlistId }) => {
       queryClient.invalidateQueries({ queryKey: ['watchlist', watchlistId] });
+      // Catalyst tags feed the dashboard's catalyst-exposure card
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'exposure'] });
     },
   });
 }

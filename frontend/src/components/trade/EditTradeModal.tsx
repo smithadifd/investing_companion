@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useUpdateTrade } from '@/lib/hooks/useTrade';
+import { AccountSelect } from '@/components/trade/AccountSelect';
 import { Modal } from '@/components/ui/Modal';
 import type { Trade, TradeType, TradeUpdate } from '@/lib/api/types';
 
@@ -32,6 +33,7 @@ export function EditTradeModal({ trade, onClose }: EditTradeModalProps) {
     new Date(trade.executed_at).toISOString().slice(0, 16)
   );
   const [notes, setNotes] = useState(trade.notes || '');
+  const [accountId, setAccountId] = useState<number | null>(trade.account_id);
 
   const updateTrade = useUpdateTrade();
 
@@ -45,6 +47,7 @@ export function EditTradeModal({ trade, onClose }: EditTradeModalProps) {
       fees: parseFloat(fees) || 0,
       executed_at: new Date(executedAt).toISOString(),
       notes: notes || undefined,
+      account_id: accountId,
     };
 
     try {
@@ -130,6 +133,9 @@ export function EditTradeModal({ trade, onClose }: EditTradeModalProps) {
               />
             </div>
           </div>
+
+          {/* Account (only shown once accounts exist) */}
+          <AccountSelect value={accountId} onChange={setAccountId} />
 
           {/* Fees */}
           <div>

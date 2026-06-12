@@ -9,6 +9,23 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.schemas.equity import QuoteResponse
 
 MAX_ENTRY_ZONES = 8
+MAX_CATALYST_TAGS = 10
+
+
+def normalize_catalyst_tags(tags: Optional[List[str]]) -> Optional[List[str]]:
+    """Lowercase, trim, dedupe (order-preserving), drop empties.
+
+    Mirrors the lessons tag normalizer so a catalyst named "Uranium Restart"
+    and "uranium restart" cluster together.
+    """
+    if tags is None:
+        return None
+    seen: dict[str, None] = {}
+    for tag in tags:
+        cleaned = tag.strip().lower()
+        if cleaned:
+            seen.setdefault(cleaned, None)
+    return list(seen)
 
 
 class EntryZone(BaseModel):
@@ -68,6 +85,10 @@ class WatchlistItemBase(BaseModel):
     track_calendar: Optional[bool] = Field(None, description="Track events for this equity on calendar")
     # Explicit null (or []) clears on update; omitted leaves unchanged
     entry_zones: Optional[List[EntryZone]] = None
+    # Single-catalyst cluster tags (e.g. "uranium restart"). Explicit null (or
+    # []) clears on update; omitted leaves unchanged. The count cap is enforced
+    # in the validator *after* dedup (see clean_catalyst_tags).
+    catalyst_tags: Optional[List[str]] = None
 
     @field_validator("entry_zones")
     @classmethod
@@ -75,6 +96,15 @@ class WatchlistItemBase(BaseModel):
         cls, v: Optional[List[EntryZone]]
     ) -> Optional[List[EntryZone]]:
         return _validate_zone_list(v)
+
+    @field_validator("catalyst_tags")
+    @classmethod
+    def clean_catalyst_tags(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        # Dedup first, then cap - a list that dedupes to <= MAX must not 422.
+        cleaned = normalize_catalyst_tags(v)
+        if cleaned is not None and len(cleaned) > MAX_CATALYST_TAGS:
+            raise ValueError(f"At most {MAX_CATALYST_TAGS} catalyst tags per item")
+        return cleaned
 
 
 class WatchlistItemCreate(WatchlistItemBase):
@@ -114,6 +144,7 @@ class WatchlistItemResponse(BaseModel):
     track_calendar: bool = True
     entry_zones: List[EntryZone] = []
     zone_statuses: List[EntryZoneStatus] = []
+    catalyst_tags: List[str] = []
     added_at: datetime
     equity: WatchlistItemEquity
     quote: Optional[QuoteResponse] = None

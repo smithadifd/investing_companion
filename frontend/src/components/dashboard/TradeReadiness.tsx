@@ -9,6 +9,7 @@ import {
   ClipboardList,
   Crosshair,
   GraduationCap,
+  Layers,
 } from 'lucide-react';
 import { useTradeReadiness } from '@/lib/hooks/useDashboard';
 import type { TradeReadinessItem } from '@/lib/api/types';
@@ -147,6 +148,16 @@ function ReadinessRow({ item }: { item: TradeReadinessItem }) {
             {item.inactive_alert_count > 1 ? 's' : ''} disabled
           </span>
         )}
+        {item.correlations.map((c) => (
+          <span
+            key={c.catalyst}
+            className="flex items-center gap-1 text-amber-600 dark:text-amber-400"
+            title={`Already loaded in "${c.catalyst}": ${c.held_symbols.join(', ')}`}
+          >
+            <Layers className="h-3 w-3" />
+            concentrates {c.catalyst} (hold {c.held_symbols.join(', ')})
+          </span>
+        ))}
       </div>
 
       {/* Lessons from similar past setups */}

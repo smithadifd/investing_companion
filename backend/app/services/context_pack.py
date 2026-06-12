@@ -37,6 +37,7 @@ from app.schemas.context_pack import (
 )
 from app.services.economic_event import EconomicEventService
 from app.services.entry_zones import build_zone_statuses, parse_zones
+from app.services.exposure import build_catalyst_clusters, catalyst_symbol_map
 from app.services.handoff import HandoffService
 from app.services.lesson import LessonService
 from app.services.trade import TradeService
@@ -52,7 +53,6 @@ APPROACHING_THRESHOLD_PCT = Decimal("3")
 UNSUPPORTED_FEATURES = [
     "percent_from_high_on_ratios",
     "options_data",
-    "per_account_positions",
 ]
 
 
@@ -68,13 +68,16 @@ class ContextPackService:
         self.lesson_service = LessonService(db)
 
     async def build(self, user_id: UUID) -> ContextPack:
-        portfolio = await self.trade_service.get_portfolio(user_id)
+        # Per-account so positions carry account context; the same ticker in
+        # two accounts is two rows. Rollup totals sum the disjoint partitions.
+        portfolio = await self.trade_service.get_portfolio(user_id, by_account=True)
         performance = await self.trade_service.get_performance(user_id)
 
         positions = [
             PackPosition(
                 symbol=p.equity.symbol,
                 name=p.equity.name,
+                account=p.account.name if p.account else None,
                 quantity=p.quantity,
                 avg_cost_basis=p.avg_cost_basis,
                 current_price=p.current_price,
@@ -86,7 +89,15 @@ class ContextPackService:
             for p in portfolio.positions
         ]
 
-        exposures = await self._exposures(positions, portfolio.current_value)
+        # Exposures aggregate by symbol across accounts, so fold the per-account
+        # current values into one value-per-symbol map.
+        value_by_symbol = self._value_by_symbol(positions)
+        exposures = await self._exposures(value_by_symbol, portfolio.current_value)
+        catalyst_exposures = build_catalyst_clusters(
+            await catalyst_symbol_map(self.db),
+            value_by_symbol,
+            portfolio.current_value,
+        )
         alerts = await self.active_alerts()
         triggers = await self._recent_triggers()
         targets = await self.watchlist_targets()
@@ -131,6 +142,7 @@ class ContextPackService:
             portfolio_value=portfolio.current_value,
             total_invested=portfolio.total_invested,
             exposures=exposures,
+            catalyst_exposures=catalyst_exposures,
             active_alerts=alerts,
             recent_triggers=triggers,
             watchlist_targets=targets,
@@ -148,13 +160,29 @@ class ContextPackService:
             unsupported_features=UNSUPPORTED_FEATURES,
         )
 
+    @staticmethod
+    def _value_by_symbol(
+        positions: List[PackPosition],
+    ) -> dict[str, Optional[Decimal]]:
+        """Fold per-account positions into one current value per symbol."""
+        value_by_symbol: dict[str, Optional[Decimal]] = {}
+        for p in positions:
+            if p.current_value is not None:
+                value_by_symbol[p.symbol] = (
+                    value_by_symbol.get(p.symbol) or Decimal("0")
+                ) + p.current_value
+            else:
+                value_by_symbol.setdefault(p.symbol, None)
+        return value_by_symbol
+
     async def _exposures(
-        self, positions: List[PackPosition], portfolio_value: Optional[Decimal]
+        self,
+        value_by_symbol: dict[str, Optional[Decimal]],
+        portfolio_value: Optional[Decimal],
     ) -> List[PackExposure]:
         """Position value per theme watchlist (overlapping by design)."""
-        if not positions:
+        if not value_by_symbol:
             return []
-        by_symbol = {p.symbol: p for p in positions}
 
         stmt = (
             select(Watchlist.name, Equity.symbol)
@@ -166,15 +194,15 @@ class ContextPackService:
 
         themes: dict[str, list[str]] = {}
         for wl_name, symbol in result.all():
-            if symbol in by_symbol:
+            if symbol in value_by_symbol:
                 themes.setdefault(wl_name, []).append(symbol)
 
         exposures = []
         for theme, symbols in sorted(themes.items()):
             values = [
-                by_symbol[s].current_value
+                value_by_symbol[s]
                 for s in symbols
-                if by_symbol[s].current_value is not None
+                if value_by_symbol[s] is not None
             ]
             value = sum(values, Decimal("0")) if values else None
             pct = (
@@ -353,8 +381,9 @@ def render_markdown(pack: ContextPack) -> str:
         f"realized {money(pack.trade_summary.total_realized_pnl)})",
     ]
     for p in pack.positions:
+        acct = f" [{p.account}]" if p.account else ""
         lines.append(
-            f"- {p.symbol}: {p.quantity} @ {money(p.avg_cost_basis)} avg, "
+            f"- {p.symbol}{acct}: {p.quantity} @ {money(p.avg_cost_basis)} avg, "
             f"now {money(p.current_price)} ({pct(p.unrealized_pnl_percent)})"
         )
 
@@ -363,6 +392,19 @@ def render_markdown(pack: ContextPack) -> str:
         for e in pack.exposures:
             share = f" ({e.percent_of_portfolio}% of portfolio)" if e.percent_of_portfolio is not None else ""
             lines.append(f"- {e.theme}: {money(e.value)}{share} - {', '.join(e.symbols)}")
+
+    if pack.catalyst_exposures:
+        lines += ["", "## Catalyst-cluster exposure (overlapping)"]
+        for c in pack.catalyst_exposures:
+            share = (
+                f" ({c.percent_of_portfolio}% of portfolio)"
+                if c.percent_of_portfolio is not None
+                else ""
+            )
+            lines.append(
+                f"- {c.catalyst}: {money(c.value)}{share} - "
+                f"{', '.join(c.symbols)} ({c.position_count} held)"
+            )
 
     lines += ["", f"## Active alerts ({len(pack.active_alerts)})"]
     for a in pack.active_alerts:

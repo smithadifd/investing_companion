@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useCreateTrade } from '@/lib/hooks/useTrade';
+import { AccountSelect } from '@/components/trade/AccountSelect';
 import { EquitySearchInput } from '@/components/equity/EquitySearchInput';
 import { LessonCaptureModal } from '@/components/trade/LessonCaptureModal';
 import { Modal } from '@/components/ui/Modal';
@@ -35,6 +36,7 @@ export function CreateTradeModal({
     new Date().toISOString().slice(0, 16)
   );
   const [notes, setNotes] = useState('');
+  const [accountId, setAccountId] = useState<number | null>(null);
 
   const [searchQuery, setSearchQuery] = useState(prefillSymbol || '');
   // Set when the logged trade closed the position - swaps the form for the
@@ -68,6 +70,7 @@ export function CreateTradeModal({
       fees: parseFloat(fees) || 0,
       executed_at: new Date(executedAt).toISOString(),
       notes: notes || undefined,
+      account_id: accountId,
     };
 
     try {
@@ -92,6 +95,7 @@ export function CreateTradeModal({
     setFees('0');
     setExecutedAt(new Date().toISOString().slice(0, 16));
     setNotes('');
+    setAccountId(null);
     onClose();
   };
 
@@ -155,6 +159,9 @@ export function CreateTradeModal({
               required
             />
           </div>
+
+          {/* Account (only shown once accounts exist) */}
+          <AccountSelect value={accountId} onChange={setAccountId} />
 
           {/* Quantity and Price */}
           <div className="grid grid-cols-2 gap-4">

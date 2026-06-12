@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { X, Loader2, Zap } from 'lucide-react';
 import { useCreateTrade } from '@/lib/hooks/useTrade';
+import { AccountSelect } from '@/components/trade/AccountSelect';
 import { LessonCaptureModal } from '@/components/trade/LessonCaptureModal';
 import { Modal } from '@/components/ui/Modal';
 import type { TradeType, TradeCreate } from '@/lib/api/types';
@@ -22,6 +23,7 @@ export function QuickTradeModal({
 }: QuickTradeModalProps) {
   const [quantity, setQuantity] = useState('');
   const [price, setPrice] = useState(suggestedPrice?.toFixed(2) || '');
+  const [accountId, setAccountId] = useState<number | null>(null);
   // Set when the logged trade closed the position - swaps to the optional
   // lesson-capture step instead of closing
   const [captureTradeId, setCaptureTradeId] = useState<number | null>(null);
@@ -47,6 +49,7 @@ export function QuickTradeModal({
       price: parseFloat(price),
       fees: 0,
       executed_at: new Date().toISOString(),
+      account_id: accountId,
     };
 
     try {
@@ -130,6 +133,9 @@ export function QuickTradeModal({
               required
             />
           </div>
+
+          {/* Account (only shown once accounts exist) */}
+          <AccountSelect value={accountId} onChange={setAccountId} />
 
           {/* Total */}
           {totalValue > 0 && (

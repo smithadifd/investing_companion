@@ -4,6 +4,7 @@ import Link from 'next/link';
 import {
   NeedsAttention,
   TradeReadiness,
+  CatalystExposure,
   WatchlistMovers,
   NotificationsFeed,
   MarketSnapshot,
@@ -33,6 +34,11 @@ export default function Dashboard() {
         {/* Market Snapshot - Full width */}
         <div className="mb-6">
           <MarketSnapshot />
+        </div>
+
+        {/* Catalyst exposure - renders nothing until catalysts are tagged + held */}
+        <div className="mb-6">
+          <CatalystExposure />
         </div>
 
         {/* Main content grid */}

@@ -97,7 +97,8 @@ class TestContextPackService:
                 avg_cost_basis=Decimal("10"), current_value=Decimal("50"),
             ),
         ]
-        exposures = await service._exposures(positions, Decimal("200"))
+        value_by_symbol = service._value_by_symbol(positions)
+        exposures = await service._exposures(value_by_symbol, Decimal("200"))
 
         one = next(e for e in exposures if e.theme == "Theme One")
         two = next(e for e in exposures if e.theme == "Theme Two")

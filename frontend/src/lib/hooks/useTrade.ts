@@ -23,6 +23,8 @@ export function useTrades(params?: {
   trade_type?: TradeType;
   start_date?: string;
   end_date?: string;
+  account_id?: number;
+  unassigned?: boolean;
   limit?: number;
   offset?: number;
 }) {
@@ -54,6 +56,7 @@ export function useCreateTrade() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trades'] });
       queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'exposure'] });
       queryClient.invalidateQueries({ queryKey: ['performance'] });
       queryClient.invalidateQueries({ queryKey: ['trade-pairs'] });
     },
@@ -73,6 +76,7 @@ export function useUpdateTrade() {
       queryClient.invalidateQueries({ queryKey: ['trades'] });
       queryClient.invalidateQueries({ queryKey: ['trade', variables.id] });
       queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'exposure'] });
       queryClient.invalidateQueries({ queryKey: ['performance'] });
       queryClient.invalidateQueries({ queryKey: ['trade-pairs'] });
     },
@@ -90,6 +94,7 @@ export function useDeleteTrade() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trades'] });
       queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'exposure'] });
       queryClient.invalidateQueries({ queryKey: ['performance'] });
       queryClient.invalidateQueries({ queryKey: ['trade-pairs'] });
     },
@@ -99,10 +104,10 @@ export function useDeleteTrade() {
 /**
  * Hook to fetch portfolio summary
  */
-export function usePortfolio() {
+export function usePortfolio(byAccount = false) {
   return useQuery<PortfolioSummary>({
-    queryKey: ['portfolio'],
-    queryFn: () => api.getPortfolio(),
+    queryKey: ['portfolio', { byAccount }],
+    queryFn: () => api.getPortfolio(byAccount),
     staleTime: 60 * 1000, // 1 minute
   });
 }

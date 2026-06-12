@@ -7,6 +7,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
+from app.schemas.exposure import CatalystCluster
 from app.schemas.trigger import TriggerSignal
 
 
@@ -65,6 +66,20 @@ class ReadinessLesson(BaseModel):
     recorded_at: datetime
 
 
+class ReadinessCorrelation(BaseModel):
+    """A catalyst cluster this trigger would concentrate, and what's held there.
+
+    The sixth checklist item: acting on a trigger whose symbols share a
+    catalyst with positions you already hold adds correlated, not diversifying,
+    exposure. Surfaced as a caution, never a blocker.
+    """
+
+    catalyst: str
+    held_symbols: List[str] = Field(
+        ..., description="Already-held symbols in this catalyst cluster"
+    )
+
+
 class TradeReadinessItem(BaseModel):
     """One actionable trigger with the context needed to act on it now."""
 
@@ -90,7 +105,17 @@ class TradeReadinessItem(BaseModel):
         default_factory=list,
         description="Lessons from similar past setups, newest first (max 3)",
     )
+    correlations: List[ReadinessCorrelation] = Field(
+        default_factory=list,
+        description="Already-loaded catalyst clusters this trigger would concentrate",
+    )
 
 
 class TradeReadinessResponse(BaseModel):
     items: List[TradeReadinessItem] = Field(default_factory=list)
+
+
+class ExposureResponse(BaseModel):
+    """Held exposure grouped by single-catalyst cluster."""
+
+    catalysts: List[CatalystCluster] = Field(default_factory=list)

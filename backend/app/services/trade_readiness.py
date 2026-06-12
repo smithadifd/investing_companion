@@ -22,6 +22,7 @@ from sqlalchemy.orm import selectinload
 from app.db.models.alert import Alert
 from app.db.models.trigger import Trigger, TriggerAlertLink, TriggerLifecycle
 from app.schemas.dashboard import (
+    ReadinessCorrelation,
     ReadinessEvent,
     ReadinessLesson,
     ReadinessPosition,
@@ -29,6 +30,7 @@ from app.schemas.dashboard import (
 )
 from app.schemas.trigger import TriggerSignal
 from app.services.economic_event import EconomicEventService
+from app.services.exposure import catalyst_symbol_map
 from app.services.lesson import LessonService
 from app.services.trade import TradeService
 from app.services.trigger import _alert_distance, derive_signal
@@ -76,6 +78,12 @@ async def build_trade_readiness(
         p.equity.symbol: p
         for p in await TradeService(db).get_open_positions(user_id)
     }
+    held_symbols = set(positions_by_symbol)
+
+    # Catalyst clusters (shared builder) for the correlation flag: a trigger
+    # whose symbols share a catalyst with something already held is adding
+    # correlated exposure.
+    catalysts = await catalyst_symbol_map(db)
 
     events_response = await EconomicEventService(db).get_upcoming_events(
         days_ahead=EVENT_WINDOW_DAYS, user_id=user_id, limit=50
@@ -124,6 +132,14 @@ async def build_trade_readiness(
         fired = [a.last_triggered_at for a in alerts if a.last_triggered_at]
         last_triggered_at = max(fired) if fired else None
 
+        # Correlation: catalysts this trigger touches that are already loaded.
+        trigger_symbols = set(symbols)
+        correlations = [
+            ReadinessCorrelation(catalyst=catalyst, held_symbols=sorted(held))
+            for catalyst, cluster in sorted(catalysts.items())
+            if cluster & trigger_symbols and (held := cluster & held_symbols)
+        ]
+
         items.append(
             TradeReadinessItem(
                 trigger_id=trigger.id,
@@ -151,6 +167,7 @@ async def build_trade_readiness(
                 ],
                 inactive_alert_count=sum(1 for a in alerts if not a.is_active),
                 lessons=lessons,
+                correlations=correlations,
             )
         )
 

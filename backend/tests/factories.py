@@ -145,6 +145,7 @@ async def create_test_watchlist_item(
     target_price: Optional[Decimal] = None,
     thesis: Optional[str] = None,
     entry_zones: Optional[list] = None,
+    catalyst_tags: Optional[list] = None,
 ) -> WatchlistItem:
     """Create a watchlist item (entry_zones as raw JSON: [{tier, low, high}])."""
     item = WatchlistItem(
@@ -154,6 +155,7 @@ async def create_test_watchlist_item(
         target_price=target_price,
         thesis=thesis,
         entry_zones=entry_zones,
+        catalyst_tags=catalyst_tags,
     )
     db.add(item)
     await db.flush()

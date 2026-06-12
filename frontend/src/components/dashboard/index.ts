@@ -1,5 +1,6 @@
 export { NeedsAttention } from './NeedsAttention';
 export { TradeReadiness } from './TradeReadiness';
+export { CatalystExposure } from './CatalystExposure';
 export { WatchlistMovers } from './WatchlistMovers';
 export { NotificationsFeed } from './NotificationsFeed';
 export { MarketSnapshot } from './MarketSnapshot';

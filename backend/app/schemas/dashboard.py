@@ -54,6 +54,17 @@ class ReadinessEvent(BaseModel):
     days_away: int
 
 
+class ReadinessLesson(BaseModel):
+    """A past lesson relevant to this setup (see LessonService matching rule)."""
+
+    id: int
+    symbol: str
+    thesis_outcome: str
+    lesson: str
+    tags: List[str] = Field(default_factory=list)
+    recorded_at: datetime
+
+
 class TradeReadinessItem(BaseModel):
     """One actionable trigger with the context needed to act on it now."""
 
@@ -74,6 +85,10 @@ class TradeReadinessItem(BaseModel):
     upcoming_events: List[ReadinessEvent] = Field(default_factory=list)
     inactive_alert_count: int = Field(
         0, description="Linked alerts that are disabled - watching is degraded"
+    )
+    lessons: List[ReadinessLesson] = Field(
+        default_factory=list,
+        description="Lessons from similar past setups, newest first (max 3)",
     )
 
 

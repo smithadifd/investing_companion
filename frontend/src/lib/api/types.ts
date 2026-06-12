@@ -582,6 +582,15 @@ export interface ReadinessEvent {
   days_away: number;
 }
 
+export interface ReadinessLesson {
+  id: number;
+  symbol: string;
+  thesis_outcome: string;
+  lesson: string;
+  tags: string[];
+  recorded_at: string;
+}
+
 export interface TradeReadinessItem {
   trigger_id: number;
   name: string;
@@ -595,6 +604,7 @@ export interface TradeReadinessItem {
   positions: ReadinessPosition[];
   upcoming_events: ReadinessEvent[];
   inactive_alert_count: number;
+  lessons: ReadinessLesson[];
 }
 
 export interface TradeReadinessResponse {
@@ -701,6 +711,8 @@ export interface Trade {
   equity: TradeEquity;
   total_value: number | string;
   total_cost: number | string;
+  /** True when this trade zeroed out the position (set on create only) */
+  position_closed: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -737,6 +749,37 @@ export interface TradePair {
   holding_period_days: number;
   calculated_at: string;
   equity: TradeEquity;
+}
+
+// Learning loop (lessons) types
+export type ThesisOutcome = 'played_out' | 'partial' | 'wrong' | 'unclear';
+
+export interface Lesson {
+  id: number;
+  trade_id: number | null;
+  equity_id: number;
+  symbol: string;
+  thesis_outcome: ThesisOutcome;
+  lesson: string;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LessonCreate {
+  trade_id?: number;
+  equity_id?: number;
+  symbol?: string;
+  thesis_outcome: ThesisOutcome;
+  lesson: string;
+  tags?: string[];
+}
+
+export interface LessonUpdate {
+  thesis_outcome?: ThesisOutcome;
+  lesson?: string;
+  tags?: string[];
+  trade_id?: number | null;
 }
 
 export interface PositionSummary {

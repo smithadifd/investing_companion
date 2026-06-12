@@ -57,6 +57,7 @@ const mockTrade: Trade = {
   price: 150.0,
   fees: 0,
   executed_at: '2026-01-15T10:00:00Z',
+  position_closed: false,
   notes: null,
   watchlist_item_id: null,
   equity: { id: 1, symbol: 'AAPL', name: 'Apple Inc.', exchange: 'NASDAQ', sector: 'Technology' },

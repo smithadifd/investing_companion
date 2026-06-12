@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 QUOTE_CACHE_TTL = 300  # 5 minutes for quotes
 FUNDAMENTALS_CACHE_TTL = 3600  # 1 hour for fundamentals
 HISTORY_CACHE_TTL = 900  # 15 minutes for historical data
+EXTENDED_QUOTE_CACHE_TTL = 300  # 5 minutes for extended-hours quotes
 
 # Thread pool for running synchronous yfinance calls
 # Limited to 4 workers to avoid overwhelming Yahoo Finance
@@ -105,6 +106,65 @@ def normalize_symbol(symbol: str) -> str:
         return f"{s}=X"
 
     return symbol
+
+
+def _parse_extended_quote(info: dict) -> Optional[dict]:
+    """Parse an extended-hours quote from a Yahoo ticker info dict.
+
+    Returns {price, change_percent, session} where session is
+    'pre' | 'regular' | 'post' | 'closed' and change_percent is measured
+    against the prior regular-session close.
+
+    The session comes from Yahoo's marketState, never the local clock. When
+    Yahoo reports an extended session but has no extended price for the symbol
+    (illiquid ticker, pre-open before any trades), the session degrades to
+    'closed' and the values are the last regular-session close/change — so a
+    caller can label the data honestly instead of presenting yesterday's move
+    as a pre-market move.
+    """
+    regular_price = _safe_decimal(info.get("regularMarketPrice"))
+    if regular_price is None:
+        return None
+
+    state = str(info.get("marketState") or "").upper()
+
+    def _result(price: Decimal, change_percent: Optional[Decimal], session: str) -> dict:
+        return {
+            "price": float(price),
+            "change_percent": float(change_percent) if change_percent is not None else 0.0,
+            "session": session,
+        }
+
+    if state == "PRE":
+        pre_price = _safe_decimal(info.get("preMarketPrice"))
+        if pre_price is not None:
+            pct = _safe_decimal(info.get("preMarketChangePercent"))
+            if pct is None and regular_price:
+                # During pre-market, regularMarketPrice is the prior close.
+                pct = (pre_price - regular_price) / regular_price * 100
+            return _result(pre_price, pct, "pre")
+    elif state == "POST":
+        post_price = _safe_decimal(info.get("postMarketPrice"))
+        if post_price is not None:
+            pct = _safe_decimal(info.get("postMarketChangePercent"))
+            if pct is None and regular_price:
+                # During post-market, regularMarketPrice is today's close.
+                pct = (post_price - regular_price) / regular_price * 100
+            return _result(post_price, pct, "post")
+    elif state == "REGULAR":
+        return _result(
+            regular_price,
+            _safe_decimal(info.get("regularMarketChangePercent")),
+            "regular",
+        )
+
+    # CLOSED, PREPRE, POSTPOST, unknown states, or an extended session with no
+    # extended data: fall back to the regular-session close, labeled honestly.
+    return _result(
+        regular_price,
+        _safe_decimal(info.get("regularMarketChangePercent")),
+        "closed",
+    )
 
 
 def _safe_decimal(value: Any) -> Optional[Decimal]:
@@ -185,6 +245,49 @@ class YahooFinanceProvider:
             logger.debug(f"Cached quote for {symbol} (TTL: {QUOTE_CACHE_TTL}s)")
         except Exception as e:
             logger.warning(f"Cache write error for {symbol}: {e}")
+
+        return quote
+
+    async def get_extended_quote(self, symbol: str) -> Optional[dict]:
+        """Fetch an extended-hours quote: {price, change_percent, session}.
+
+        session is 'pre' | 'regular' | 'post' | 'closed' (from Yahoo's
+        marketState); change_percent is vs the prior regular-session close.
+        Falls back to the last regular close with session 'closed' when no
+        extended data exists. Uses a 5-minute cache. Returns None when the
+        symbol can't be quoted at all.
+        """
+        cache_key = f"ext_quote:{symbol.upper()}"
+
+        try:
+            cached = await cache_service.get(cache_key)
+            if cached:
+                logger.debug(f"Cache hit for extended quote: {symbol}")
+                return cached
+        except Exception as e:
+            logger.warning(f"Cache read error for extended quote {symbol}: {e}")
+
+        yahoo_symbol = normalize_symbol(symbol)
+
+        def _fetch_info() -> Optional[dict]:
+            ticker = yf.Ticker(yahoo_symbol)
+            info = ticker.info
+            if not info or "regularMarketPrice" not in info:
+                return None
+            return info
+
+        info = await run_in_executor(_fetch_info)
+        if not info:
+            return None
+
+        quote = _parse_extended_quote(info)
+        if not quote:
+            return None
+
+        try:
+            await cache_service.set(cache_key, quote, EXTENDED_QUOTE_CACHE_TTL)
+        except Exception as e:
+            logger.warning(f"Cache write error for extended quote {symbol}: {e}")
 
         return quote
 

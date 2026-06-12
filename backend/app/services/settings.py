@@ -29,12 +29,14 @@ class SettingsService:
     EOD_NOTIFICATION_TIME = "EOD_NOTIFICATION_TIME"
     MORNING_NOTIFICATION_LAST_SENT = "MORNING_NOTIFICATION_LAST_SENT"
     EOD_NOTIFICATION_LAST_SENT = "EOD_NOTIFICATION_LAST_SENT"
+    SCHWAB_TOKEN = "SCHWAB_TOKEN"
 
     # Keys that should be encrypted
     ENCRYPTED_KEYS = {
         CLAUDE_API_KEY,
         ALPHA_VANTAGE_API_KEY,
         POLYGON_API_KEY,
+        SCHWAB_TOKEN,
     }
 
     def __init__(self, db: AsyncSession) -> None:
@@ -83,6 +85,34 @@ class SettingsService:
             except Exception:
                 return None
         return setting.value
+
+    async def get_setting_any_user(
+        self,
+        key: str,
+    ) -> tuple[Optional[uuid.UUID], Optional[str]]:
+        """Find a setting row regardless of user_id (single-user app).
+
+        Background tasks have no request user, so they resolve per-user
+        settings this way — same pattern as the Discord webhook lookup.
+        Returns (user_id, decrypted_value), or (None, None) if absent.
+        """
+        stmt = select(UserSetting).where(
+            UserSetting.key == key,
+            UserSetting.value.isnot(None),
+        )
+        result = await self.db.execute(stmt)
+        setting = result.scalars().first()
+
+        if not setting or setting.value is None:
+            return None, None
+
+        value = setting.value
+        if setting.is_encrypted:
+            try:
+                value = self._decrypt(value)
+            except Exception:
+                return setting.user_id, None
+        return setting.user_id, value
 
     async def set_setting(
         self,

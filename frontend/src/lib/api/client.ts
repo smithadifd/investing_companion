@@ -54,6 +54,8 @@ import type {
   RatioQuote,
   RatioUpdate,
   RegistrationStatus,
+  SchwabConnectResponse,
+  SchwabStatus,
   SessionInfo,
   TechnicalIndicators,
   TechnicalSummary,
@@ -354,6 +356,29 @@ class ApiClient {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
+  }
+
+  // ==================== Schwab Connection Methods ====================
+
+  /**
+   * Get Schwab connection status
+   */
+  async getSchwabStatus(): Promise<SchwabStatus> {
+    return this.fetch<SchwabStatus>('/schwab/status');
+  }
+
+  /**
+   * Start the Schwab OAuth flow; redirect the browser to the returned auth_url
+   */
+  async connectSchwab(): Promise<SchwabConnectResponse> {
+    return this.fetch<SchwabConnectResponse>('/schwab/connect', { method: 'POST' });
+  }
+
+  /**
+   * Disconnect Schwab (forgets the stored token)
+   */
+  async disconnectSchwab(): Promise<SchwabStatus> {
+    return this.fetch<SchwabStatus>('/schwab/disconnect', { method: 'DELETE' });
   }
 
   /**

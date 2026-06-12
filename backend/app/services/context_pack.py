@@ -28,6 +28,7 @@ from app.schemas.context_pack import (
     PackEvent,
     PackExposure,
     PackHandoff,
+    PackLesson,
     PackPosition,
     PackPlaybookTrigger,
     PackTradeSummary,
@@ -37,6 +38,7 @@ from app.schemas.context_pack import (
 from app.services.economic_event import EconomicEventService
 from app.services.entry_zones import build_zone_statuses, parse_zones
 from app.services.handoff import HandoffService
+from app.services.lesson import LessonService
 from app.services.trade import TradeService
 from app.services.trigger import TriggerService
 
@@ -63,6 +65,7 @@ class ContextPackService:
         self.event_service = EconomicEventService(db)
         self.handoff_service = HandoffService(db)
         self.trigger_service = TriggerService(db)
+        self.lesson_service = LessonService(db)
 
     async def build(self, user_id: UUID) -> ContextPack:
         portfolio = await self.trade_service.get_portfolio(user_id)
@@ -99,6 +102,16 @@ class ContextPackService:
             )
             for r in await self.handoff_service.recent(limit=5)
         ]
+        lessons = [
+            PackLesson(
+                symbol=les.symbol,
+                thesis_outcome=les.thesis_outcome.value,
+                lesson=les.lesson,
+                tags=les.tags,
+                recorded_at=les.created_at,
+            )
+            for les in await self.lesson_service.recent_lessons(user_id, limit=20)
+        ]
         playbook = [
             PackPlaybookTrigger(
                 name=t.name,
@@ -124,6 +137,7 @@ class ContextPackService:
             upcoming_events=events,
             triggers=playbook,
             recent_handoffs=handoffs,
+            lessons=lessons,
             trade_summary=PackTradeSummary(
                 total_trades=performance.metrics.total_trades,
                 win_rate=performance.metrics.win_rate,
@@ -412,6 +426,15 @@ def render_markdown(pack: ContextPack) -> str:
                 f"- {h.received_at.strftime('%m-%d')} [{h.source}] {h.summary} "
                 f"(applied {h.applied_count}, skipped {h.skipped_count}, "
                 f"flagged {h.flagged_count})"
+            )
+
+    if pack.lessons:
+        lines += ["", "## Lessons learned (newest first)"]
+        for les in pack.lessons:
+            tags = f" [{', '.join(les.tags)}]" if les.tags else ""
+            lines.append(
+                f"- {les.recorded_at.strftime('%m-%d')} {les.symbol} "
+                f"({les.thesis_outcome}){tags}: {les.lesson}"
             )
 
     ts = pack.trade_summary

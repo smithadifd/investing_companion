@@ -83,6 +83,7 @@ export function CreateTradeModal({
   };
 
   const handleClose = () => {
+    setCapture(null);
     setTradeType('buy');
     setEquitySymbol(prefillSymbol || '');
     setSearchQuery(prefillSymbol || '');
@@ -106,10 +107,7 @@ export function CreateTradeModal({
       <LessonCaptureModal
         symbol={capture.symbol}
         tradeId={capture.tradeId}
-        onClose={() => {
-          setCapture(null);
-          handleClose();
-        }}
+        onClose={handleClose}
       />
     );
   }

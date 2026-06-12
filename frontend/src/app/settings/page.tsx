@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import {
@@ -15,6 +15,7 @@ import {
   AlertCircle,
   Eye,
   EyeOff,
+  Link2,
   Palette,
   Sun,
   Moon,
@@ -28,6 +29,11 @@ import {
   useSessions,
   useLogoutAll,
 } from '@/lib/hooks/useAuth';
+import {
+  useSchwabStatus,
+  useConnectSchwab,
+  useDisconnectSchwab,
+} from '@/lib/hooks/useSchwab';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -46,6 +52,28 @@ export default function SettingsPage() {
   const [alphaVantageKey, setAlphaVantageKey] = useState('');
   const [polygonKey, setPolygonKey] = useState('');
   const [discordWebhook, setDiscordWebhook] = useState('');
+
+  // Schwab connection state
+  const { data: schwabStatus } = useSchwabStatus();
+  const connectSchwab = useConnectSchwab();
+  const disconnectSchwab = useDisconnectSchwab();
+  const [schwabBanner, setSchwabBanner] = useState<'connected' | 'error' | null>(null);
+
+  // Pick up the ?schwab=connected|error result of the OAuth redirect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get('schwab');
+    if (result === 'connected' || result === 'error') {
+      setSchwabBanner(result);
+      params.delete('schwab');
+      const query = params.toString();
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${query ? `?${query}` : ''}`
+      );
+    }
+  }, []);
 
   // Notification schedule state
   const [morningTime, setMorningTime] = useState('');
@@ -92,6 +120,16 @@ export default function SettingsPage() {
 
   const handleClearKey = async (key: string) => {
     await updateSettings.mutateAsync({ [key]: '' });
+  };
+
+  const handleConnectSchwab = async () => {
+    const { auth_url } = await connectSchwab.mutateAsync();
+    window.location.href = auth_url;
+  };
+
+  const handleDisconnectSchwab = async () => {
+    setSchwabBanner(null);
+    await disconnectSchwab.mutateAsync();
   };
 
   const handleChangePassword = async (e: React.FormEvent) => {
@@ -283,6 +321,85 @@ export default function SettingsPage() {
                   )}
                   Save API Keys
                 </button>
+
+                {/* Schwab connection */}
+                <div className="pt-6 border-t border-neutral-200 dark:border-neutral-700 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Link2 className="h-4 w-4 text-blue-500" />
+                    <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+                      Schwab (real-time quotes)
+                    </h3>
+                  </div>
+                  <p className="text-xs text-neutral-500">
+                    Optional. Connect a Schwab account for real-time and pre/post-market
+                    quotes in briefings. Without it, quotes use the free Yahoo Finance
+                    base. Schwab requires re-authorizing every 7 days.
+                  </p>
+
+                  {schwabBanner === 'connected' && (
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 text-sm">
+                      <Check className="h-4 w-4 shrink-0" />
+                      Schwab connected. Briefings now use real-time quotes.
+                    </div>
+                  )}
+                  {schwabBanner === 'error' && (
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm">
+                      <AlertCircle className="h-4 w-4 shrink-0" />
+                      Schwab connection failed. Please try again.
+                    </div>
+                  )}
+
+                  {!schwabStatus?.configured ? (
+                    <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                      Not configured on this server. Set{' '}
+                      <code className="text-xs">SCHWAB_APP_KEY</code>,{' '}
+                      <code className="text-xs">SCHWAB_APP_SECRET</code>, and{' '}
+                      <code className="text-xs">SCHWAB_CALLBACK_URL</code> to enable it.
+                    </p>
+                  ) : schwabStatus.connected ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                        <Check className="h-4 w-4" />
+                        Connected
+                        {schwabStatus.expires_in_days !== null && (
+                          <span className="text-neutral-500 dark:text-neutral-400">
+                            — re-authorize in {Math.max(1, Math.round(schwabStatus.expires_in_days))}{' '}
+                            day{Math.round(schwabStatus.expires_in_days) === 1 ? '' : 's'}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={handleDisconnectSchwab}
+                        disabled={disconnectSchwab.isPending}
+                        className="px-3 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
+                      >
+                        Disconnect
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {schwabStatus.needs_reconnect && (
+                        <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
+                          <AlertCircle className="h-4 w-4" />
+                          Connection expired — Schwab tokens last 7 days. Reconnect to
+                          resume real-time quotes.
+                        </div>
+                      )}
+                      <button
+                        onClick={handleConnectSchwab}
+                        disabled={connectSchwab.isPending}
+                        className="px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-400 text-white font-medium rounded-lg transition-colors flex items-center gap-2"
+                      >
+                        {connectSchwab.isPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Link2 className="h-4 w-4" />
+                        )}
+                        {schwabStatus.needs_reconnect ? 'Reconnect Schwab' : 'Connect Schwab'}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

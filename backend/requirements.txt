@@ -41,6 +41,7 @@ yfinance>=0.2.36
 pandas>=2.2.0
 numpy>=1.26.0
 ta>=0.11.0  # Technical analysis library
+schwab-py>=1.5.1  # Opt-in real-time/all-session quotes (OAuth)
 
 # ===========================================
 # HTTP Client

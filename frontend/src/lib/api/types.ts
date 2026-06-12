@@ -709,6 +709,19 @@ export interface AppSettingsUpdate {
   eod_notification_time?: string;
 }
 
+// Schwab connection (opt-in real-time quotes)
+export interface SchwabStatus {
+  configured: boolean;
+  connected: boolean;
+  needs_reconnect: boolean;
+  token_age_days: number | null;
+  expires_in_days: number | null;
+}
+
+export interface SchwabConnectResponse {
+  auth_url: string;
+}
+
 // Account types (multi-account positions)
 export interface Account {
   id: number;

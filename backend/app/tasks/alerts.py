@@ -88,6 +88,7 @@ def send_morning_pulse():
         from sqlalchemy import func, select
 
         from app.db.models.alert import Alert, AlertHistory
+        from app.services.data_providers import get_extended_quote_provider
         from app.services.data_providers.yahoo import YahooFinanceProvider
         from app.services.economic_event import EconomicEventService
         from app.services.extended_movers import collect_extended_movers
@@ -184,9 +185,16 @@ def send_morning_pulse():
                 if not wl:
                     continue
                 watchlist_symbols.extend(item.equity.symbol for item in wl.items)
-            premarket_movers, movers_session = await collect_extended_movers(
-                watchlist_symbols, yahoo, target_session="pre"
-            )
+            # Schwab (real-time, all-session) when connected, else Yahoo
+            extended_provider = await get_extended_quote_provider(session)
+            try:
+                premarket_movers, movers_session = await collect_extended_movers(
+                    watchlist_symbols, extended_provider, target_session="pre"
+                )
+            finally:
+                provider_close = getattr(extended_provider, "aclose", None)
+                if provider_close:
+                    await provider_close()
 
             # --- Alert stats ---
             active_count = await session.scalar(
@@ -252,6 +260,7 @@ def send_eod_wrap():
 
         from app.db.models.alert import Alert, AlertHistory
         from app.schemas.economic_event import EventFilters
+        from app.services.data_providers import get_extended_quote_provider
         from app.services.data_providers.yahoo import YahooFinanceProvider
         from app.services.economic_event import EconomicEventService
         from app.services.extended_movers import collect_extended_movers, dedupe_movers
@@ -324,9 +333,16 @@ def send_eod_wrap():
             # so the fallback is dropped instead of relabeled.
             postmarket_movers: list[dict] = []
             try:
-                movers, post_session = await collect_extended_movers(
-                    watchlist_symbols, yahoo, target_session="post"
-                )
+                # Schwab (real-time, all-session) when connected, else Yahoo
+                extended_provider = await get_extended_quote_provider(session)
+                try:
+                    movers, post_session = await collect_extended_movers(
+                        watchlist_symbols, extended_provider, target_session="post"
+                    )
+                finally:
+                    provider_close = getattr(extended_provider, "aclose", None)
+                    if provider_close:
+                        await provider_close()
                 if post_session == "post":
                     postmarket_movers = movers
             except Exception as e:

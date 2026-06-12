@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { X, Loader2, Zap } from 'lucide-react';
 import { useCreateTrade } from '@/lib/hooks/useTrade';
+import { LessonCaptureModal } from '@/components/trade/LessonCaptureModal';
 import { Modal } from '@/components/ui/Modal';
 import type { TradeType, TradeCreate } from '@/lib/api/types';
 
@@ -21,6 +22,9 @@ export function QuickTradeModal({
 }: QuickTradeModalProps) {
   const [quantity, setQuantity] = useState('');
   const [price, setPrice] = useState(suggestedPrice?.toFixed(2) || '');
+  // Set when the logged trade closed the position - swaps to the optional
+  // lesson-capture step instead of closing
+  const [captureTradeId, setCaptureTradeId] = useState<number | null>(null);
 
   const createTrade = useCreateTrade();
 
@@ -46,8 +50,12 @@ export function QuickTradeModal({
     };
 
     try {
-      await createTrade.mutateAsync(data);
-      onClose();
+      const trade = await createTrade.mutateAsync(data);
+      if (trade.position_closed) {
+        setCaptureTradeId(trade.id);
+      } else {
+        onClose();
+      }
     } catch (error) {
       console.error('Failed to create trade:', error);
     }
@@ -55,6 +63,16 @@ export function QuickTradeModal({
 
   const totalValue = quantity && price ? parseFloat(quantity) * parseFloat(price) : 0;
   const isBuy = tradeType === 'buy';
+
+  if (captureTradeId !== null) {
+    return (
+      <LessonCaptureModal
+        symbol={symbol.toUpperCase()}
+        tradeId={captureTradeId}
+        onClose={onClose}
+      />
+    );
+  }
 
   const headerContent = (
     <div className={`flex items-center justify-between p-4 border-b border-neutral-200 dark:border-neutral-700 ${

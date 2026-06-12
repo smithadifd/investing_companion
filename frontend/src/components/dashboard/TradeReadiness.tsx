@@ -8,6 +8,7 @@ import {
   ChevronRight,
   ClipboardList,
   Crosshair,
+  GraduationCap,
 } from 'lucide-react';
 import { useTradeReadiness } from '@/lib/hooks/useDashboard';
 import type { TradeReadinessItem } from '@/lib/api/types';
@@ -36,6 +37,21 @@ const TIER_CHIPS: Record<string, string> = {
   yellow: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400',
   orange: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
   red: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+};
+
+// Thesis-outcome labels + colors for resurfaced lessons
+const OUTCOME_LABELS: Record<string, string> = {
+  played_out: 'thesis played out',
+  partial: 'partially played out',
+  wrong: 'thesis wrong',
+  unclear: 'outcome unclear',
+};
+
+const OUTCOME_COLORS: Record<string, string> = {
+  played_out: 'text-emerald-600 dark:text-emerald-400',
+  partial: 'text-amber-600 dark:text-amber-400',
+  wrong: 'text-red-600 dark:text-red-400',
+  unclear: 'text-neutral-500 dark:text-neutral-400',
 };
 
 function PositionContext({ item }: { item: TradeReadinessItem }) {
@@ -132,6 +148,32 @@ function ReadinessRow({ item }: { item: TradeReadinessItem }) {
           </span>
         )}
       </div>
+
+      {/* Lessons from similar past setups */}
+      {item.lessons.length > 0 && (
+        <div className="mt-1.5 ml-9 space-y-1">
+          {item.lessons.map((lesson) => (
+            <div
+              key={lesson.id}
+              className="flex items-start gap-1.5 text-xs text-neutral-600 dark:text-neutral-300"
+            >
+              <GraduationCap className="h-3 w-3 mt-0.5 flex-shrink-0 text-blue-500" />
+              <span>
+                <span className="font-medium">{lesson.symbol}</span>{' '}
+                <span
+                  className={
+                    OUTCOME_COLORS[lesson.thesis_outcome] ??
+                    'text-neutral-500 dark:text-neutral-400'
+                  }
+                >
+                  ({OUTCOME_LABELS[lesson.thesis_outcome] ?? lesson.thesis_outcome})
+                </span>{' '}
+                {lesson.lesson}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-# Handoff Loop Schema (v1.3)
+# Handoff Loop Schema (v1.4)
 
 The handoff loop connects an external AI advisor (e.g. a Claude project) to the app in both
 directions. This document is the contract; give it to the advisor verbatim.
@@ -15,7 +15,7 @@ advisor --(handoff block)--> executor (Claude Code) --(API calls)--> IC
 `GET /api/v1/export/context-pack` (auth required). `?format=markdown` renders for pasting
 into a conversation; the default JSON is for tooling.
 
-Top-level fields (`schema_version: "1.3"`):
+Top-level fields (`schema_version: "1.4"`):
 
 | Field | Contents |
 |-------|----------|
@@ -28,6 +28,7 @@ Top-level fields (`schema_version: "1.3"`):
 | `upcoming_events` | Next 14 days of earnings/macro/custom events with `days_away` |
 | `triggers` | The trigger playbook: pre-committed "if X then I do Y" standing orders with `tier`, lifecycle `status` (active/executed/retired), and live `signal` (armed/approaching/hit/unwatched, derived from linked alerts). Advisors can propose new triggers via handoff (`ADD_TRIGGER` with name, rule, action, tier, linked alert names) |
 | `recent_handoffs` | Execution receipts for the last 5 handoff blocks (see below) |
+| `lessons` | The learning loop's journal: the 20 most recent lessons captured at trade close, each `{symbol, thesis_outcome, lesson, tags, recorded_at}` with `thesis_outcome`: `played_out` / `partial` / `wrong` / `unclear`. Weigh these when advising on similar setups (same symbol, same theme, or shared tags). Lessons are written via `POST /api/v1/lessons` (`ADD_LESSON` handoff actions are allowed: trade_id or symbol + thesis_outcome + lesson + tags) |
 | `trade_summary` | Trade count, win rate, profit factor, realized/unrealized P&L |
 | `unsupported_features` | **Never emit handoff actions requiring anything listed here.** Shrinks as features ship |
 
@@ -76,3 +77,4 @@ fields); a major bump may rename or remove. Changes are recorded here.
 | 1.1 | Added `recent_handoffs` + the receipts endpoint |
 | 1.2 | Added `triggers` (the trigger playbook) + `/api/v1/triggers` CRUD |
 | 1.3 | `watchlist_targets` includes items with `entry_zones` + per-tier zone status; `entry_zone` alert condition; `tiered_entry_zones` removed from `unsupported_features` |
+| 1.4 | Added `lessons` (learning-loop journal) + `/api/v1/lessons` CRUD; trade create responses gain `position_closed` |

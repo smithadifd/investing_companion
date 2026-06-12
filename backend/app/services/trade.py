@@ -133,7 +133,15 @@ class TradeService:
         result = await self.db.execute(stmt)
         trade = result.scalar_one()
 
-        return self._trade_to_response(trade)
+        response = self._trade_to_response(trade)
+        # A closing trade that brings the net position to exactly zero is a
+        # "position closed" event - the lesson-capture prompt keys off this.
+        if trade.is_closing:
+            positions = await self._calculate_positions(
+                user_id, equity_id=equity.id, with_quotes=False
+            )
+            response.position_closed = bool(positions) and positions[0].quantity == 0
+        return response
 
     async def update_trade(
         self, trade_id: int, user_id: UUID, data: TradeUpdate

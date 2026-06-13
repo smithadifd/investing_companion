@@ -66,8 +66,15 @@ services:
       - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}
       - FINNHUB_API_KEY=${FINNHUB_API_KEY:-}
       - REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-true}
+      # Advisor outbox: leave CONTEXT_PACK_OUTBOX_DIR empty to disable the feature.
+      # Set it to /app/outbox (the mount below) to enable publishing; a host-side
+      # rclone job then syncs CONTEXT_PACK_OUTBOX_HOST_DIR up to Google Drive.
+      - CONTEXT_PACK_OUTBOX_DIR=${CONTEXT_PACK_OUTBOX_DIR:-}
+      - CONTEXT_PACK_REFERENCE_DIR=${CONTEXT_PACK_REFERENCE_DIR:-}
     ports:
       - "8000:8000"
+    volumes:
+      - ${CONTEXT_PACK_OUTBOX_HOST_DIR:-./data/claude-outbox}:/app/outbox
     depends_on:
       db:
         condition: service_healthy
@@ -91,6 +98,11 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - ENVIRONMENT=production
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      # The daily advisor drop runs here, so the worker needs the same outbox.
+      - CONTEXT_PACK_OUTBOX_DIR=${CONTEXT_PACK_OUTBOX_DIR:-}
+      - CONTEXT_PACK_REFERENCE_DIR=${CONTEXT_PACK_REFERENCE_DIR:-}
+    volumes:
+      - ${CONTEXT_PACK_OUTBOX_HOST_DIR:-./data/claude-outbox}:/app/outbox
     command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info", "--concurrency=2"]
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]

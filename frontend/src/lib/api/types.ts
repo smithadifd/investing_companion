@@ -1076,3 +1076,18 @@ export interface EventFilters {
   importance?: EventImportance;
   include_past?: boolean;
 }
+
+// ==================== Advisor context pack outbox ====================
+
+export interface OutboxStatus {
+  configured: boolean;
+  dir: string | null;
+  last_published_at: string | null;
+  last_file: string | null;
+}
+
+export interface OutboxPublishResult {
+  latest_path: string;
+  history_path: string;
+  generated_at: string;
+}

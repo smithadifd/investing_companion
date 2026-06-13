@@ -131,6 +131,17 @@ class Settings(BaseSettings):
     # AI (fallback, users provide their own)
     CLAUDE_API_KEY: str = ""
 
+    # Context pack outbox (advisor bridge). When set, the app can publish the
+    # context pack to this directory; a host-side rclone job syncs it to a
+    # private Google Drive folder the claude.ai "IC Advisor" Project reads. The
+    # app never holds Google credentials. Empty = feature disabled.
+    CONTEXT_PACK_OUTBOX_DIR: str = ""
+    CONTEXT_PACK_HISTORY_RETENTION_DAYS: int = 30
+    # Optional source dir for the advisor contract docs (handoff-schema.md,
+    # advisor-actions.md). When set, they are copied into <outbox>/reference/ on
+    # publish so the Drive folder carries the contract beside latest.md.
+    CONTEXT_PACK_REFERENCE_DIR: str = ""
+
     # Cache TTLs (seconds)
     QUOTE_CACHE_TTL: int = 900  # 15 minutes
     FUNDAMENTALS_CACHE_TTL: int = 86400  # 24 hours

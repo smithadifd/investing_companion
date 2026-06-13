@@ -134,6 +134,13 @@ services:
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
       # Auth settings
       - REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-false}
+      # Advisor outbox: leave CONTEXT_PACK_OUTBOX_DIR empty to disable. Set it to
+      # /app/outbox (the mount below) to enable; a host-side rclone job then syncs
+      # CONTEXT_PACK_OUTBOX_HOST_DIR up to the private advisor Google Drive folder.
+      - CONTEXT_PACK_OUTBOX_DIR=${CONTEXT_PACK_OUTBOX_DIR:-}
+      - CONTEXT_PACK_REFERENCE_DIR=${CONTEXT_PACK_REFERENCE_DIR:-}
+    volumes:
+      - ${CONTEXT_PACK_OUTBOX_HOST_DIR:-./data/claude-outbox}:/app/outbox
     depends_on:
       db:
         condition: service_healthy
@@ -176,6 +183,11 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - ENVIRONMENT=production
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      # The daily advisor drop runs here, so the worker needs the same outbox.
+      - CONTEXT_PACK_OUTBOX_DIR=${CONTEXT_PACK_OUTBOX_DIR:-}
+      - CONTEXT_PACK_REFERENCE_DIR=${CONTEXT_PACK_REFERENCE_DIR:-}
+    volumes:
+      - ${CONTEXT_PACK_OUTBOX_HOST_DIR:-./data/claude-outbox}:/app/outbox
     command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=warning", "--concurrency=2"]
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]

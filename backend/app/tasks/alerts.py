@@ -518,6 +518,10 @@ def check_notification_schedule():
             if current_hhmm == eod_time and eod_last != today_str:
                 logger.info(f"Firing EOD wrap at {current_hhmm} ET")
                 send_eod_wrap.delay()
+                # Daily advisor drop: publish the context pack to the outbox.
+                # No-op unless an outbox is configured; shares the EOD window's
+                # weekend-skip + once-per-day dedup.
+                celery_app.send_task("export.publish_context_pack")
                 await svc.set_setting(svc.EOD_NOTIFICATION_LAST_SENT, today_str)
                 sent.append("eod")
 

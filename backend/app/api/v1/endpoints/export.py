@@ -10,9 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependencies import get_current_user, require_not_demo
 from app.db.models.user import User
 from app.db.session import get_db
+from app.schemas.common import DataResponse
 from app.schemas.context_pack import ContextPack
 from app.schemas.handoff import HandoffReceiptCreate, HandoffReceiptResponse
+from app.schemas.outbox import OutboxPublishResult, OutboxStatusResponse
 from app.services.context_pack import ContextPackService, render_markdown
+from app.services.context_pack_outbox import ContextPackOutboxService
 from app.services.handoff import HandoffService
 
 logger = logging.getLogger(__name__)
@@ -47,6 +50,56 @@ async def get_context_pack(
             render_markdown(pack), media_type="text/markdown; charset=utf-8"
         )
     return pack
+
+
+def get_outbox_service(
+    db: AsyncSession = Depends(get_db),
+) -> ContextPackOutboxService:
+    return ContextPackOutboxService(db)
+
+
+@router.get("/outbox-status", response_model=DataResponse[OutboxStatusResponse])
+async def get_outbox_status(
+    current_user: User = Depends(get_current_user),
+) -> DataResponse[OutboxStatusResponse]:
+    """Report whether an outbox is configured and when it was last published.
+
+    Lets the UI show or disable the publish action without trying it first.
+    """
+    s = ContextPackOutboxService.status()
+    return DataResponse(
+        data=OutboxStatusResponse(
+            configured=s.configured,
+            dir=s.dir,
+            last_published_at=s.last_published_at,
+            last_file=s.last_file,
+        )
+    )
+
+
+@router.post(
+    "/context-pack/publish",
+    response_model=DataResponse[OutboxPublishResult],
+    status_code=status.HTTP_201_CREATED,
+)
+async def publish_context_pack(
+    _demo_guard: None = Depends(require_not_demo),
+    current_user: User = Depends(get_current_user),
+    service: ContextPackOutboxService = Depends(get_outbox_service),
+) -> DataResponse[OutboxPublishResult]:
+    """Write the current context pack to the outbox directory.
+
+    A host-side rclone job syncs the outbox to the advisor's Drive folder; the
+    app only writes plain files. Returns 409 if no outbox is configured.
+    """
+    result = await service.publish(current_user.id)
+    return DataResponse(
+        data=OutboxPublishResult(
+            latest_path=result.latest_path,
+            history_path=result.history_path,
+            generated_at=result.generated_at,
+        )
+    )
 
 
 def get_handoff_service(db: AsyncSession = Depends(get_db)) -> HandoffService:

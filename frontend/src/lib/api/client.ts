@@ -40,6 +40,8 @@ import type {
   NeedsAttentionResponse,
   TradeReadinessResponse,
   NotificationStatus,
+  OutboxPublishResult,
+  OutboxStatus,
   PaginatedMeta,
   PasswordChange,
   PerformanceReport,
@@ -546,6 +548,58 @@ class ApiClient {
       throw new ApiError('Failed to export watchlist', 'EXPORT_ERROR', response.status);
     }
     return response.json();
+  }
+
+  // ==================== Advisor context pack ====================
+
+  /**
+   * Fetch the advisor context pack as markdown, for copy/download.
+   * Returns text (not JSON), so it bypasses the JSON envelope wrapper.
+   */
+  async getContextPackMarkdown(): Promise<string> {
+    const doFetch = () => {
+      const headers: Record<string, string> = {};
+      if (this.accessToken) {
+        headers['Authorization'] = `Bearer ${this.accessToken}`;
+      }
+      return fetch(`${API_BASE}/export/context-pack?format=markdown`, {
+        headers,
+      });
+    };
+
+    let response = await doFetch();
+    // Mirror this.fetch()'s 401 -> refresh -> retry so an expired access token
+    // doesn't fail a button click on a long-open Settings page.
+    if (response.status === 401 && this.refreshToken) {
+      const refreshed = await this.refreshAccessToken();
+      if (refreshed) {
+        response = await doFetch();
+      }
+    }
+    if (!response.ok) {
+      throw new ApiError(
+        'Failed to fetch context pack',
+        'EXPORT_ERROR',
+        response.status
+      );
+    }
+    return response.text();
+  }
+
+  /**
+   * Publish the context pack to the server-side outbox (advisor Drive folder).
+   */
+  async publishContextPack(): Promise<OutboxPublishResult> {
+    return this.fetch<OutboxPublishResult>('/export/context-pack/publish', {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Whether the server has an outbox configured, and the last publish time.
+   */
+  async getOutboxStatus(): Promise<OutboxStatus> {
+    return this.fetch<OutboxStatus>('/export/outbox-status');
   }
 
   /**

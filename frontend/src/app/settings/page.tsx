@@ -20,7 +20,12 @@ import {
   Sun,
   Moon,
   Monitor,
+  Bot,
+  Copy,
+  Download,
+  UploadCloud,
 } from 'lucide-react';
+import { DEMO_MODE } from '@/lib/demo';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import {
   useAppSettings,
@@ -34,6 +39,11 @@ import {
   useConnectSchwab,
   useDisconnectSchwab,
 } from '@/lib/hooks/useSchwab';
+import {
+  useContextPackMarkdown,
+  usePublishContextPack,
+  useOutboxStatus,
+} from '@/lib/hooks/useExport';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -45,7 +55,14 @@ export default function SettingsPage() {
   const logoutAllMutation = useLogoutAll();
   const { theme, setTheme } = useTheme();
 
-  const [activeTab, setActiveTab] = useState<'api-keys' | 'notifications' | 'appearance' | 'account' | 'sessions'>('api-keys');
+  const [activeTab, setActiveTab] = useState<'api-keys' | 'notifications' | 'appearance' | 'account' | 'sessions' | 'advisor'>('api-keys');
+
+  // Advisor context pack state
+  const contextPackMarkdown = useContextPackMarkdown();
+  const publishContextPack = usePublishContextPack();
+  const { data: outboxStatus } = useOutboxStatus();
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const [publishMsg, setPublishMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   // API keys state
   const [claudeKey, setClaudeKey] = useState('');
@@ -170,9 +187,55 @@ export default function SettingsPage() {
     router.push('/login');
   };
 
+  const handleCopyContextPack = async () => {
+    try {
+      const markdown = await contextPackMarkdown.mutateAsync();
+      await navigator.clipboard.writeText(markdown);
+      setCopyState('copied');
+      setTimeout(() => setCopyState('idle'), 2000);
+    } catch {
+      setCopyState('error');
+      setTimeout(() => setCopyState('idle'), 3000);
+    }
+  };
+
+  const handleDownloadContextPack = async () => {
+    try {
+      const markdown = await contextPackMarkdown.mutateAsync();
+      const blob = new Blob([markdown], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'ic-context-pack.md';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      setCopyState('error');
+      setTimeout(() => setCopyState('idle'), 3000);
+    }
+  };
+
+  const handlePublishContextPack = async () => {
+    setPublishMsg(null);
+    try {
+      const result = await publishContextPack.mutateAsync();
+      const when = new Date(result.generated_at).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      setPublishMsg({ ok: true, text: `Published latest.md at ${when}.` });
+    } catch (e) {
+      const text = e instanceof Error ? e.message : 'Publish failed.';
+      setPublishMsg({ ok: false, text });
+    }
+  };
+
   const tabs = [
     { id: 'api-keys', label: 'API Keys', icon: Key },
     { id: 'notifications', label: 'Notifications', icon: Bell },
+    { id: 'advisor', label: 'Advisor', icon: Bot },
     { id: 'appearance', label: 'Appearance', icon: Palette },
     { id: 'account', label: 'Account', icon: User },
     { id: 'sessions', label: 'Sessions', icon: Shield },
@@ -738,6 +801,132 @@ export default function SettingsPage() {
                     Sign out all sessions
                   </button>
                 </div>
+              </div>
+            )}
+
+            {activeTab === 'advisor' && (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-1">
+                    Advisor context
+                  </h2>
+                  <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                    Grab the context pack to triage in your Claude advisor project,
+                    or publish it to the advisor folder.
+                  </p>
+                </div>
+
+                {/* Grab the pack */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Bot className="h-4 w-4 text-blue-500" />
+                    <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+                      Context pack
+                    </h3>
+                  </div>
+                  <p className="text-xs text-neutral-500">
+                    A versioned snapshot of your alerts, watchlist targets, entry
+                    zones, upcoming events, and trigger playbook (plus positions if
+                    you log trades). Paste it into your IC Advisor project to triage.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={handleCopyContextPack}
+                      disabled={contextPackMarkdown.isPending}
+                      className="px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-400 text-white font-medium rounded-lg transition-colors flex items-center gap-2"
+                    >
+                      {contextPackMarkdown.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Copy className="h-4 w-4" />
+                      )}
+                      Copy context pack
+                    </button>
+                    <button
+                      onClick={handleDownloadContextPack}
+                      disabled={contextPackMarkdown.isPending}
+                      className="px-4 py-2 border border-neutral-300 dark:border-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 font-medium rounded-lg transition-colors flex items-center gap-2"
+                    >
+                      <Download className="h-4 w-4" />
+                      Download .md
+                    </button>
+                    {copyState === 'copied' && (
+                      <span className="text-sm text-green-600 dark:text-green-400">
+                        Copied!
+                      </span>
+                    )}
+                    {copyState === 'error' && (
+                      <span className="text-sm text-red-600 dark:text-red-400">
+                        Couldn&apos;t copy — try Download.
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Publish to advisor folder */}
+                {!DEMO_MODE && (
+                  <div className="pt-6 border-t border-neutral-200 dark:border-neutral-700 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <UploadCloud className="h-4 w-4 text-blue-500" />
+                      <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+                        Publish to advisor folder
+                      </h3>
+                    </div>
+                    <p className="text-xs text-neutral-500">
+                      Writes the pack to the server outbox a sync job pushes to your
+                      private advisor Drive folder, so the project can read the
+                      latest state without pasting.
+                    </p>
+
+                    {!outboxStatus?.configured ? (
+                      <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                        Not configured on this server. Set{' '}
+                        <code className="text-xs">CONTEXT_PACK_OUTBOX_DIR</code> to
+                        enable it.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {outboxStatus.last_published_at && (
+                          <p className="text-xs text-neutral-500">
+                            Last published{' '}
+                            {new Date(
+                              outboxStatus.last_published_at
+                            ).toLocaleString()}
+                            .
+                          </p>
+                        )}
+                        <button
+                          onClick={handlePublishContextPack}
+                          disabled={publishContextPack.isPending}
+                          className="px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-400 text-white font-medium rounded-lg transition-colors flex items-center gap-2"
+                        >
+                          {publishContextPack.isPending ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <UploadCloud className="h-4 w-4" />
+                          )}
+                          Publish to advisor folder
+                        </button>
+                        {publishMsg && (
+                          <div
+                            className={`flex items-center gap-2 text-sm ${
+                              publishMsg.ok
+                                ? 'text-green-600 dark:text-green-400'
+                                : 'text-red-600 dark:text-red-400'
+                            }`}
+                          >
+                            {publishMsg.ok ? (
+                              <Check className="h-4 w-4 shrink-0" />
+                            ) : (
+                              <AlertCircle className="h-4 w-4 shrink-0" />
+                            )}
+                            {publishMsg.text}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>

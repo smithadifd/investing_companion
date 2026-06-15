@@ -3,8 +3,10 @@
 from datetime import datetime, timedelta, timezone
 
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.alert import Alert
 from app.schemas.context_pack import SCHEMA_VERSION
 from app.schemas.trigger import TriggerCreate, TriggerSignal, TriggerUpdate
 from app.services.context_pack import ContextPackService
@@ -83,6 +85,45 @@ class TestLifecycle:
         assert rearmed.status.value == "active"
         assert rearmed.executed_at is None
 
+    async def test_retire_is_terminal(self, db: AsyncSession):
+        """Retire sets RETIRED, hides from the default list, and blocks rearm."""
+        service = TriggerService(db)
+        trigger = await _make_trigger(db, [])
+
+        retired = await service.retire_trigger(trigger.id)
+        assert retired.status.value == "retired"
+
+        # Excluded from the default list, visible with include_retired
+        assert all(t.id != trigger.id for t in await service.list_triggers())
+        assert any(
+            t.id == trigger.id
+            for t in await service.list_triggers(include_retired=True)
+        )
+
+        # Terminal: cannot be rearmed back to active
+        try:
+            await service.rearm_trigger(trigger.id)
+            raise AssertionError("expected ValueError rearming a retired trigger")
+        except ValueError as e:
+            assert "retired" in str(e).lower()
+
+    async def test_retire_leaves_linked_alerts_intact(self, db: AsyncSession):
+        """Retiring a trigger does not delete or silence its linked alerts."""
+        equity = await create_test_equity(db, symbol="TRG6")
+        alert = await create_test_alert(
+            db, equity, threshold_value=100.0, last_checked_value=50.0
+        )
+        trigger = await _make_trigger(db, [alert.id])
+
+        retired = await TriggerService(db).retire_trigger(trigger.id)
+        assert retired.status.value == "retired"
+
+        found = (
+            await db.execute(select(Alert).where(Alert.id == alert.id))
+        ).scalar_one_or_none()
+        assert found is not None
+        assert found.is_active is True
+
     async def test_unknown_alert_ids_rejected(self, db: AsyncSession):
         service = TriggerService(db)
         try:
@@ -150,6 +191,36 @@ class TestTriggerEndpoints:
 
         deleted = await authed_client.delete(f"/api/v1/triggers/{trigger_id}")
         assert deleted.status_code == 204
+
+    async def test_retire_then_rearm_returns_422(
+        self, authed_client: AsyncClient
+    ):
+        created = await authed_client.post("/api/v1/triggers", json={
+            "name": "LNG Roth swing stop",
+            "rule": "LNG breaks the $224.50 manual stop",
+            "action": "Execute the stop; log the trade",
+        })
+        trigger_id = created.json()["data"]["id"]
+
+        retired = await authed_client.post(f"/api/v1/triggers/{trigger_id}/retire")
+        assert retired.status_code == 200
+        assert retired.json()["data"]["status"] == "retired"
+
+        # Default list hides it; include_retired surfaces it
+        default = await authed_client.get("/api/v1/triggers")
+        assert all(t["id"] != trigger_id for t in default.json()["data"])
+        with_retired = await authed_client.get(
+            "/api/v1/triggers", params={"include_retired": True}
+        )
+        assert any(t["id"] == trigger_id for t in with_retired.json()["data"])
+
+        # Terminal: rearm is rejected
+        rearmed = await authed_client.post(f"/api/v1/triggers/{trigger_id}/rearm")
+        assert rearmed.status_code == 422
+
+    async def test_retire_unknown_returns_404(self, authed_client: AsyncClient):
+        response = await authed_client.post("/api/v1/triggers/999999/retire")
+        assert response.status_code == 404
 
     async def test_unknown_alert_id_returns_422(self, authed_client: AsyncClient):
         response = await authed_client.post("/api/v1/triggers", json={

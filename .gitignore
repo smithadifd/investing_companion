@@ -105,6 +105,7 @@ backups/
 # Claude Code local config
 # ===========================================
 .claude/
+CLAUDE.local.md
 
 # ===========================================
 # Local-only docs (session notes, plans)

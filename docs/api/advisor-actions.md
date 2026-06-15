@@ -123,9 +123,22 @@ Fields in **bold** are required.
 | Action | Fields |
 |--------|--------|
 | `ADD_TRIGGER` | **`name`**, **`rule`** ("if X"), **`action`** ("then I do Y"), `tier`, linked alert **names** |
+| `UPDATE_TRIGGER` | target = trigger **name**; any of `rule`, `action`, `tier`, a new `name`, linked alert **names**. Editing `rule` or `action` — the decision itself — is **⚠️ approval required**; a cosmetic `name`/`tier` change is not |
 
 Triggers are pre-committed decisions, not automation — they record *what you'll do* when a level
 hits, and the pack reports each one's live `signal` (armed/approaching/hit) from its linked alerts.
+
+`UPDATE_TRIGGER` edits a standing order in place — use it when a trigger's prose goes stale (e.g. an
+add ladder gets re-leveled) rather than retiring and re-adding. Notes:
+
+- Target by trigger **name**; the executor owns name→ID. Trigger names aren't unique, so an
+  ambiguous or missing name comes back `flagged`, not guessed.
+- Editing `rule`/`action` is gated. The executor reads the current trigger and **only treats it as
+  approved when the `⚠️` mark is present and the change actually touches `rule`/`action`** — an
+  unmarked prose edit is `skipped`, same as any unmarked-but-risky action.
+- Renaming or rewriting prose leaves the trigger's linked alerts untouched. Re-point links only by
+  passing new linked alert **names** — and do so when a linked alert is being *removed* this session
+  (the join cascades on alert delete, silently dropping the link).
 
 ### Lessons (learning loop)
 
@@ -150,3 +163,13 @@ The executor posts a receipt (`applied` / `skipped` / `flagged` per action) that
 next context pack's `recent_handoffs`. The advisor reads that to learn what actually happened —
 no need to ask. If actions come back `skipped`/`flagged` repeatedly, the cause is usually a missed
 approval mark, an `unsupported_features` collision, or a known bug (#48 / #49) above.
+
+## Write-vocabulary changelog
+
+Write-side action additions are tracked here, **separate** from the context pack's `schema_version`
+in [`handoff-schema.md`](./handoff-schema.md) — that version covers only the read-side pack. A pure
+write-vocabulary change (a new action that adds no pack field) does **not** move the pack version.
+
+| Date | Change |
+|------|--------|
+| 2026-06-15 | Added `UPDATE_TRIGGER` — edit a standing order in place (`rule` / `action` / `tier` / `name` / linked alerts); `rule`/`action` edits are approval-gated. Maps to the existing trigger update path; no read-side pack field added, so pack `schema_version` stays 1.5. |

@@ -139,13 +139,36 @@ class TriggerService:
         return await self.get_trigger(trigger_id)
 
     async def rearm_trigger(self, trigger_id: int) -> Optional[TriggerResponse]:
-        """Return an executed/retired trigger to active."""
+        """Return an executed trigger to active.
+
+        RETIRED is terminal: a retired trigger is closed history and cannot be
+        rearmed - re-create it via ADD_TRIGGER instead. Raises ValueError so the
+        caller surfaces a 422 rather than silently resurrecting a closed order.
+        """
         trigger = await self._get(trigger_id)
         if not trigger:
             return None
+        if trigger.status == TriggerLifecycle.RETIRED.value:
+            raise ValueError("Cannot rearm a retired trigger; re-create it instead")
         trigger.status = TriggerLifecycle.ACTIVE.value
         trigger.executed_at = None
         trigger.execution_note = None
+        await self.db.commit()
+        return await self.get_trigger(trigger_id)
+
+    async def retire_trigger(self, trigger_id: int) -> Optional[TriggerResponse]:
+        """Retire a trigger - the standing order no longer applies.
+
+        Terminal lifecycle state. Retiring preserves the trigger as closed
+        history (and its linked-alert record) rather than deleting it, so
+        receipts and the playbook still resolve it. Linked alerts are left
+        untouched: retiring a trigger does NOT silence the alerts that watched
+        it - remove those with a separate REMOVE_ALERT if that's intended.
+        """
+        trigger = await self._get(trigger_id)
+        if not trigger:
+            return None
+        trigger.status = TriggerLifecycle.RETIRED.value
         await self.db.commit()
         return await self.get_trigger(trigger_id)
 

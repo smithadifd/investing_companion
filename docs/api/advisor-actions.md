@@ -124,6 +124,7 @@ Fields in **bold** are required.
 |--------|--------|
 | `ADD_TRIGGER` | **`name`**, **`rule`** ("if X"), **`action`** ("then I do Y"), `tier`, linked alert **names** |
 | `UPDATE_TRIGGER` | target = trigger **name**; any of `rule`, `action`, `tier`, a new `name`, linked alert **names**. Editing `rule` or `action` — the decision itself — is **⚠️ approval required**; a cosmetic `name`/`tier` change is not |
+| `RETIRE_TRIGGER` | target = trigger **name**. **⚠️ approval required** (a standing order is playbook-linked, same as `REMOVE_ALERT` on a live trigger). Trigger-only — never cascades to alerts |
 
 Triggers are pre-committed decisions, not automation — they record *what you'll do* when a level
 hits, and the pack reports each one's live `signal` (armed/approaching/hit) from its linked alerts.
@@ -139,6 +140,19 @@ add ladder gets re-leveled) rather than retiring and re-adding. Notes:
 - Renaming or rewriting prose leaves the trigger's linked alerts untouched. Re-point links only by
   passing new linked alert **names** — and do so when a linked alert is being *removed* this session
   (the join cascades on alert delete, silently dropping the link).
+
+`RETIRE_TRIGGER` closes a standing order that no longer applies (a thesis broke, a swing closed). It
+is **terminal** — a retired trigger is history, not paused; to bring an order back, `ADD_TRIGGER` a
+fresh one. Notes:
+
+- **The trigger↔alert relationship is not symmetric, in either direction.** `REMOVE_ALERT` does *not*
+  retire a linked trigger — the join cascades, the alert vanishes, but the trigger survives watching
+  nothing (`signal: unwatched`). So when you remove the last alert behind a standing order, **pair it
+  with a separate `RETIRE_TRIGGER`** in the same block. Conversely, `RETIRE_TRIGGER` does *not* silence
+  the trigger's linked alerts — they keep firing on their own; remove or deactivate them with their own
+  `REMOVE_ALERT`/`MODIFY_ALERT` if that's the intent.
+- Retire when the order is dead; `UPDATE_TRIGGER` when it's only stale (re-leveled, renamed). Don't
+  retire-and-re-add to make an edit.
 
 ### Lessons (learning loop)
 
@@ -173,3 +187,4 @@ write-vocabulary change (a new action that adds no pack field) does **not** move
 | Date | Change |
 |------|--------|
 | 2026-06-15 | Added `UPDATE_TRIGGER` — edit a standing order in place (`rule` / `action` / `tier` / `name` / linked alerts); `rule`/`action` edits are approval-gated. Maps to the existing trigger update path; no read-side pack field added, so pack `schema_version` stays 1.5. |
+| 2026-06-15 | Added `RETIRE_TRIGGER` — terminal close of a standing order (approval-gated, trigger-only). Backed by a new `POST /triggers/{id}/retire` endpoint; `retired` was already a pack lifecycle value (since 1.2), so pack `schema_version` stays 1.5. |

@@ -114,7 +114,27 @@ async def rearm_trigger(
     current_user: User = Depends(get_current_user),
     service: TriggerService = Depends(get_trigger_service),
 ) -> DataResponse[TriggerResponse]:
-    trigger = await service.rearm_trigger(trigger_id)
+    try:
+        trigger = await service.rearm_trigger(trigger_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    if not trigger:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trigger not found")
+    return DataResponse(data=trigger)
+
+
+@router.post("/{trigger_id}/retire", response_model=DataResponse[TriggerResponse])
+async def retire_trigger(
+    trigger_id: int,
+    _demo_guard: None = Depends(require_not_demo),
+    current_user: User = Depends(get_current_user),
+    service: TriggerService = Depends(get_trigger_service),
+) -> DataResponse[TriggerResponse]:
+    """Retire a standing order - terminal; keeps it as closed history.
+
+    Trigger-only: does not touch linked alerts. Remove those separately.
+    """
+    trigger = await service.retire_trigger(trigger_id)
     if not trigger:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trigger not found")
     return DataResponse(data=trigger)

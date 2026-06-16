@@ -9,6 +9,8 @@ Responses stream back token by token rather than arriving all at once. The panel
 
 For the rationale behind these design choices — user-provided keys, SSE transport, why there's no response caching — see the [AI integration design decisions](/design-decisions/ai-integration/) page. The SSE sequence is also mapped in [data flow, Flow 3](/architecture/data-flow/).
 
+This panel is per-equity Q&A. For an external Claude project that reasons over your whole portfolio and proposes changes the app can apply, see [AI advisor (handoff loop)](/features/ai-advisor/).
+
 ## Analysis types
 
 The backend defines four `AnalysisType` values: `equity`, `ratio`, `watchlist`, and `general`. Only `equity` is wired to the UI panel today — the panel appears on the equity detail page under the AI tab. The `ratio`, `watchlist`, and `general` types exist in the API but are not currently surfaced in the frontend.

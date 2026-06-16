@@ -38,6 +38,7 @@ export default defineConfig({
 						{ label: 'Watchlists', slug: 'features/watchlists' },
 						{ label: 'Market overview & ratios', slug: 'features/market-overview' },
 						{ label: 'AI analysis', slug: 'features/ai-analysis' },
+						{ label: 'AI advisor (handoff loop)', slug: 'features/ai-advisor' },
 						{ label: 'Alerts', slug: 'features/alerts' },
 						{ label: 'Trade tracker', slug: 'features/trade-tracker' },
 						{ label: 'Calendar & events', slug: 'features/calendar' },

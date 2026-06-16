@@ -104,6 +104,32 @@ cd backend && alembic revision --autogenerate -m "description"
 
 ---
 
+## Cross-cutting concern: keep the advisor contract in sync
+
+The external AI advisor reads/writes through a versioned contract. When a change touches what
+the app **exports** or the actions the executor **supports**, update the contract in the **same
+PR** — it's not a follow-up. Two common triggers:
+
+- **Feature add / change** — a new context-pack field, a new endpoint the advisor can drive, a
+  new/changed action, field, or enum value.
+- **Modifying the underlying system** — renaming a field, changing a response shape, deprecating
+  an action, or shipping a fix that removes a known limitation.
+
+What to update (single source of truth — the starter kit only points at these):
+
+| Change | Update | Notes |
+|--------|--------|-------|
+| Context pack adds/renames a field | `docs/api/handoff-schema.md` | Bump `schema_version` per its MAJOR.MINOR rule + add a changelog row. The constant lives in `backend/app/schemas/context_pack.py` |
+| New / changed / removed action, field, or enum | `docs/api/advisor-actions.md` | Add a write-vocabulary changelog row. A pure write-vocab change does **not** bump the pack `schema_version` |
+| A feature ships that removes a limitation | `UNSUPPORTED_FEATURES` in `backend/app/services/context_pack.py` | This list is the **live authority** on capability — shrink it; never hardcode bug lists in the contract docs |
+
+The fill-in-the-blanks **`docs/advisor-starter-kit/`** points at the two `docs/api/*` contracts,
+so ordinary feature work needs **no** kit edits — it stays current automatically. Only touch the
+kit when the loop's *mechanics* change (e.g. the retrieval transport) or the kit's own structure
+changes.
+
+---
+
 ## Key Files Reference
 
 | File | Purpose |
@@ -111,6 +137,8 @@ cd backend && alembic revision --autogenerate -m "description"
 | `docs/ROADMAP.md` | Phased development plan |
 | `docs/architecture/OVERVIEW.md` | System architecture |
 | `docs/sessions/` | Session notes and history |
+| `docs/advisor-starter-kit/` | Fill-in-the-blanks kit to recreate the external AI advisor (handoff loop) |
+| `docs/api/handoff-schema.md` · `docs/api/advisor-actions.md` | The advisor read/write contract (single source of truth) |
 | `backend/app/core/config.py` | Environment configuration |
 | `backend/app/db/models/*.py` | Database models |
 | `frontend/src/lib/api/client.ts` | API client |

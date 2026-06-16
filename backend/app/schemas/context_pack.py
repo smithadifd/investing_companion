@@ -22,7 +22,7 @@ SCHEMA_VERSION = "1.6"
 # change doesn't force a read-side pack bump. MINOR = additive action/field/enum;
 # MAJOR = rename/removal. Emitted in the pack so an advisor can detect when its
 # uploaded advisor-actions.md is behind the deployed vocabulary.
-ADVISOR_ACTIONS_VERSION = "1.1"
+ADVISOR_ACTIONS_VERSION = "1.2"
 
 
 class PackPosition(BaseModel):

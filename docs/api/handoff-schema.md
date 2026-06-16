@@ -1,4 +1,4 @@
-# Handoff Loop Schema (v1.5)
+# Handoff Loop Schema (v1.6)
 
 The handoff loop connects an external AI advisor (e.g. a Claude project) to the app in both
 directions. This document is the contract; give it to the advisor verbatim.
@@ -15,7 +15,7 @@ advisor --(handoff block)--> executor (Claude Code) --(API calls)--> IC
 `GET /api/v1/export/context-pack` (auth required). `?format=markdown` renders for pasting
 into a conversation; the default JSON is for tooling.
 
-Top-level fields (`schema_version: "1.5"`):
+Top-level fields (`schema_version: "1.6"`, `advisor_actions_version: "1.1"`):
 
 | Field | Contents |
 |-------|----------|
@@ -32,6 +32,7 @@ Top-level fields (`schema_version: "1.5"`):
 | `lessons` | The learning loop's journal: the 20 most recent lessons captured at trade close, each `{symbol, thesis_outcome, lesson, tags, recorded_at}` with `thesis_outcome`: `played_out` / `partial` / `wrong` / `unclear`. Weigh these when advising on similar setups (same symbol, same theme, or shared tags). Lessons are written via `POST /api/v1/lessons` (`ADD_LESSON` handoff actions are allowed: trade_id or symbol + thesis_outcome + lesson + tags) |
 | `trade_summary` | Trade count, win rate, profit factor, realized/unrealized P&L |
 | `unsupported_features` | **Never emit handoff actions requiring anything listed here.** Shrinks as features ship |
+| `advisor_actions_version` | The deployed **write-vocabulary** version (MAJOR.MINOR), stamped separately from `schema_version`. Compare it against the version in your uploaded `advisor-actions.md`; if the pack's is higher, your action vocabulary is behind — ask for a re-upload. Tolerate minor (additive) gaps. See `advisor-actions.md` for its changelog |
 
 Staleness: the pack makes no live market-data calls. Prices are at most one alert-check
 cycle (5 min) old; daily closes are from the last completed sync.
@@ -72,6 +73,11 @@ without being told.
 `schema_version` is MAJOR.MINOR. Minor bumps add fields (advisors must tolerate unknown
 fields); a major bump may rename or remove. Changes are recorded here.
 
+The pack carries **two** independent version stamps: `schema_version` (this table — the read-side
+pack shape) and `advisor_actions_version` (the write-side action vocabulary, changelog in
+`advisor-actions.md`). They move independently — a pure write-vocab change bumps only the latter
+and leaves `schema_version` untouched (e.g. the trigger-edit actions added under 1.5).
+
 | Version | Change |
 |---------|--------|
 | 1.0 | Initial pack: positions, exposures, alerts, triggers, targets, events, trade summary, unsupported_features |
@@ -80,3 +86,4 @@ fields); a major bump may rename or remove. Changes are recorded here.
 | 1.3 | `watchlist_targets` includes items with `entry_zones` + per-tier zone status; `entry_zone` alert condition; `tiered_entry_zones` removed from `unsupported_features` |
 | 1.4 | Added `lessons` (learning-loop journal) + `/api/v1/lessons` CRUD; trade create responses gain `position_closed` |
 | 1.5 | Multi-account: `positions` are per-account (each gains `account`); added `catalyst_exposures` (single-catalyst cluster rollups) + `catalyst_tags` on watchlist items + `/api/v1/accounts` CRUD + `trades.account_id`; removed `per_account_positions` from `unsupported_features` |
+| 1.6 | Added `advisor_actions_version` top-level field — the write-vocabulary version stamp, so an advisor can detect when its uploaded `advisor-actions.md` is behind the deployed action vocabulary |

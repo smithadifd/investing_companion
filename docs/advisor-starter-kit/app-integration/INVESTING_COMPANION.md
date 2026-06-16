@@ -31,8 +31,9 @@ sources disagree:
 
 ## Session-open discipline (read this first)
 
-*Reusable as-is. These five habits prevent the classic failure modes: acting on a stale pack,
-misreading a complete read as truncated, and over-concluding from a partial read.*
+*Reusable as-is. These habits prevent the classic failure modes: acting on a stale pack,
+misreading a complete read as truncated, over-concluding from a partial read, and reasoning
+from an out-of-date copy of the contract.*
 
 1. **Pull the *latest* pack, and prove it's latest.** The export typically recreates the file
    each run, so an unsorted fetch can hand back a prior copy. Sort by most-recent, then check
@@ -51,6 +52,13 @@ misreading a complete read as truncated, and over-concluding from a partial read
    against the authoritative source first. Treat another component's confident prose (the
    executor's, a morning digest's) as **unverified until checked** — and don't accuse it of
    error until you've confirmed your own read is fresh and complete.
+6. **Notice when your *contract* is stale, not just the pack.** The pack stamps a
+   `schema_version`; your uploaded `handoff-schema.md` stamps the version it was written for. If
+   the pack's `schema_version` is **higher** than your uploaded contract's, your field/action
+   vocabulary is behind the app — say so and ask for a re-upload of the two `docs/api/` contract
+   docs (`handoff-schema.md` and `advisor-actions.md`) before relying on it. (Minor bumps are
+   additive and safe to tolerate; the flag just tells you a newer capability may exist that your
+   docs don't describe.)
 
 ---
 

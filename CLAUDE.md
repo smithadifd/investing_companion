@@ -119,8 +119,8 @@ What to update (single source of truth — the starter kit only points at these)
 
 | Change | Update | Notes |
 |--------|--------|-------|
-| Context pack adds/renames a field | `docs/api/handoff-schema.md` | Bump `schema_version` per its MAJOR.MINOR rule + add a changelog row. The constant lives in `backend/app/schemas/context_pack.py` |
-| New / changed / removed action, field, or enum | `docs/api/advisor-actions.md` | Add a write-vocabulary changelog row. A pure write-vocab change does **not** bump the pack `schema_version` |
+| Context pack adds/renames a field | `docs/api/handoff-schema.md` | Bump `SCHEMA_VERSION` (in `backend/app/schemas/context_pack.py`) per its MAJOR.MINOR rule + add a changelog row, and update the `(vX.Y)` header stamp in the doc |
+| New / changed / removed action, field, or enum | `docs/api/advisor-actions.md` **and** `ADVISOR_ACTIONS_VERSION` (in `backend/app/schemas/context_pack.py`) | Bump `ADVISOR_ACTIONS_VERSION` (MINOR = additive, MAJOR = rename/removal) + add a row to the doc's write-vocab changelog + update its header stamp. This is the **write-side** version — independent of the pack `schema_version`, so a pure write-vocab change does **not** bump the pack. The pack emits both stamps so the advisor can detect a stale uploaded copy of either doc |
 | A feature ships that removes a limitation | `UNSUPPORTED_FEATURES` in `backend/app/services/context_pack.py` | This list is the **live authority** on capability — shrink it; never hardcode bug lists in the contract docs |
 
 The fill-in-the-blanks **`docs/advisor-starter-kit/`** points at the two `docs/api/*` contracts,

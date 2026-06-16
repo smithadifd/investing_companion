@@ -1,5 +1,11 @@
 # Advisor Action Vocabulary
 
+**`advisor_actions_version`: 1.1** — MAJOR.MINOR (MINOR = additive action/field/enum; MAJOR =
+rename/removal). The context pack emits this same value as `advisor_actions_version`, so an
+advisor can detect when *this* uploaded copy is behind: if the pack's version is higher than the
+one stamped here, ask for a re-upload before relying on the vocabulary (tolerate minor gaps).
+Changelog at the bottom of this file.
+
 Companion to [`handoff-schema.md`](./handoff-schema.md). That document describes the **context
 pack** the advisor *reads*; this one describes the **handoff block** the advisor *writes back*.
 Upload both to the advisor (the Claude.ai investing project) as project knowledge.
@@ -180,11 +186,14 @@ approval mark, an `unsupported_features` collision, or a known bug (#48 / #49) a
 
 ## Write-vocabulary changelog
 
-Write-side action additions are tracked here, **separate** from the context pack's `schema_version`
-in [`handoff-schema.md`](./handoff-schema.md) — that version covers only the read-side pack. A pure
-write-vocabulary change (a new action that adds no pack field) does **not** move the pack version.
+Write-side action additions are tracked here under `advisor_actions_version` (MAJOR.MINOR),
+**separate** from the context pack's `schema_version` in
+[`handoff-schema.md`](./handoff-schema.md) — that version covers only the read-side pack. A pure
+write-vocabulary change (a new action that adds no pack field) bumps **this** version and does
+**not** move the pack `schema_version`. The pack emits the current value as
+`advisor_actions_version` so the advisor can spot a stale uploaded copy.
 
-| Date | Change |
-|------|--------|
-| 2026-06-15 | Added `UPDATE_TRIGGER` — edit a standing order in place (`rule` / `action` / `tier` / `name` / linked alerts); `rule`/`action` edits are approval-gated. Maps to the existing trigger update path; no read-side pack field added, so pack `schema_version` stays 1.5. |
-| 2026-06-15 | Added `RETIRE_TRIGGER` — terminal close of a standing order (approval-gated, trigger-only). Backed by a new `POST /triggers/{id}/retire` endpoint; `retired` was already a pack lifecycle value (since 1.2), so pack `schema_version` stays 1.5. |
+| Version | Date | Change |
+|---------|------|--------|
+| 1.0 | (baseline) | Initial write vocabulary: alerts (`ADD_ALERT` / `MODIFY_ALERT` / `REMOVE_ALERT`), watchlist (`ADD_TO_WATCHLIST` / `UPDATE_WATCHLIST_ITEM` / `CREATE_WATCHLIST`), `ADD_RATIO`, `ADD_CALENDAR_EVENT`, `LOG_TRADE`, `ADD_TRIGGER`, `ADD_LESSON` |
+| 1.1 | 2026-06-15 | Added `UPDATE_TRIGGER` — edit a standing order in place (`rule` / `action` / `tier` / `name` / linked alerts); `rule`/`action` edits are approval-gated. And `RETIRE_TRIGGER` — terminal close of a standing order (approval-gated, trigger-only; `POST /triggers/{id}/retire`). Both are pure write-vocab (no read-side pack field added), so pack `schema_version` stayed 1.5 |

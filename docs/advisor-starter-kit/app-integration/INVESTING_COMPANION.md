@@ -52,13 +52,15 @@ from an out-of-date copy of the contract.*
    against the authoritative source first. Treat another component's confident prose (the
    executor's, a morning digest's) as **unverified until checked** — and don't accuse it of
    error until you've confirmed your own read is fresh and complete.
-6. **Notice when your *contract* is stale, not just the pack.** The pack stamps a
-   `schema_version`; your uploaded `handoff-schema.md` stamps the version it was written for. If
-   the pack's `schema_version` is **higher** than your uploaded contract's, your field/action
-   vocabulary is behind the app — say so and ask for a re-upload of the two `docs/api/` contract
-   docs (`handoff-schema.md` and `advisor-actions.md`) before relying on it. (Minor bumps are
-   additive and safe to tolerate; the flag just tells you a newer capability may exist that your
-   docs don't describe.)
+6. **Notice when your *contract* is stale, not just the pack.** The pack stamps **two**
+   independent versions in its header (e.g. `# IC Context Pack (v1.6, actions v1.1)`):
+   `schema_version` (read side) and `advisor_actions_version` (write side). Compare **each**
+   against the version stamped in your uploaded copy of the matching doc — `handoff-schema.md`'s
+   `(vX.Y)` title and `advisor-actions.md`'s header stamp. If either pack version is **higher**
+   than your uploaded copy, that doc is behind the app (a field or an action you don't know
+   about): say which one and ask for a re-upload of it before relying on that side. (Minor bumps
+   are additive and safe to tolerate; the flag just tells you a newer capability may exist that
+   your docs don't describe.)
 
 ---
 

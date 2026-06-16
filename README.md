@@ -75,6 +75,18 @@ Data flows through Celery background tasks that pull from Yahoo Finance and Alph
 - **Scheduled Tasks** -- Celery-powered background jobs for data refresh, alert checking, and daily summaries
 - **Authentication** -- Single-user auth with secure password hashing and session management
 
+## Recreate the AI advisor
+
+Beyond the in-app AI analysis, you can stand up an external **investing advisor** -- a Claude
+project tuned to your portfolio that reads a live context pack from this app and proposes
+changes back through a handoff loop. The [**Advisor Starter Kit**](docs/advisor-starter-kit/)
+is a fill-in-the-blanks scaffold for exactly that.
+
+Open the kit in Claude Code and say *"Walk me through `docs/advisor-starter-kit/ONBOARDING.md`"* --
+it interviews you and fills the templates. The optional app-integration layer wires the advisor
+to this app's read/write contract ([`docs/api/handoff-schema.md`](docs/api/handoff-schema.md) and
+[`docs/api/advisor-actions.md`](docs/api/advisor-actions.md)).
+
 ## Quick Start
 
 ### Docker (recommended)

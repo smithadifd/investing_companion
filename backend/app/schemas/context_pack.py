@@ -15,7 +15,14 @@ from pydantic import BaseModel, Field
 from app.schemas.exposure import CatalystCluster
 from app.schemas.watchlist import EntryZoneStatus
 
-SCHEMA_VERSION = "1.5"
+SCHEMA_VERSION = "1.6"
+
+# Write-side vocabulary version (the actions an advisor may emit, documented in
+# advisor-actions.md). Stamped separately from SCHEMA_VERSION so a pure write-vocab
+# change doesn't force a read-side pack bump. MINOR = additive action/field/enum;
+# MAJOR = rename/removal. Emitted in the pack so an advisor can detect when its
+# uploaded advisor-actions.md is behind the deployed vocabulary.
+ADVISOR_ACTIONS_VERSION = "1.1"
 
 
 class PackPosition(BaseModel):
@@ -163,6 +170,11 @@ class ContextPack(BaseModel):
     """The full versioned export."""
 
     schema_version: str = SCHEMA_VERSION
+    advisor_actions_version: str = Field(
+        ADVISOR_ACTIONS_VERSION,
+        description="Write-vocabulary version; compare against your uploaded "
+        "advisor-actions.md, same tolerate-minor logic as schema_version",
+    )
     generated_at: datetime
     positions: List[PackPosition]
     portfolio_value: Optional[Decimal] = None

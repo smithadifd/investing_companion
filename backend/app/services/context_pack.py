@@ -372,7 +372,7 @@ def render_markdown(pack: ContextPack) -> str:
         return f"{v:+.1f}%" if v is not None else "?"
 
     lines: List[str] = [
-        f"# IC Context Pack (v{pack.schema_version})",
+        f"# IC Context Pack (v{pack.schema_version}, actions v{pack.advisor_actions_version})",
         f"Generated: {pack.generated_at.strftime('%Y-%m-%d %H:%M UTC')}",
         "",
         f"## Portfolio - {money(pack.portfolio_value)} "

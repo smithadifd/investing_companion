@@ -13,6 +13,7 @@ Live demo: [invest.smithadifd.com](https://invest.smithadifd.com) (log in as `de
 - **Watchlists** — group equities with notes, target prices, and a written thesis. Import and export as CSV or JSON.
 - **Market overview & ratios** — indices (S&P 500, NASDAQ, Dow), sector heatmap, top gainers and losers, and a ratios page preloaded with Gold/Silver, SPY/QQQ, Copper/Gold, TLT/IEF, and others.
 - **AI analysis** — bring your own Claude API key. The backend builds a prompt from the equity's fundamentals, price history, and your watchlist context, then streams the response back over SSE.
+- **AI advisor (optional)** — connect an external Claude project as a portfolio advisor through a two-way handoff loop: the app exports a context pack, the advisor proposes changes, and a reviewed executor applies them. See [AI advisor (handoff loop)](/features/ai-advisor/).
 - **Alerts** — price above, below, crosses a moving average, percent change, or a ratio threshold. Celery Beat checks them on a schedule and posts to a Discord webhook with a per-alert cooldown.
 - **Trade tracker** — log buys, sells, shorts, and covers. FIFO matching calculates realized P&L, and a separate view tracks unrealized P&L, win rate, profit factor, and best/worst trades. Includes a position sizer (fixed risk, Kelly, ATR-based).
 - **Calendar** — earnings dates, ex-dividend dates, and macro events (FOMC, CPI, NFP, GDP). Filterable to only your watchlist.

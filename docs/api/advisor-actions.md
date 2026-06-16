@@ -1,6 +1,6 @@
 # Advisor Action Vocabulary
 
-**`advisor_actions_version`: 1.1** — MAJOR.MINOR (MINOR = additive action/field/enum; MAJOR =
+**`advisor_actions_version`: 1.2** — MAJOR.MINOR (MINOR = additive action/field/enum; MAJOR =
 rename/removal). The context pack emits this same value as `advisor_actions_version`, so an
 advisor can detect when *this* uploaded copy is behind: if the pack's version is higher than the
 one stamped here, ask for a re-upload before relying on the vocabulary (tolerate minor gaps).
@@ -117,6 +117,22 @@ Fields in **bold** are required.
 | Action | Fields |
 |--------|--------|
 | `ADD_CALENDAR_EVENT` | **`event_type`** (`earnings` / `fomc` / `cpi` / `ppi` / `nfp` / `gdp` / `pce` / `custom`, among others), **`title`**, **`event_date`** (`YYYY-MM-DD`), `description`, `importance` (`low` / `medium` / `high`) |
+| `UPDATE_CALENDAR_EVENT` | target = event **title**; any of `title`, `event_date`, `event_type`, `description`, `importance` to change |
+| `REMOVE_CALENDAR_EVENT` | target = event **title** |
+
+`UPDATE_CALENDAR_EVENT` corrects an event in place — use it when a known event moves (e.g. an
+earnings date slips) rather than removing and re-adding. `REMOVE_CALENDAR_EVENT` deletes one that no
+longer applies. Neither needs approval (a calendar entry moves no money and holds no position).
+Notes:
+
+- **Target by event title; the executor owns title→ID.** Titles aren't guaranteed unique, so add
+  `event_date` to disambiguate a collision. On 0 or >1 match, the action comes back `flagged`, not
+  guessed.
+- **Custom (user-created) events only.** These verbs touch events you added via
+  `ADD_CALENDAR_EVENT`. Auto-fetched system events — earnings pulled from Yahoo, seeded macro
+  releases (FOMC/CPI/…) — are owned by the data source and can't be edited or deleted this way; an
+  attempt comes back `flagged`. To correct an auto-fetched earnings date, leave it for the next
+  data-source refresh.
 
 ### Trades
 
@@ -197,3 +213,4 @@ write-vocabulary change (a new action that adds no pack field) bumps **this** ve
 |---------|------|--------|
 | 1.0 | (baseline) | Initial write vocabulary: alerts (`ADD_ALERT` / `MODIFY_ALERT` / `REMOVE_ALERT`), watchlist (`ADD_TO_WATCHLIST` / `UPDATE_WATCHLIST_ITEM` / `CREATE_WATCHLIST`), `ADD_RATIO`, `ADD_CALENDAR_EVENT`, `LOG_TRADE`, `ADD_TRIGGER`, `ADD_LESSON` |
 | 1.1 | 2026-06-15 | Added `UPDATE_TRIGGER` — edit a standing order in place (`rule` / `action` / `tier` / `name` / linked alerts); `rule`/`action` edits are approval-gated. And `RETIRE_TRIGGER` — terminal close of a standing order (approval-gated, trigger-only; `POST /triggers/{id}/retire`). Both are pure write-vocab (no read-side pack field added), so pack `schema_version` stayed 1.5 |
+| 1.2 | 2026-06-16 | Added `UPDATE_CALENDAR_EVENT` — correct a calendar event in place (`title` / `event_date` / `event_type` / `description` / `importance`; `PUT /events/{id}`) — and `REMOVE_CALENDAR_EVENT` — delete one (`DELETE /events/{id}`). Both target by event title (+ `event_date` to disambiguate), are benign (no approval), and operate on user-created custom events only — auto-fetched system events come back `flagged`. Pure write-vocab (no read-side pack field added), so pack `schema_version` stayed 1.6 |

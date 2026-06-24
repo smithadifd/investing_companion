@@ -10,6 +10,7 @@ from app.tasks.alerts import (
 )
 from app.tasks.price_history import sync_all_price_history
 from app.tasks.export import publish_context_pack
+from app.tasks.schwab import check_token_expiry
 
 __all__ = [
     "celery_app",
@@ -20,4 +21,5 @@ __all__ = [
     "send_eod_wrap",
     "sync_all_price_history",
     "publish_context_pack",
+    "check_token_expiry",
 ]

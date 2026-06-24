@@ -66,6 +66,12 @@ services:
       - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}
       - FINNHUB_API_KEY=${FINNHUB_API_KEY:-}
       - REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-true}
+      # Schwab OAuth (optional all-session quotes). FRONTEND_URL is also where the
+      # OAuth callback bounces the browser back to after a successful connect.
+      - SCHWAB_APP_KEY=${SCHWAB_APP_KEY:-}
+      - SCHWAB_APP_SECRET=${SCHWAB_APP_SECRET:-}
+      - SCHWAB_CALLBACK_URL=${SCHWAB_CALLBACK_URL:-}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
       # Advisor outbox: leave CONTEXT_PACK_OUTBOX_DIR empty to disable the feature.
       # Set it to /app/outbox (the mount below) to enable publishing; a host-side
       # rclone job then syncs CONTEXT_PACK_OUTBOX_HOST_DIR up to Google Drive.
@@ -98,6 +104,11 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - ENVIRONMENT=production
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      # Schwab token refresh happens in the worker too (briefing movers), so it
+      # needs the same credentials. No FRONTEND_URL — the worker never serves OAuth.
+      - SCHWAB_APP_KEY=${SCHWAB_APP_KEY:-}
+      - SCHWAB_APP_SECRET=${SCHWAB_APP_SECRET:-}
+      - SCHWAB_CALLBACK_URL=${SCHWAB_CALLBACK_URL:-}
       # The daily advisor drop runs here, so the worker needs the same outbox.
       - CONTEXT_PACK_OUTBOX_DIR=${CONTEXT_PACK_OUTBOX_DIR:-}
       - CONTEXT_PACK_REFERENCE_DIR=${CONTEXT_PACK_REFERENCE_DIR:-}

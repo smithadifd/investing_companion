@@ -1,0 +1,38 @@
+# Investing Companion — Local Configuration (DO NOT COMMIT)
+
+Copy this to `CLAUDE.local.md` and fill in. It holds per-machine, volatile, and operational
+details that don't belong in the committed AGENTS.md. Keep the session log to the last ~10 entries;
+when a lesson becomes durable, promote it to AGENTS.md § gotchas and delete the entry.
+
+## Owner
+
+Your Name (your-email@example.com)
+
+## Deployment
+
+<host + reverse proxy, ports, which compose file + env file, deploy script>
+- Frontend: port 3000 / API: port 8000
+- Compose file: `docker-compose.local.yml` with `.env.production`
+- Deploy: `./scripts/deploy-synology.sh`
+
+## Handoff Execution Reference
+
+Operational only — how to apply a pasted advisor handoff block against the prod API. Fill from your
+own setup; keep secrets (passwords, tokens) out of the committed example.
+
+- **Host / access**: how you reach the running API (e.g. SSH to the box, curl `localhost:8000`).
+- **Auth**: how you mint/obtain a bearer token (the repo has a mint-token flow — see CLAUDE.local.md).
+  All `/api/v1/*` endpoints need `Authorization: Bearer <token>`.
+- **Action → API mapping**: table of advisor action types → HTTP method + endpoint + key body fields
+  (`ADD_ALERT`, `MODIFY_ALERT`, `ADD_TO_WATCHLIST`, `ADD_RATIO`, `ADD_CALENDAR_EVENT`, `LOG_TRADE`,
+  `ADD_TRIGGER`, `RETIRE_TRIGGER`, …).
+- **Execution pattern**: authenticate → GET-to-resolve-IDs-by-name (match alert names by prefix, flag
+  on 0/>1 matches) → execute in dependency order → report IDs → POST an execution receipt to
+  `/api/v1/export/handoff-receipts` → clean up the token.
+- **Current watchlist IDs**: your own `id → name` table.
+- **Known bugs to avoid**: e.g. #48 percent alerts ignore `comparison_period`; #49 forex symbols don't
+  resolve in ratios (use ETF proxies). Mirror the live list in AGENTS.md § gotchas.
+
+## Session Log
+
+- YYYY-MM-DD — <what changed, what to pick up next>

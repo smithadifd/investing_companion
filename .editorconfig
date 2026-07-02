@@ -1,0 +1,29 @@
+# EditorConfig — https://editorconfig.org
+# Dual-stack: Python (backend, 4-space) + TypeScript/JS (frontend, 2-space).
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+# Python — PEP 8, 4-space
+[*.py]
+indent_size = 4
+
+# TypeScript / JavaScript / JSON / CSS — 2-space
+[*.{ts,tsx,js,jsx,mjs,cjs,json,css,scss}]
+indent_size = 2
+
+# Markup / config
+[*.{yml,yaml,toml}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+# Makefiles require real tabs
+[Makefile]
+indent_style = tab

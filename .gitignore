@@ -104,7 +104,10 @@ backups/
 # ===========================================
 # Claude Code local config
 # ===========================================
-.claude/
+.claude/*
+!.claude/workflows/
+.claude/workflows/*
+!.claude/workflows/audit-sweep.js
 CLAUDE.local.md
 
 # ===========================================

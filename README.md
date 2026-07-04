@@ -1,8 +1,17 @@
 # Investing Companion
 
+[![CI](https://github.com/smithadifd/investing_companion/actions/workflows/ci.yml/badge.svg)](https://github.com/smithadifd/investing_companion/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Self-hosted equity analysis dashboard with AI-powered insights, real-time alerts, and trade tracking.
 
-<!-- TODO: Add 3-4 screenshots (dashboard, equity detail, AI analysis, trade tracker) -->
+| Dashboard | Equity Detail |
+|-----------|---------------|
+| [![Dashboard](docs/screenshots/dashboard.png)](docs/screenshots/dashboard.png) | [![Equity Detail](docs/screenshots/equity-detail.png)](docs/screenshots/equity-detail.png) |
+| **AI Analysis** | **Trade Tracker** |
+| [![AI Analysis](docs/screenshots/ai-analysis.png)](docs/screenshots/ai-analysis.png) | [![Trade Tracker](docs/screenshots/trade-tracker.png)](docs/screenshots/trade-tracker.png) |
+
+<sub>Screenshots captured from the [live demo](https://invest.smithadifd.com) in demo mode.</sub>
 
 ## Why This Exists
 
@@ -82,6 +91,12 @@ project tuned to your portfolio that reads a live context pack from this app and
 changes back through a handoff loop. The [**Advisor Starter Kit**](docs/advisor-starter-kit/)
 is a fill-in-the-blanks scaffold for exactly that.
 
+> **In plain English:** the app exports a snapshot of your holdings, watchlists, and ratios;
+> you paste it to an AI assistant (e.g. [Claude Code](https://claude.ai/code), a terminal tool
+> that can read and act on files); it hands back a structured block of proposed trades and
+> alerts; you review it and the app applies the changes. The exact shape of that exchange is
+> the [handoff schema](docs/api/handoff-schema.md).
+
 Open the kit in Claude Code and say *"Walk me through `docs/advisor-starter-kit/ONBOARDING.md`"* --
 it interviews you and fills the templates. The optional app-integration layer wires the advisor
 to this app's read/write contract ([`docs/api/handoff-schema.md`](docs/api/handoff-schema.md) and
@@ -140,6 +155,14 @@ cd frontend && npm test
 | Yahoo Finance | Quotes, fundamentals, history | None (unofficial) |
 | Alpha Vantage | Technical indicators, forex | Free API key |
 | Claude API | AI-powered analysis | User-provided key |
+
+## Support This Project
+
+Investing Companion is free and self-hosted. If it saves you a subscription or you just want to
+help keep it maintained, you can chip in:
+
+- [Sponsor on GitHub](https://github.com/sponsors/smithadifd)
+- [Buy me a coffee on Ko-fi](https://ko-fi.com/smithadifd)
 
 ## License
 

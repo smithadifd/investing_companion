@@ -5,13 +5,30 @@
 
 Self-hosted equity analysis dashboard with AI-powered insights, real-time alerts, and trade tracking.
 
-| Dashboard | Equity Detail |
+| Dashboard | Equity detail |
 |-----------|---------------|
-| [![Dashboard](docs/screenshots/dashboard.png)](docs/screenshots/dashboard.png) | [![Equity Detail](docs/screenshots/equity-detail.png)](docs/screenshots/equity-detail.png) |
-| **AI Analysis** | **Trade Tracker** |
-| [![AI Analysis](docs/screenshots/ai-analysis.png)](docs/screenshots/ai-analysis.png) | [![Trade Tracker](docs/screenshots/trade-tracker.png)](docs/screenshots/trade-tracker.png) |
+| [![Dashboard](docs/screenshots/dashboard.png)](docs/screenshots/dashboard.png) | [![Equity detail](docs/screenshots/equity-detail.png)](docs/screenshots/equity-detail.png) |
+| **Market overview** | **Playbook** |
+| [![Market overview](docs/screenshots/market-overview.png)](docs/screenshots/market-overview.png) | [![Playbook](docs/screenshots/playbook.png)](docs/screenshots/playbook.png) |
 
-<sub>Screenshots captured from the [live demo](https://invest.smithadifd.com) in demo mode.</sub>
+<details>
+<summary>More screenshots</summary>
+
+| Market snapshot | Price chart | Fundamentals |
+|-----------------|-------------|--------------|
+| [![Dashboard market snapshot](docs/screenshots/dashboard-market-snapshot.png)](docs/screenshots/dashboard-market-snapshot.png) | [![Equity price chart](docs/screenshots/equity-price-chart.png)](docs/screenshots/equity-price-chart.png) | [![Equity fundamentals](docs/screenshots/equity-fundamentals.png)](docs/screenshots/equity-fundamentals.png) |
+
+| Ratios | News | Watchlist |
+|--------|------|-----------|
+| [![Financial ratios](docs/screenshots/ratios.png)](docs/screenshots/ratios.png) | [![News](docs/screenshots/news.png)](docs/screenshots/news.png) | [![Watchlist](docs/screenshots/watchlist.png)](docs/screenshots/watchlist.png) |
+
+| Alerts | Economic calendar | Advisor context packs |
+|--------|-------------------|-----------------------|
+| [![Alerts](docs/screenshots/alerts.png)](docs/screenshots/alerts.png) | [![Economic calendar](docs/screenshots/economic-calendar.png)](docs/screenshots/economic-calendar.png) | [![Settings — advisor context packs](docs/screenshots/settings-advisor-context.png)](docs/screenshots/settings-advisor-context.png) |
+
+</details>
+
+<sub>Screenshots from the <a href="https://invest.smithadifd.com">live demo</a> in demo mode.</sub>
 
 ## Why This Exists
 

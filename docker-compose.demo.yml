@@ -9,7 +9,7 @@ services:
   # Database
   # ===========================================
   db:
-    image: timescale/timescaledb:latest-pg15
+    image: timescale/timescaledb:2.25.0-pg15
     container_name: investing_demo_db
     environment:
       POSTGRES_USER: investing_demo
@@ -35,7 +35,7 @@ services:
   # Redis (Cache + Celery Broker)
   # ===========================================
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.7-alpine
     container_name: investing_demo_redis
     command: redis-server --appendonly yes --maxmemory 64mb --maxmemory-policy allkeys-lru
     volumes:

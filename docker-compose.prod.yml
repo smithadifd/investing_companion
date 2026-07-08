@@ -79,7 +79,7 @@ services:
   # Redis (Cache + Celery Broker)
   # ===========================================
   redis:
-    image: redis:7.4.8-alpine
+    image: redis:7.4.7-alpine
     container_name: investing_redis
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:

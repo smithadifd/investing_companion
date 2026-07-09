@@ -23,7 +23,7 @@ jobs:
 
     services:
       postgres:
-        image: timescale/timescaledb:latest-pg15
+        image: timescale/timescaledb:2.25.0-pg15
         env:
           POSTGRES_USER: test_user
           POSTGRES_PASSWORD: test_pass
@@ -37,7 +37,7 @@ jobs:
           --health-retries 5
 
       redis:
-        image: redis:7-alpine
+        image: redis:7.4.7-alpine
         ports:
           - 6379:6379
         options: >-

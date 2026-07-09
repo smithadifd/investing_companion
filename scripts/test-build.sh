@@ -68,15 +68,21 @@ else
     echo ""
 fi
 
-# Build Docker images (without running)
-echo "→ Building Docker images..."
-if [ -f "docker-compose.local.yml" ]; then
-    docker compose -f docker-compose.local.yml build
+# Build Docker images (without running) (if Docker is installed)
+if command -v docker &> /dev/null; then
+    echo "→ Building Docker images..."
+    if [ -f "docker-compose.local.yml" ]; then
+        docker compose -f docker-compose.local.yml build
+    else
+        docker compose -f docker-compose.prod.yml build
+    fi
+    echo "  ✓ Docker build OK"
+    echo ""
 else
-    docker compose -f docker-compose.prod.yml build
+    echo "→ Skipping Docker build (docker not installed)"
+    echo "  The Synology deploy rebuilds images itself; safe to skip here."
+    echo ""
 fi
-echo "  ✓ Docker build OK"
-echo ""
 
 echo "========================================="
 echo "✓ All build tests passed!"

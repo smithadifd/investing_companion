@@ -16,13 +16,5 @@ CLAUDE.local.md.example shows its shape.
   `npm run type-check` + `npm run lint` + `npm test` for frontend.
 - Don't run anything under `scripts/` (deploy/backup) or touch `docs/issues/017` as part of
   ordinary code work — those hit live hosts / track a deliberate blocked decision.
-
-## End-of-session workflow
-
-Public repo with branch protection — no direct push to main:
-
-1. Feature branch → Conventional Commits.
-2. `gh pr create`; wait for CI with `gh run watch <id> --exit-status`.
-3. Squash-merge (`gh pr merge --squash --delete-branch`), switch to main + pull.
-4. Deploy only when asked (`scripts/deploy-synology.sh`); apply pending migrations on prod.
-5. Trim the CLAUDE.local.md session log; promote any durable lesson into AGENTS.md § gotchas.
+- End-of-session ship steps (deploy script, Alembic-on-prod migrations) are deploy-specific
+  and live in the gitignored `CLAUDE.local.md`, not this committed shim.

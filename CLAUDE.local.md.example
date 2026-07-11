@@ -15,6 +15,14 @@ Your Name (your-email@example.com)
 - Compose file: `docker-compose.local.yml` with `.env.production`
 - Deploy: `./scripts/deploy-synology.sh`
 
+## End-of-session workflow
+
+The generic branch → PR → CI-green → squash-merge sequence is your global
+`~/.claude/CLAUDE.md` checklist (its `gh run watch` step waits for GitHub checks
+name-agnostically); keep only IC's deltas here, e.g.:
+- Deploy (only when asked): `./scripts/deploy-synology.sh`.
+- Migrations are Alembic **against prod** (`alembic upgrade head`) after deploy — not boot-time.
+
 ## Handoff Execution Reference
 
 Operational only — how to apply a pasted advisor handoff block against the prod API. Fill from your

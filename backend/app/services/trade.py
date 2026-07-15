@@ -30,6 +30,21 @@ from app.schemas.trade import (
 from app.services.equity import EquityService
 
 
+def _fee_per_share(trade: Trade) -> Decimal:
+    """Per-share commission for a trade.
+
+    Fees are stored per whole order (``trade.fees``), but a single open can be
+    closed across several closes (and one close can span several opens), so
+    realized P&L nets out only the *matched* fraction of each leg's fee. Spread
+    the fee evenly over the order's shares and let the caller multiply by the
+    matched quantity. Guards the degenerate zero-quantity trade (no valid trade
+    has one, but never divide by zero).
+    """
+    if not trade.quantity:
+        return Decimal("0")
+    return trade.fees / trade.quantity
+
+
 class TradeService:
     """Service for trade-related operations."""
 
@@ -433,26 +448,36 @@ class TradeService:
 
         # FIFO queues keyed by account_id (None = unassigned bucket) so a
         # close only matches opens in the same account.
-        # Each entry: (trade_id, remaining_quantity, price, executed_at).
-        long_queues: dict[Optional[int], List[Tuple[int, Decimal, Decimal, datetime]]] = {}
-        short_queues: dict[Optional[int], List[Tuple[int, Decimal, Decimal, datetime]]] = {}
+        # Each entry: (trade_id, remaining_quantity, price, executed_at,
+        # open_fee_per_share) - the per-share opening fee rides along so a close
+        # can net its matched share of it out of realized P&L.
+        long_queues: dict[Optional[int], List[Tuple[int, Decimal, Decimal, datetime, Decimal]]] = {}
+        short_queues: dict[Optional[int], List[Tuple[int, Decimal, Decimal, datetime, Decimal]]] = {}
 
         for trade in trades:
             acct = trade.account_id
             if trade.trade_type == TradeType.BUY:
                 # Opening long position
                 long_queues.setdefault(acct, []).append(
-                    (trade.id, trade.quantity, trade.price, trade.executed_at)
+                    (trade.id, trade.quantity, trade.price, trade.executed_at,
+                     _fee_per_share(trade))
                 )
             elif trade.trade_type == TradeType.SELL:
                 # Closing long position (FIFO within the account)
                 queue = long_queues.setdefault(acct, [])
                 remaining = trade.quantity
+                close_fee_ps = _fee_per_share(trade)
                 while remaining > 0 and queue:
-                    open_id, open_qty, open_price, open_date = queue[0]
+                    open_id, open_qty, open_price, open_date, open_fee_ps = queue[0]
                     matched = min(remaining, open_qty)
 
-                    pnl = matched * (trade.price - open_price)
+                    # Net realized P&L = gross price move less the matched share
+                    # of BOTH commissions (opening + closing). Fees belong in
+                    # realized P&L, not just cost basis - otherwise win-rate and
+                    # profit-factor are overstated.
+                    pnl = matched * (trade.price - open_price) - matched * (
+                        open_fee_ps + close_fee_ps
+                    )
                     holding_days = (trade.executed_at - open_date).days
 
                     self.db.add(
@@ -472,23 +497,31 @@ class TradeService:
                     if matched >= open_qty:
                         queue.pop(0)
                     else:
-                        queue[0] = (open_id, open_qty - matched, open_price, open_date)
+                        queue[0] = (
+                            open_id, open_qty - matched, open_price, open_date,
+                            open_fee_ps,
+                        )
 
             elif trade.trade_type == TradeType.SHORT:
                 # Opening short position
                 short_queues.setdefault(acct, []).append(
-                    (trade.id, trade.quantity, trade.price, trade.executed_at)
+                    (trade.id, trade.quantity, trade.price, trade.executed_at,
+                     _fee_per_share(trade))
                 )
             elif trade.trade_type == TradeType.COVER:
                 # Closing short position (FIFO within the account)
                 queue = short_queues.setdefault(acct, [])
                 remaining = trade.quantity
+                close_fee_ps = _fee_per_share(trade)
                 while remaining > 0 and queue:
-                    open_id, open_qty, open_price, open_date = queue[0]
+                    open_id, open_qty, open_price, open_date, open_fee_ps = queue[0]
                     matched = min(remaining, open_qty)
 
-                    # P&L for short: profit when price goes down
-                    pnl = matched * (open_price - trade.price)
+                    # P&L for short: profit when price goes down, less the
+                    # matched share of both commissions (see SELL branch).
+                    pnl = matched * (open_price - trade.price) - matched * (
+                        open_fee_ps + close_fee_ps
+                    )
                     holding_days = (trade.executed_at - open_date).days
 
                     self.db.add(
@@ -508,7 +541,10 @@ class TradeService:
                     if matched >= open_qty:
                         queue.pop(0)
                     else:
-                        queue[0] = (open_id, open_qty - matched, open_price, open_date)
+                        queue[0] = (
+                            open_id, open_qty - matched, open_price, open_date,
+                            open_fee_ps,
+                        )
 
         await self.db.commit()
 

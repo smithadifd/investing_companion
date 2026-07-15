@@ -547,8 +547,25 @@ class ApiClient {
    * Export a watchlist to JSON
    */
   async exportWatchlist(id: number): Promise<WatchlistExport> {
-    // eslint-disable-next-line no-restricted-syntax -- returns raw un-enveloped JSON, incompatible with this.fetch()'s data unwrap
-    const response = await fetch(`${API_BASE}/watchlists/${id}/export`);
+    // Raw un-enveloped JSON download, so it can't use this.fetch()'s data
+    // unwrap — but it still carries the bearer and mirrors the 401 -> refresh
+    // -> retry path (see getContextPackMarkdown).
+    const doFetch = () => {
+      const headers: Record<string, string> = {};
+      if (this.accessToken) {
+        headers['Authorization'] = `Bearer ${this.accessToken}`;
+      }
+      // eslint-disable-next-line no-restricted-syntax -- raw un-enveloped JSON body; carries bearer + 401-refresh inline
+      return fetch(`${API_BASE}/watchlists/${id}/export`, { headers });
+    };
+
+    let response = await doFetch();
+    if (response.status === 401 && this.refreshToken) {
+      const refreshed = await this.refreshAccessToken();
+      if (refreshed) {
+        response = await doFetch();
+      }
+    }
     if (!response.ok) {
       throw new ApiError('Failed to export watchlist', 'EXPORT_ERROR', response.status);
     }
@@ -767,14 +784,31 @@ class ApiClient {
   async *analyzeAIStream(
     request: AIAnalysisRequest
   ): AsyncGenerator<string, void, unknown> {
-    // eslint-disable-next-line no-restricted-syntax -- SSE stream: needs the raw ReadableStream body, not the JSON envelope
-    const response = await fetch(`${API_BASE}/ai/analyze/stream`, {
-      method: 'POST',
-      headers: {
+    // SSE stream: needs the raw ReadableStream body (not the JSON envelope),
+    // but still carries the bearer and mirrors the 401 -> refresh -> retry path.
+    // R8 scopes the AI endpoints to the user, so the bearer is required.
+    const doFetch = () => {
+      const headers: Record<string, string> = {
         'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(request),
-    });
+      };
+      if (this.accessToken) {
+        headers['Authorization'] = `Bearer ${this.accessToken}`;
+      }
+      // eslint-disable-next-line no-restricted-syntax -- SSE stream needs the raw ReadableStream body; carries bearer + 401-refresh inline
+      return fetch(`${API_BASE}/ai/analyze/stream`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(request),
+      });
+    };
+
+    let response = await doFetch();
+    if (response.status === 401 && this.refreshToken) {
+      const refreshed = await this.refreshAccessToken();
+      if (refreshed) {
+        response = await doFetch();
+      }
+    }
 
     if (!response.ok) {
       throw new ApiError('AI analysis failed', 'AI_ERROR', response.status);
@@ -1028,11 +1062,25 @@ class ApiClient {
     const queryString = queryParams.toString();
     const url = queryString ? `/trades?${queryString}` : '/trades';
 
-    // This endpoint returns data with paginated meta
-    // eslint-disable-next-line no-restricted-syntax -- needs the paginated meta envelope, not this.fetch()'s data-only unwrap
-    const response = await fetch(`${API_BASE}${url}`, {
-      headers: this.accessToken ? { Authorization: `Bearer ${this.accessToken}` } : {},
-    });
+    // This endpoint returns the paginated meta envelope, so it bypasses
+    // this.fetch()'s data-only unwrap — but still carries the bearer and
+    // mirrors the 401 -> refresh -> retry path.
+    const doFetch = () => {
+      const headers: Record<string, string> = {};
+      if (this.accessToken) {
+        headers['Authorization'] = `Bearer ${this.accessToken}`;
+      }
+      // eslint-disable-next-line no-restricted-syntax -- needs the paginated meta envelope, not this.fetch()'s data-only unwrap; carries bearer + 401-refresh inline
+      return fetch(`${API_BASE}${url}`, { headers });
+    };
+
+    let response = await doFetch();
+    if (response.status === 401 && this.refreshToken) {
+      const refreshed = await this.refreshAccessToken();
+      if (refreshed) {
+        response = await doFetch();
+      }
+    }
 
     if (!response.ok) {
       throw new ApiError('Failed to fetch trades', 'FETCH_ERROR', response.status);

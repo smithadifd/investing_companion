@@ -2,9 +2,6 @@
 
 import logging
 
-from sqlalchemy import select
-
-from app.db.models.user import User
 from app.db.session import AsyncSessionLocal
 from app.services.context_pack_outbox import ContextPackOutboxService
 from app.tasks.celery_app import celery_app
@@ -26,15 +23,12 @@ def publish_context_pack():
 
     async def _publish():
         async with AsyncSessionLocal() as session:
-            # Single-user install: the owner is the oldest active account.
-            user_id = await session.scalar(
-                select(User.id)
-                .where(User.is_active.is_(True))
-                .order_by(User.created_at)
-                .limit(1)
-            )
+            from app.services.settings import SettingsService
+
+            # Explicit install owner (replaces implicit oldest-active-user).
+            user_id = await SettingsService(session).get_owner_user_id()
             if user_id is None:
-                return {"skipped": "no_user"}
+                return {"skipped": "no_owner"}
             service = ContextPackOutboxService(session)
             result = await service.publish(user_id)
             return {"latest_path": result.latest_path}

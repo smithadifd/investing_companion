@@ -417,8 +417,11 @@ class TestZoneAlertProcessing:
 
 class TestZoneAlertCrud:
     async def test_create_resolves_equity_from_item(self, db: AsyncSession):
+        from tests.factories import create_test_user
+
         equity, item = await _zone_item(db, symbol="ZC1")
-        service = AlertService(db)
+        owner = await create_test_user(db, email="zone-owner-1@example.com")
+        service = AlertService(db, owner.id)
 
         created = await service.create_alert(
             AlertCreate(
@@ -434,7 +437,10 @@ class TestZoneAlertCrud:
         assert created.target.symbol == "ZC1"
 
     async def test_create_unknown_item_rejected(self, db: AsyncSession):
-        service = AlertService(db)
+        from tests.factories import create_test_user
+
+        owner = await create_test_user(db, email="zone-owner-2@example.com")
+        service = AlertService(db, owner.id)
         with pytest.raises(ValueError, match="not found"):
             await service.create_alert(
                 AlertCreate(

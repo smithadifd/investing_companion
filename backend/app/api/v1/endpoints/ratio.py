@@ -21,9 +21,12 @@ from app.services.ratio import RatioService
 router = APIRouter(prefix="/ratios", tags=["ratios"])
 
 
-def get_ratio_service(db: AsyncSession = Depends(get_db)) -> RatioService:
-    """Dependency to get ratio service instance."""
-    return RatioService(db)
+def get_ratio_service(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RatioService:
+    """Dependency to get a ratio service scoped to the authenticated user."""
+    return RatioService(db, current_user.id)
 
 
 @router.get("", response_model=DataResponse[List[RatioResponse]])

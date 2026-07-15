@@ -6,7 +6,8 @@ drift apart. format_needs_attention_lines() reproduces the pulse's historic
 plain-text lines from the structured items.
 """
 
-from typing import List
+from typing import List, Optional
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,12 +18,18 @@ TARGET_NEAR_THRESHOLD_PCT = 5
 NOTE_PREVIEW_CHARS = 90
 
 
-async def build_needs_attention(db: AsyncSession) -> List[NeedsAttentionItem]:
-    """Decisions first: recently-triggered alerts, approaching alerts, near targets."""
+async def build_needs_attention(
+    db: AsyncSession, user_id: Optional[UUID] = None
+) -> List[NeedsAttentionItem]:
+    """Decisions first: recently-triggered alerts, approaching alerts, near targets.
+
+    Scoped to ``user_id`` for the per-user dashboard; the background morning
+    pulse passes None (owner-only on a single-user install).
+    """
     cp = ContextPackService(db)
     items: List[NeedsAttentionItem] = []
 
-    for a in await cp.active_alerts():
+    for a in await cp.active_alerts(user_id):
         if a.status == "triggered_recently":
             stripped = a.notes.strip() if a.notes else ""
             note = stripped.splitlines()[0][:NOTE_PREVIEW_CHARS] if stripped else None
@@ -46,7 +53,7 @@ async def build_needs_attention(db: AsyncSession) -> List[NeedsAttentionItem]:
                 )
             )
 
-    for t in await cp.watchlist_targets():
+    for t in await cp.watchlist_targets(user_id):
         if t.percent_to_target is not None and abs(t.percent_to_target) <= TARGET_NEAR_THRESHOLD_PCT:
             items.append(
                 NeedsAttentionItem(

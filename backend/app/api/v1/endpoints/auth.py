@@ -3,6 +3,7 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -70,6 +71,19 @@ async def register(
         )
 
     user = await auth_service.create_user(user_data)
+
+    # The first registered account owns the install: promote it to admin and
+    # record the explicit owner pointer background tasks resolve against
+    # (replaces the old implicit "oldest active user" behavior).
+    user_count = await db.scalar(select(func.count(User.id)))
+    if user_count == 1:
+        from app.services.settings import SettingsService
+
+        user.is_admin = True
+        await db.flush()
+        await SettingsService(db).set_owner_user_id(user.id)
+        await db.refresh(user)
+
     user_response = UserResponse.model_validate(user)
     return DataResponse(data=user_response, meta=ResponseMeta.now())
 

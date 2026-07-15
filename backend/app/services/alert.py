@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Optional, Tuple
@@ -49,11 +50,26 @@ PERIOD_LOOKBACK = {
 class AlertService:
     """Service for alert-related operations."""
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(
+        self, db: AsyncSession, user_id: Optional[uuid.UUID] = None
+    ) -> None:
         self.db = db
+        self.user_id = user_id
         self.yahoo = YahooFinanceProvider()
         self.equity_service = EquityService(db)
         self.price_history_service = PriceHistoryService(db, provider=self.yahoo)
+
+    def _scope(self, stmt):
+        """Restrict an ``Alert`` query to the caller.
+
+        Alerts are strictly owned (``user_id`` is non-null after migration
+        20260715_001), so an unset ``user_id`` means the system/background
+        context — the Celery evaluator legitimately checks every user's alerts.
+        A set ``user_id`` restricts to that owner.
+        """
+        if self.user_id is None:
+            return stmt
+        return stmt.where(Alert.user_id == self.user_id)
 
     async def list_alerts(
         self,
@@ -62,7 +78,7 @@ class AlertService:
         ratio_id: Optional[int] = None,
     ) -> List[AlertResponse]:
         """List all alerts, optionally filtered."""
-        stmt = select(Alert)
+        stmt = self._scope(select(Alert))
 
         if active_only:
             stmt = stmt.where(Alert.is_active.is_(True))
@@ -81,7 +97,7 @@ class AlertService:
 
     async def get_alert(self, alert_id: int) -> Optional[AlertResponse]:
         """Get a single alert by ID."""
-        stmt = select(Alert).where(Alert.id == alert_id)
+        stmt = self._scope(select(Alert).where(Alert.id == alert_id))
         result = await self.db.execute(stmt)
         alert = result.scalar_one_or_none()
 
@@ -93,7 +109,7 @@ class AlertService:
         self, alert_id: int, history_limit: int = 10
     ) -> Optional[AlertWithHistoryResponse]:
         """Get an alert with its recent history."""
-        stmt = select(Alert).where(Alert.id == alert_id)
+        stmt = self._scope(select(Alert).where(Alert.id == alert_id))
         result = await self.db.execute(stmt)
         alert = result.scalar_one_or_none()
 
@@ -123,6 +139,9 @@ class AlertService:
 
     async def create_alert(self, data: AlertCreate) -> AlertResponse:
         """Create a new alert."""
+        if self.user_id is None:
+            raise ValueError("Cannot create an alert without an owner")
+
         # Resolve equity if symbol provided
         equity_id = None
         if data.equity_symbol:
@@ -146,6 +165,7 @@ class AlertService:
             equity_id = item.equity_id
 
         alert = Alert(
+            user_id=self.user_id,
             name=data.name,
             notes=data.notes,
             equity_id=equity_id,
@@ -169,7 +189,7 @@ class AlertService:
         self, alert_id: int, data: AlertUpdate
     ) -> Optional[AlertResponse]:
         """Update an alert."""
-        stmt = select(Alert).where(Alert.id == alert_id)
+        stmt = self._scope(select(Alert).where(Alert.id == alert_id))
         result = await self.db.execute(stmt)
         alert = result.scalar_one_or_none()
 
@@ -226,7 +246,7 @@ class AlertService:
 
     async def delete_alert(self, alert_id: int) -> bool:
         """Delete an alert."""
-        stmt = select(Alert).where(Alert.id == alert_id)
+        stmt = self._scope(select(Alert).where(Alert.id == alert_id))
         result = await self.db.execute(stmt)
         alert = result.scalar_one_or_none()
 
@@ -239,7 +259,7 @@ class AlertService:
 
     async def toggle_alert(self, alert_id: int) -> Optional[AlertResponse]:
         """Toggle an alert's active state."""
-        stmt = select(Alert).where(Alert.id == alert_id)
+        stmt = self._scope(select(Alert).where(Alert.id == alert_id))
         result = await self.db.execute(stmt)
         alert = result.scalar_one_or_none()
 
@@ -262,6 +282,10 @@ class AlertService:
             .order_by(AlertHistory.triggered_at.desc())
             .limit(limit)
         )
+        if self.user_id is not None:
+            stmt = stmt.join(Alert, AlertHistory.alert_id == Alert.id).where(
+                Alert.user_id == self.user_id
+            )
         result = await self.db.execute(stmt)
 
         return [AlertHistoryResponse.model_validate(h) for h in result.scalars().all()]
@@ -270,9 +294,13 @@ class AlertService:
         self, limit: int = 100, offset: int = 0
     ) -> List[AlertHistoryResponse]:
         """Get all alert history."""
+        stmt = select(AlertHistory)
+        if self.user_id is not None:
+            stmt = stmt.join(Alert, AlertHistory.alert_id == Alert.id).where(
+                Alert.user_id == self.user_id
+            )
         stmt = (
-            select(AlertHistory)
-            .order_by(AlertHistory.triggered_at.desc())
+            stmt.order_by(AlertHistory.triggered_at.desc())
             .offset(offset)
             .limit(limit)
         )
@@ -286,9 +314,11 @@ class AlertService:
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         week_start = today_start - timedelta(days=7)
 
-        # Total and active counts
-        total_stmt = select(func.count(Alert.id))
-        active_stmt = select(func.count(Alert.id)).where(Alert.is_active.is_(True))
+        # Total and active counts (scoped to the caller's alerts)
+        total_stmt = self._scope(select(func.count(Alert.id)))
+        active_stmt = self._scope(
+            select(func.count(Alert.id)).where(Alert.is_active.is_(True))
+        )
 
         # Triggered counts
         today_stmt = select(func.count(AlertHistory.id)).where(
@@ -297,6 +327,13 @@ class AlertService:
         week_stmt = select(func.count(AlertHistory.id)).where(
             AlertHistory.triggered_at >= week_start
         )
+        if self.user_id is not None:
+            today_stmt = today_stmt.join(
+                Alert, AlertHistory.alert_id == Alert.id
+            ).where(Alert.user_id == self.user_id)
+            week_stmt = week_stmt.join(
+                Alert, AlertHistory.alert_id == Alert.id
+            ).where(Alert.user_id == self.user_id)
 
         total, active, today, week = await asyncio.gather(
             self.db.scalar(total_stmt),

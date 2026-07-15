@@ -64,7 +64,6 @@ class ContextPackService:
         self.trade_service = TradeService(db)
         self.event_service = EconomicEventService(db)
         self.handoff_service = HandoffService(db)
-        self.trigger_service = TriggerService(db)
         self.lesson_service = LessonService(db)
 
     async def build(self, user_id: UUID) -> ContextPack:
@@ -92,15 +91,17 @@ class ContextPackService:
         # Exposures aggregate by symbol across accounts, so fold the per-account
         # current values into one value-per-symbol map.
         value_by_symbol = self._value_by_symbol(positions)
-        exposures = await self._exposures(value_by_symbol, portfolio.current_value)
+        exposures = await self._exposures(
+            value_by_symbol, portfolio.current_value, user_id
+        )
         catalyst_exposures = build_catalyst_clusters(
             await catalyst_symbol_map(self.db),
             value_by_symbol,
             portfolio.current_value,
         )
-        alerts = await self.active_alerts()
-        triggers = await self._recent_triggers()
-        targets = await self.watchlist_targets()
+        alerts = await self.active_alerts(user_id)
+        triggers = await self._recent_triggers(user_id)
+        targets = await self.watchlist_targets(user_id)
         events = await self._upcoming_events(user_id)
         handoffs = [
             PackHandoff(
@@ -133,7 +134,7 @@ class ContextPackService:
                 signal=t.signal.value,
                 executed_at=t.executed_at,
             )
-            for t in await self.trigger_service.list_triggers()
+            for t in await TriggerService(self.db, user_id).list_triggers()
         ]
 
         return ContextPack(
@@ -179,6 +180,7 @@ class ContextPackService:
         self,
         value_by_symbol: dict[str, Optional[Decimal]],
         portfolio_value: Optional[Decimal],
+        user_id: Optional[UUID] = None,
     ) -> List[PackExposure]:
         """Position value per theme watchlist (overlapping by design)."""
         if not value_by_symbol:
@@ -190,6 +192,10 @@ class ContextPackService:
             .join(Equity, Equity.id == WatchlistItem.equity_id)
             .where(Watchlist.is_default.is_(False))
         )
+        if user_id is not None:
+            stmt = stmt.where(
+                or_(Watchlist.user_id == user_id, Watchlist.user_id.is_(None))
+            )
         result = await self.db.execute(stmt)
 
         themes: dict[str, list[str]] = {}
@@ -218,13 +224,17 @@ class ContextPackService:
             )
         return exposures
 
-    async def active_alerts(self) -> List[PackAlert]:
+    async def active_alerts(
+        self, user_id: Optional[UUID] = None
+    ) -> List[PackAlert]:
         stmt = (
             select(Alert)
             .options(selectinload(Alert.equity), selectinload(Alert.ratio))
             .where(Alert.is_active.is_(True))
             .order_by(Alert.name)
         )
+        if user_id is not None:
+            stmt = stmt.where(Alert.user_id == user_id)
         result = await self.db.execute(stmt)
         alerts = result.scalars().all()
 
@@ -271,7 +281,9 @@ class ContextPackService:
             )
         return packed
 
-    async def _recent_triggers(self, days: int = 7) -> List[PackTrigger]:
+    async def _recent_triggers(
+        self, user_id: Optional[UUID] = None, days: int = 7
+    ) -> List[PackTrigger]:
         since = datetime.now(timezone.utc) - timedelta(days=days)
         stmt = (
             select(AlertHistory)
@@ -280,6 +292,10 @@ class ContextPackService:
             .order_by(AlertHistory.triggered_at.desc())
             .limit(20)
         )
+        if user_id is not None:
+            stmt = stmt.join(Alert, AlertHistory.alert_id == Alert.id).where(
+                Alert.user_id == user_id
+            )
         result = await self.db.execute(stmt)
         return [
             PackTrigger(
@@ -292,7 +308,9 @@ class ContextPackService:
             for h in result.scalars().all()
         ]
 
-    async def watchlist_targets(self) -> List[PackWatchlistItem]:
+    async def watchlist_targets(
+        self, user_id: Optional[UUID] = None
+    ) -> List[PackWatchlistItem]:
         """Items with a target price or entry zones, plus status vs the latest close."""
         stmt = (
             select(WatchlistItem, Watchlist.name, Equity)
@@ -306,6 +324,10 @@ class ContextPackService:
             )
             .order_by(Watchlist.name, Equity.symbol)
         )
+        if user_id is not None:
+            stmt = stmt.where(
+                or_(Watchlist.user_id == user_id, Watchlist.user_id.is_(None))
+            )
         result = await self.db.execute(stmt)
         rows = result.all()
 

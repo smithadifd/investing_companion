@@ -110,7 +110,11 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
-    REGISTRATION_ENABLED: bool = True  # Set to False for single-user mode
+    # Closed by default: this is a single-user, self-hosted app (see AGENTS.md
+    # non-goals). Open it explicitly to onboard the first account, then leave it
+    # false. The login page already gates its Register link on this via
+    # /auth/registration-status.
+    REGISTRATION_ENABLED: bool = False
     DEMO_MODE: bool = False  # Set to True for public demo deployment
 
     # External APIs

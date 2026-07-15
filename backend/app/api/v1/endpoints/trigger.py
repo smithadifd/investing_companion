@@ -23,8 +23,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def get_trigger_service(db: AsyncSession = Depends(get_db)) -> TriggerService:
-    return TriggerService(db)
+def get_trigger_service(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> TriggerService:
+    return TriggerService(db, current_user.id)
 
 
 @router.get("", response_model=DataResponse[List[TriggerResponse]])

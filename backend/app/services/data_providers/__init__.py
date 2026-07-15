@@ -42,8 +42,11 @@ async def get_extended_quote_provider(db: AsyncSession):
         from app.services.settings import SettingsService
 
         service = SettingsService(db)
-        user_id, raw_token = await service.get_setting_any_user(
-            SettingsService.SCHWAB_TOKEN
+        user_id = await service.get_owner_user_id()
+        raw_token = (
+            await service.get_setting(SettingsService.SCHWAB_TOKEN, user_id)
+            if user_id is not None
+            else None
         )
     except Exception as e:
         logger.warning(f"Could not load Schwab token, using Yahoo: {e}")

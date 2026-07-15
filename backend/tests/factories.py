@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.account import Account
@@ -114,7 +115,19 @@ async def create_test_alert(
     zone_state: Optional[dict] = None,
     user_id: Optional[uuid.UUID] = None,
 ) -> Alert:
-    """Create an alert attached to an equity."""
+    """Create an alert attached to an equity.
+
+    Alerts are strictly owned (user_id is non-null). When no ``user_id`` is
+    given, reuse the existing test user if there is one, else create an owner —
+    so callers that don't care about ownership keep working.
+    """
+    if user_id is None:
+        user_id = await db.scalar(select(User.id).order_by(User.created_at))
+        if user_id is None:
+            owner = await create_test_user(
+                db, email=f"alert-owner-{uuid.uuid4().hex[:8]}@example.com"
+            )
+            user_id = owner.id
     alert = Alert(
         name=name,
         equity_id=equity.id,

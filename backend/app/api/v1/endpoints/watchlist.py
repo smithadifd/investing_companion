@@ -32,7 +32,7 @@ async def list_watchlists(
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[List[WatchlistSummary]]:
     """List all watchlists."""
-    service = WatchlistService(db)
+    service = WatchlistService(db, current_user.id)
     watchlists = await service.list_watchlists()
     return DataResponse(data=watchlists, meta=ResponseMeta.now())
 
@@ -44,7 +44,7 @@ async def get_all_movers(
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[AllWatchlistMovers]:
     """Get top gainers and losers across all watchlists."""
-    service = WatchlistService(db)
+    service = WatchlistService(db, current_user.id)
     movers = await service.get_all_movers(limit)
     return DataResponse(data=movers, meta=ResponseMeta.now())
 
@@ -57,7 +57,7 @@ async def create_watchlist(
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[WatchlistResponse]:
     """Create a new watchlist."""
-    service = WatchlistService(db)
+    service = WatchlistService(db, current_user.id)
     watchlist = await service.create_watchlist(data)
     return DataResponse(data=watchlist, meta=ResponseMeta.now())
 
@@ -70,7 +70,7 @@ async def get_watchlist(
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[WatchlistResponse]:
     """Get a watchlist with all items."""
-    service = WatchlistService(db)
+    service = WatchlistService(db, current_user.id)
     watchlist = await service.get_watchlist(watchlist_id, include_quotes=include_quotes)
 
     if not watchlist:
@@ -88,7 +88,7 @@ async def update_watchlist(
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[WatchlistResponse]:
     """Update a watchlist."""
-    service = WatchlistService(db)
+    service = WatchlistService(db, current_user.id)
     watchlist = await service.update_watchlist(watchlist_id, data)
 
     if not watchlist:
@@ -105,7 +105,7 @@ async def delete_watchlist(
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Delete a watchlist."""
-    service = WatchlistService(db)
+    service = WatchlistService(db, current_user.id)
     deleted = await service.delete_watchlist(watchlist_id)
 
     if not deleted:
@@ -133,7 +133,7 @@ async def add_item(
             detail="Either equity_id or symbol must be provided",
         )
 
-    service = WatchlistService(db)
+    service = WatchlistService(db, current_user.id)
     item = await service.add_item(watchlist_id, data)
 
     if not item:
@@ -158,7 +158,7 @@ async def update_item(
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[WatchlistItemResponse]:
     """Update a watchlist item's notes, target price, or thesis."""
-    service = WatchlistService(db)
+    service = WatchlistService(db, current_user.id)
     item = await service.update_item(watchlist_id, item_id, data)
 
     if not item:
@@ -176,7 +176,7 @@ async def remove_item(
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Remove an item from a watchlist."""
-    service = WatchlistService(db)
+    service = WatchlistService(db, current_user.id)
     removed = await service.remove_item(watchlist_id, item_id)
 
     if not removed:
@@ -192,7 +192,7 @@ async def export_watchlist(
     db: AsyncSession = Depends(get_db),
 ) -> WatchlistExport:
     """Export a watchlist to JSON format."""
-    service = WatchlistService(db)
+    service = WatchlistService(db, current_user.id)
     export_data = await service.export_watchlist(watchlist_id)
 
     if not export_data:
@@ -209,6 +209,6 @@ async def import_watchlist(
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[WatchlistResponse]:
     """Import a watchlist from JSON format."""
-    service = WatchlistService(db)
+    service = WatchlistService(db, current_user.id)
     watchlist = await service.import_watchlist(data)
     return DataResponse(data=watchlist, meta=ResponseMeta.now())

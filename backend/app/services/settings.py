@@ -11,6 +11,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.db.models.user import User
 from app.db.models.user_settings import UserSetting
 from app.schemas.auth import AppSettings, AppSettingsUpdate
 
@@ -31,6 +32,9 @@ class SettingsService:
     EOD_NOTIFICATION_LAST_SENT = "EOD_NOTIFICATION_LAST_SENT"
     SCHWAB_TOKEN = "SCHWAB_TOKEN"
     SCHWAB_EXPIRY_LAST_NOTIFIED = "SCHWAB_EXPIRY_LAST_NOTIFIED"
+    # Explicit install-owner pointer (a global row with user_id NULL). Replaces
+    # the old implicit "oldest active user" resolution used by background tasks.
+    OWNER_USER_ID = "OWNER_USER_ID"
 
     # Keys that should be encrypted
     ENCRYPTED_KEYS = {
@@ -87,33 +91,47 @@ class SettingsService:
                 return None
         return setting.value
 
-    async def get_setting_any_user(
-        self,
-        key: str,
-    ) -> tuple[Optional[uuid.UUID], Optional[str]]:
-        """Find a setting row regardless of user_id (single-user app).
+    async def get_owner_user_id(self) -> Optional[uuid.UUID]:
+        """Resolve the install owner deterministically.
 
-        Background tasks have no request user, so they resolve per-user
-        settings this way — same pattern as the Discord webhook lookup.
-        Returns (user_id, decrypted_value), or (None, None) if absent.
+        Replaces the old implicit "first/oldest active user" behavior:
+
+        1. An explicit ``OWNER_USER_ID`` global setting, when its user is active.
+        2. Otherwise the sole active user (unambiguous single-user install).
+        3. Otherwise ``None`` — an ambiguous multi-user install with no explicit
+           owner is never resolved by guessing; callers degrade gracefully.
         """
-        stmt = select(UserSetting).where(
-            UserSetting.key == key,
-            UserSetting.value.isnot(None),
+        explicit = await self.db.scalar(
+            select(UserSetting.value).where(
+                UserSetting.key == self.OWNER_USER_ID,
+                UserSetting.user_id.is_(None),
+                UserSetting.value.isnot(None),
+            )
         )
-        result = await self.db.execute(stmt)
-        setting = result.scalars().first()
-
-        if not setting or setting.value is None:
-            return None, None
-
-        value = setting.value
-        if setting.is_encrypted:
+        if explicit:
             try:
-                value = self._decrypt(value)
-            except Exception:
-                return setting.user_id, None
-        return setting.user_id, value
+                owner_id: Optional[uuid.UUID] = uuid.UUID(explicit)
+            except (ValueError, TypeError):
+                owner_id = None
+            if owner_id is not None:
+                is_active = await self.db.scalar(
+                    select(User.is_active).where(User.id == owner_id)
+                )
+                if is_active:
+                    return owner_id
+
+        active_ids = (
+            await self.db.execute(
+                select(User.id).where(User.is_active.is_(True)).limit(2)
+            )
+        ).scalars().all()
+        if len(active_ids) == 1:
+            return active_ids[0]
+        return None
+
+    async def set_owner_user_id(self, user_id: uuid.UUID) -> None:
+        """Record the explicit install owner (global OWNER_USER_ID setting)."""
+        await self.set_setting(self.OWNER_USER_ID, str(user_id), user_id=None)
 
     async def set_setting(
         self,

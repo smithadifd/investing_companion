@@ -1,11 +1,12 @@
 """Trigger playbook service - CRUD plus live signal derivation."""
 
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Optional
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -61,8 +62,24 @@ def derive_signal(alerts: List[Alert]) -> TriggerSignal:
 
 
 class TriggerService:
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(
+        self, db: AsyncSession, user_id: Optional[uuid.UUID] = None
+    ) -> None:
         self.db = db
+        self.user_id = user_id
+
+    def _owned(self):
+        """Ownership predicate: the caller's triggers plus legacy (NULL) rows.
+        ``user_id is None`` is an unscoped system/background context. Returns
+        None when unscoped.
+        """
+        if self.user_id is None:
+            return None
+        return or_(Trigger.user_id == self.user_id, Trigger.user_id.is_(None))
+
+    def _scope(self, stmt):
+        predicate = self._owned()
+        return stmt if predicate is None else stmt.where(predicate)
 
     async def list_triggers(
         self, include_retired: bool = False
@@ -76,7 +93,7 @@ class TriggerService:
         )
         if not include_retired:
             stmt = stmt.where(Trigger.status != TriggerLifecycle.RETIRED.value)
-        result = await self.db.execute(stmt)
+        result = await self.db.execute(self._scope(stmt))
         return [self._to_response(t) for t in result.scalars().all()]
 
     async def get_trigger(self, trigger_id: int) -> Optional[TriggerResponse]:
@@ -85,6 +102,7 @@ class TriggerService:
 
     async def create_trigger(self, data: TriggerCreate) -> TriggerResponse:
         trigger = Trigger(
+            user_id=self.user_id,
             name=data.name,
             rule=data.rule,
             action=data.action,
@@ -180,15 +198,17 @@ class TriggerService:
             )
             .where(Trigger.id == trigger_id)
         )
-        result = await self.db.execute(stmt)
+        result = await self.db.execute(self._scope(stmt))
         return result.scalar_one_or_none()
 
     async def _set_alert_links(self, trigger: Trigger, alert_ids: List[int]) -> None:
         """Replace the trigger's alert links, validating the alerts exist."""
         if alert_ids:
-            result = await self.db.execute(
-                select(Alert.id).where(Alert.id.in_(alert_ids))
-            )
+            alert_stmt = select(Alert.id).where(Alert.id.in_(alert_ids))
+            # Only the caller's own alerts may be linked to their triggers
+            if self.user_id is not None:
+                alert_stmt = alert_stmt.where(Alert.user_id == self.user_id)
+            result = await self.db.execute(alert_stmt)
             found = set(result.scalars().all())
             missing = set(alert_ids) - found
             if missing:

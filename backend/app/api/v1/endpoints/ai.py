@@ -24,9 +24,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai", tags=["ai"])
 
 
-def get_ai_service(db: AsyncSession = Depends(get_db)) -> AIService:
-    """Dependency to get AI service instance."""
-    return AIService(db)
+def get_ai_service(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AIService:
+    """Dependency to get an AI service scoped to the authenticated user."""
+    return AIService(db, current_user.id)
 
 
 @router.get("/settings", response_model=DataResponse[AISettingsResponse])

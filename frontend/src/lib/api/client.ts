@@ -170,6 +170,7 @@ class ApiClient {
 
     this.refreshPromise = (async () => {
       try {
+        // eslint-disable-next-line no-restricted-syntax -- refresh primitive: routing through this.fetch() would recurse
         const response = await fetch(`${API_BASE}/auth/refresh`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -206,6 +207,7 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${this.accessToken}`;
     }
 
+    // eslint-disable-next-line no-restricted-syntax -- this IS the shared auth wrapper primitive
     let response = await fetch(`${API_BASE}${path}`, {
       ...options,
       headers,
@@ -217,6 +219,7 @@ class ApiClient {
       if (refreshed) {
         // Retry the request with new token
         headers['Authorization'] = `Bearer ${this.accessToken}`;
+        // eslint-disable-next-line no-restricted-syntax -- auth wrapper retry after token refresh
         response = await fetch(`${API_BASE}${path}`, {
           ...options,
           headers,
@@ -285,6 +288,7 @@ class ApiClient {
   async logout(): Promise<void> {
     if (this.refreshToken) {
       try {
+        // eslint-disable-next-line no-restricted-syntax -- fire-and-forget logout: deliberately swallows errors, no 401-retry
         await fetch(`${API_BASE}/auth/logout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -495,7 +499,7 @@ class ApiClient {
    * Delete a watchlist
    */
   async deleteWatchlist(id: number): Promise<void> {
-    await fetch(`${API_BASE}/watchlists/${id}`, {
+    await this.fetch<void>(`/watchlists/${id}`, {
       method: 'DELETE',
     });
   }
@@ -534,7 +538,7 @@ class ApiClient {
    * Remove an item from a watchlist
    */
   async removeWatchlistItem(watchlistId: number, itemId: number): Promise<void> {
-    await fetch(`${API_BASE}/watchlists/${watchlistId}/items/${itemId}`, {
+    await this.fetch<void>(`/watchlists/${watchlistId}/items/${itemId}`, {
       method: 'DELETE',
     });
   }
@@ -543,6 +547,7 @@ class ApiClient {
    * Export a watchlist to JSON
    */
   async exportWatchlist(id: number): Promise<WatchlistExport> {
+    // eslint-disable-next-line no-restricted-syntax -- returns raw un-enveloped JSON, incompatible with this.fetch()'s data unwrap
     const response = await fetch(`${API_BASE}/watchlists/${id}/export`);
     if (!response.ok) {
       throw new ApiError('Failed to export watchlist', 'EXPORT_ERROR', response.status);
@@ -562,6 +567,7 @@ class ApiClient {
       if (this.accessToken) {
         headers['Authorization'] = `Bearer ${this.accessToken}`;
       }
+      // eslint-disable-next-line no-restricted-syntax -- returns text/markdown (not the JSON envelope); mirrors the 401->refresh path below
       return fetch(`${API_BASE}/export/context-pack?format=markdown`, {
         headers,
       });
@@ -690,7 +696,7 @@ class ApiClient {
    * Delete a ratio
    */
   async deleteRatio(id: number): Promise<void> {
-    await fetch(`${API_BASE}/ratios/${id}`, {
+    await this.fetch<void>(`/ratios/${id}`, {
       method: 'DELETE',
     });
   }
@@ -720,7 +726,7 @@ class ApiClient {
    * Initialize system ratios
    */
   async initializeRatios(): Promise<void> {
-    await fetch(`${API_BASE}/ratios/initialize`, {
+    await this.fetch<void>('/ratios/initialize', {
       method: 'POST',
     });
   }
@@ -761,6 +767,7 @@ class ApiClient {
   async *analyzeAIStream(
     request: AIAnalysisRequest
   ): AsyncGenerator<string, void, unknown> {
+    // eslint-disable-next-line no-restricted-syntax -- SSE stream: needs the raw ReadableStream body, not the JSON envelope
     const response = await fetch(`${API_BASE}/ai/analyze/stream`, {
       method: 'POST',
       headers: {
@@ -850,7 +857,7 @@ class ApiClient {
    * Delete an alert
    */
   async deleteAlert(id: number): Promise<void> {
-    await fetch(`${API_BASE}/alerts/${id}`, {
+    await this.fetch<void>(`/alerts/${id}`, {
       method: 'DELETE',
     });
   }
@@ -1022,6 +1029,7 @@ class ApiClient {
     const url = queryString ? `/trades?${queryString}` : '/trades';
 
     // This endpoint returns data with paginated meta
+    // eslint-disable-next-line no-restricted-syntax -- needs the paginated meta envelope, not this.fetch()'s data-only unwrap
     const response = await fetch(`${API_BASE}${url}`, {
       headers: this.accessToken ? { Authorization: `Bearer ${this.accessToken}` } : {},
     });

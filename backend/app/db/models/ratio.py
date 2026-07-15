@@ -1,19 +1,33 @@
 """Ratio model for tracking asset pair comparisons."""
 
+import uuid
 from datetime import datetime
+from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
 
 class Ratio(Base):
-    """Model for tracking ratios between two assets."""
+    """Model for tracking ratios between two assets.
+
+    ``user_id`` scopes a custom ratio to its owner. System ratios (``is_system``)
+    are global and carry ``user_id = NULL`` so they stay visible to everyone; a
+    NULL on a non-system ratio is a legacy/pre-tenant-isolation row.
+    """
 
     __tablename__ = "ratios"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     numerator_symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     denominator_symbol: Mapped[str] = mapped_column(String(20), nullable=False)

@@ -46,10 +46,12 @@ class Alert(Base, TimestampMixin):
     __tablename__ = "alerts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    # Tenant isolation: every alert is owned. Enforced non-null by migration
+    # 20260715_001 (which backfills legacy NULL rows to the install owner).
+    user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=True,
+        nullable=False,
         index=True,
     )
 

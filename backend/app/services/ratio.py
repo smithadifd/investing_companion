@@ -2,10 +2,11 @@
 
 import asyncio
 import logging
+import uuid
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.ratio import Ratio
@@ -86,9 +87,25 @@ SYSTEM_RATIOS = [
 class RatioService:
     """Service for ratio-related operations."""
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(
+        self, db: AsyncSession, user_id: Optional[uuid.UUID] = None
+    ) -> None:
         self.db = db
+        self.user_id = user_id
         self.yahoo = YahooFinanceProvider()
+
+    def _owned(self):
+        """Ownership predicate: the caller's custom ratios plus global/system
+        (NULL) ratios. ``user_id is None`` is an unscoped system/background
+        context. Returns None when unscoped.
+        """
+        if self.user_id is None:
+            return None
+        return or_(Ratio.user_id == self.user_id, Ratio.user_id.is_(None))
+
+    def _scope(self, stmt):
+        predicate = self._owned()
+        return stmt if predicate is None else stmt.where(predicate)
 
     async def initialize_system_ratios(self) -> None:
         """Create system ratios if they don't exist."""
@@ -120,7 +137,7 @@ class RatioService:
         self, favorites_only: bool = False, category: Optional[str] = None
     ) -> List[RatioResponse]:
         """List all ratios, optionally filtered."""
-        stmt = select(Ratio)
+        stmt = self._scope(select(Ratio))
 
         if favorites_only:
             stmt = stmt.where(Ratio.is_favorite.is_(True))
@@ -136,7 +153,7 @@ class RatioService:
 
     async def get_ratio(self, ratio_id: int) -> Optional[RatioResponse]:
         """Get a single ratio by ID."""
-        stmt = select(Ratio).where(Ratio.id == ratio_id)
+        stmt = self._scope(select(Ratio).where(Ratio.id == ratio_id))
         result = await self.db.execute(stmt)
         ratio = result.scalar_one_or_none()
 
@@ -154,6 +171,7 @@ class RatioService:
             category=data.category,
             is_system=False,
             is_favorite=data.is_favorite,
+            user_id=self.user_id,
         )
         self.db.add(ratio)
         await self.db.commit()
@@ -165,7 +183,7 @@ class RatioService:
         self, ratio_id: int, data: RatioUpdate
     ) -> Optional[RatioResponse]:
         """Update a ratio (only certain fields for system ratios)."""
-        stmt = select(Ratio).where(Ratio.id == ratio_id)
+        stmt = self._scope(select(Ratio).where(Ratio.id == ratio_id))
         result = await self.db.execute(stmt)
         ratio = result.scalar_one_or_none()
 
@@ -192,7 +210,9 @@ class RatioService:
 
     async def delete_ratio(self, ratio_id: int) -> bool:
         """Delete a custom ratio (cannot delete system ratios)."""
-        stmt = select(Ratio).where(Ratio.id == ratio_id, Ratio.is_system.is_(False))
+        stmt = self._scope(
+            select(Ratio).where(Ratio.id == ratio_id, Ratio.is_system.is_(False))
+        )
         result = await self.db.execute(stmt)
         ratio = result.scalar_one_or_none()
 
@@ -268,7 +288,7 @@ class RatioService:
 
     async def get_ratio_quote(self, ratio_id: int) -> Optional[RatioQuoteResponse]:
         """Get current ratio quote."""
-        stmt = select(Ratio).where(Ratio.id == ratio_id)
+        stmt = self._scope(select(Ratio).where(Ratio.id == ratio_id))
         result = await self.db.execute(stmt)
         ratio = result.scalar_one_or_none()
 

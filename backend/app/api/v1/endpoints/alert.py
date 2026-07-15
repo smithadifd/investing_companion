@@ -23,9 +23,12 @@ from app.services.notifications.discord import discord_service, get_discord_serv
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
 
-def get_alert_service(db: AsyncSession = Depends(get_db)) -> AlertService:
-    """Dependency to get alert service instance."""
-    return AlertService(db)
+def get_alert_service(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AlertService:
+    """Dependency to get an alert service scoped to the authenticated user."""
+    return AlertService(db, current_user.id)
 
 
 @router.get("", response_model=DataResponse[List[AlertResponse]])
@@ -219,6 +222,7 @@ async def get_alert_history(
 async def check_alert(
     alert_id: int,
     notify: bool = False,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
 ) -> DataResponse[dict]:
@@ -226,11 +230,15 @@ async def check_alert(
     Manually check an alert's condition.
 
     - **notify**: If True and condition is met, send a real notification (ignores cooldown)
+
+    Blocked in demo mode: the notify=True path fires a real Discord send.
     """
     from app.db.models.alert import Alert
     from sqlalchemy import select
 
-    stmt = select(Alert).where(Alert.id == alert_id)
+    stmt = select(Alert).where(
+        Alert.id == alert_id, Alert.user_id == service.user_id
+    )
     result = await service.db.execute(stmt)
     alert = result.scalar_one_or_none()
 

@@ -1,10 +1,11 @@
 """Watchlist service - business logic for watchlist operations."""
 
+import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -71,9 +72,29 @@ def _item_response(
 class WatchlistService:
     """Service for watchlist-related operations."""
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(
+        self, db: AsyncSession, user_id: Optional[uuid.UUID] = None
+    ) -> None:
         self.db = db
+        self.user_id = user_id
         self.equity_service = EquityService(db)
+
+    def _owned(self):
+        """Ownership predicate: the caller's rows plus legacy/global (NULL) rows.
+
+        ``user_id is None`` is a system/background context (e.g. the Celery
+        briefings) and applies no per-user restriction. A set ``user_id``
+        restricts to that owner's watchlists plus legacy NULL rows created
+        before tenant isolation. Returns None when unscoped.
+        """
+        if self.user_id is None:
+            return None
+        return or_(Watchlist.user_id == self.user_id, Watchlist.user_id.is_(None))
+
+    def _scope(self, stmt):
+        """Apply the ownership predicate to a Watchlist query when scoped."""
+        predicate = self._owned()
+        return stmt if predicate is None else stmt.where(predicate)
 
     async def list_watchlists(self) -> List[WatchlistSummary]:
         """List all watchlists with item counts."""
@@ -86,6 +107,7 @@ class WatchlistService:
             .group_by(Watchlist.id)
             .order_by(Watchlist.is_default.desc(), Watchlist.name)
         )
+        stmt = self._scope(stmt)
         result = await self.db.execute(stmt)
         rows = result.all()
 
@@ -111,7 +133,7 @@ class WatchlistService:
             .options(selectinload(Watchlist.items).selectinload(WatchlistItem.equity))
             .where(Watchlist.id == watchlist_id)
         )
-        result = await self.db.execute(stmt)
+        result = await self.db.execute(self._scope(stmt))
         watchlist = result.scalar_one_or_none()
 
         if not watchlist:
@@ -145,6 +167,7 @@ class WatchlistService:
             name=data.name,
             description=data.description,
             is_default=data.is_default,
+            user_id=self.user_id,
         )
         self.db.add(watchlist)
         await self.db.commit()
@@ -165,7 +188,7 @@ class WatchlistService:
     ) -> Optional[WatchlistResponse]:
         """Update a watchlist."""
         stmt = select(Watchlist).where(Watchlist.id == watchlist_id)
-        result = await self.db.execute(stmt)
+        result = await self.db.execute(self._scope(stmt))
         watchlist = result.scalar_one_or_none()
 
         if not watchlist:
@@ -188,7 +211,7 @@ class WatchlistService:
     async def delete_watchlist(self, watchlist_id: int) -> bool:
         """Delete a watchlist and all its items."""
         stmt = select(Watchlist).where(Watchlist.id == watchlist_id)
-        result = await self.db.execute(stmt)
+        result = await self.db.execute(self._scope(stmt))
         watchlist = result.scalar_one_or_none()
 
         if not watchlist:
@@ -202,9 +225,9 @@ class WatchlistService:
         self, watchlist_id: int, data: WatchlistItemCreate
     ) -> Optional[WatchlistItemResponse]:
         """Add an equity to a watchlist."""
-        # Verify watchlist exists
+        # Verify watchlist exists and is owned by the caller
         stmt = select(Watchlist).where(Watchlist.id == watchlist_id)
-        result = await self.db.execute(stmt)
+        result = await self.db.execute(self._scope(stmt))
         watchlist = result.scalar_one_or_none()
         if not watchlist:
             return None
@@ -249,6 +272,11 @@ class WatchlistService:
         self, watchlist_id: int, item_id: int, data: WatchlistItemUpdate
     ) -> Optional[WatchlistItemResponse]:
         """Update a watchlist item's notes, target price, or thesis."""
+        # Enforce ownership of the parent watchlist before touching its items
+        if not await self.db.scalar(
+            self._scope(select(Watchlist.id).where(Watchlist.id == watchlist_id))
+        ):
+            return None
         stmt = (
             select(WatchlistItem)
             .options(selectinload(WatchlistItem.equity))
@@ -288,6 +316,11 @@ class WatchlistService:
 
     async def remove_item(self, watchlist_id: int, item_id: int) -> bool:
         """Remove an item from a watchlist."""
+        # Enforce ownership of the parent watchlist before touching its items
+        if not await self.db.scalar(
+            self._scope(select(Watchlist.id).where(Watchlist.id == watchlist_id))
+        ):
+            return False
         stmt = select(WatchlistItem).where(
             WatchlistItem.id == item_id,
             WatchlistItem.watchlist_id == watchlist_id,
@@ -309,7 +342,7 @@ class WatchlistService:
             .options(selectinload(Watchlist.items).selectinload(WatchlistItem.equity))
             .where(Watchlist.id == watchlist_id)
         )
-        result = await self.db.execute(stmt)
+        result = await self.db.execute(self._scope(stmt))
         watchlist = result.scalar_one_or_none()
 
         if not watchlist:
@@ -342,6 +375,7 @@ class WatchlistService:
             name=data.name,
             description=data.description,
             is_default=False,
+            user_id=self.user_id,
         )
         self.db.add(watchlist)
         await self.db.commit()
@@ -366,9 +400,9 @@ class WatchlistService:
         return await self.get_watchlist(watchlist.id, include_quotes=False)
 
     async def _unset_default_watchlist(self) -> None:
-        """Remove default flag from any existing default watchlist."""
+        """Remove default flag from the caller's existing default watchlist."""
         stmt = select(Watchlist).where(Watchlist.is_default == True)  # noqa: E712
-        result = await self.db.execute(stmt)
+        result = await self.db.execute(self._scope(stmt))
         for watchlist in result.scalars():
             watchlist.is_default = False
         await self.db.commit()
@@ -382,7 +416,7 @@ class WatchlistService:
             select(Watchlist)
             .options(selectinload(Watchlist.items).selectinload(WatchlistItem.equity))
         )
-        result = await self.db.execute(stmt)
+        result = await self.db.execute(self._scope(stmt))
         watchlists = result.scalars().all()
 
         if not watchlists:

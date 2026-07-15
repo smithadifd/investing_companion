@@ -26,7 +26,7 @@ async def get_needs_attention(
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[NeedsAttentionResponse]:
     """The morning pulse's ⚡ section as structured data for the dashboard."""
-    items = await build_needs_attention(db)
+    items = await build_needs_attention(db, current_user.id)
     return DataResponse(data=NeedsAttentionResponse(items=items))
 
 

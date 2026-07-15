@@ -28,9 +28,12 @@ function toNumber(value: unknown): number | null {
 function formatPercentValue(value: number | string | null | undefined): string {
   const num = toNumber(value);
   if (num == null) return '--';
-  // Yahoo Finance returns percentage values directly (0.39 = 0.39%, 27.04 = 27.04%)
-  // No multiplication needed - display as-is
-  return `${num.toFixed(2)}%`;
+  // dividend_yield / profit_margin are stored as fractions, not percents:
+  // the backend columns are Numeric(5,4) (max 9.9999) and yfinance's
+  // profitMargins/dividendYield are written straight through, so e.g. Apple's
+  // ~0.2704 means 27.04%. Multiply by 100 to display - this matches the
+  // backend scale and PeerComparison (which had it right).
+  return `${(num * 100).toFixed(2)}%`;
 }
 
 export function FundamentalsCard({ fundamentals }: FundamentalsCardProps) {

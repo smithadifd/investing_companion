@@ -13,9 +13,12 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.alert import AlertHistory
 from app.db.models.ratio import Ratio
+from app.schemas.trigger import TriggerCreate
 from app.services.alert import AlertService
 from app.services.auth import AuthService
+from app.services.context_pack import ContextPackService
 from app.services.ratio import RatioService
 from app.services.trigger import TriggerService
 from app.services.watchlist import WatchlistService
@@ -24,6 +27,7 @@ from tests.factories import (
     create_test_equity,
     create_test_user,
     create_test_watchlist,
+    create_test_watchlist_item,
 )
 
 
@@ -244,3 +248,47 @@ class TestTriggerIsolation:
         )
         assert await TriggerService(db, b.id).get_trigger(created.id) is None
         assert await TriggerService(db, a.id).get_trigger(created.id) is not None
+
+
+# ---------------------------------------------------------------------------
+# Context pack (the interactive advisor export) — aggregation must be scoped
+# ---------------------------------------------------------------------------
+
+class TestContextPackIsolation:
+    async def test_b_context_pack_excludes_a_data(
+        self, db: AsyncSession, two_users
+    ):
+        a, b = two_users
+        equity = await create_test_equity(db, symbol="CPISO")
+
+        # A's alert, its trigger history, a watchlist target, and a playbook trigger
+        alert_a = await create_test_alert(
+            db, equity, name="A-cp-alert", user_id=a.id
+        )
+        db.add(
+            AlertHistory(
+                alert_id=alert_a.id,
+                triggered_value=100,
+                threshold_value=100,
+                notification_sent=False,
+            )
+        )
+        wl_a = await create_test_watchlist(db, name="A theme", user_id=a.id)
+        await create_test_watchlist_item(db, wl_a, equity, target_price=123)
+        trig_a = await TriggerService(db, a.id).create_trigger(
+            TriggerCreate(name="A-cp-trigger", rule="if", action="do", alert_ids=[alert_a.id])
+        )
+
+        # B's pack must contain none of A's aggregated data
+        pack_b = await ContextPackService(db).build(b.id)
+        assert "A-cp-alert" not in [x.name for x in pack_b.active_alerts]
+        assert "CPISO" not in [x.symbol for x in pack_b.watchlist_targets]
+        assert "A-cp-trigger" not in [x.name for x in pack_b.triggers]
+        assert "A-cp-alert" not in [x.alert_name for x in pack_b.recent_triggers]
+
+        # A's own pack still contains them (proves exclusion is isolation, not a bug)
+        pack_a = await ContextPackService(db).build(a.id)
+        assert "A-cp-alert" in [x.name for x in pack_a.active_alerts]
+        assert "CPISO" in [x.symbol for x in pack_a.watchlist_targets]
+        assert "A-cp-trigger" in [x.name for x in pack_a.triggers]
+        assert trig_a.id  # created

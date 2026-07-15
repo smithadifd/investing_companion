@@ -301,6 +301,7 @@ async def delete_equity_events(
 @router.post("/refresh/{symbol}", response_model=DataResponse[List[EconomicEventResponse]])
 async def refresh_equity_events(
     symbol: str,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     service: EconomicEventService = Depends(get_event_service),
 ) -> DataResponse[List[EconomicEventResponse]]:
@@ -316,6 +317,7 @@ async def refresh_equity_events(
 @router.post("/refresh/watchlist", response_model=DataResponse[dict])
 async def refresh_watchlist_events(
     watchlist_id: Optional[int] = Query(None, description="Specific watchlist to refresh"),
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     service: EconomicEventService = Depends(get_event_service),
 ) -> DataResponse[dict]:

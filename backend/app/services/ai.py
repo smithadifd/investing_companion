@@ -1,6 +1,7 @@
 """AI analysis service using Claude API."""
 
 import logging
+import uuid
 from datetime import datetime
 from decimal import Decimal
 from typing import AsyncGenerator, Optional
@@ -43,8 +44,11 @@ def _decimal_to_float(value) -> Optional[float]:
 class AIService:
     """Service for AI-powered analysis using Claude API."""
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(
+        self, db: AsyncSession, user_id: Optional[uuid.UUID] = None
+    ) -> None:
         self.db = db
+        self.user_id = user_id
 
     async def get_api_key(self) -> Optional[str]:
         """Get Claude API key from settings or environment."""
@@ -159,7 +163,7 @@ class AIService:
 
     async def _get_ratio_context(self, ratio_id: int) -> Optional[RatioContext]:
         """Build context for ratio analysis."""
-        ratio_service = RatioService(self.db)
+        ratio_service = RatioService(self.db, self.user_id)
         history = await ratio_service.get_ratio_history(ratio_id, "1mo")
 
         if not history:

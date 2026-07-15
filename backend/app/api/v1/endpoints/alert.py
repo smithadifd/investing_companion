@@ -222,6 +222,7 @@ async def get_alert_history(
 async def check_alert(
     alert_id: int,
     notify: bool = False,
+    _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
 ) -> DataResponse[dict]:
@@ -229,6 +230,8 @@ async def check_alert(
     Manually check an alert's condition.
 
     - **notify**: If True and condition is met, send a real notification (ignores cooldown)
+
+    Blocked in demo mode: the notify=True path fires a real Discord send.
     """
     from app.db.models.alert import Alert
     from sqlalchemy import select

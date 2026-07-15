@@ -20,10 +20,9 @@ GUARD_EXEMPT = {
     "POST /api/v1/auth/refresh",
     "POST /api/v1/auth/logout",
     "POST /api/v1/auth/logout-all",
-    # Pure calculators — compute a result from the request body, persist nothing.
+    # Pure calculator — computes a result from the request body, persists
+    # nothing and triggers no external side effect.
     "POST /api/v1/trades/position-size",
-    # Read-only: evaluates an alert's current condition; writes no state.
-    "POST /api/v1/alerts/{alert_id}/check",
 }
 
 _MUTATING = {"POST", "PUT", "PATCH", "DELETE"}

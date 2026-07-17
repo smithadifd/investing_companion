@@ -8,9 +8,11 @@ def run_async(coro):
 
     Handles cleanup of shared resources that are bound to the event loop:
     - Discord httpx client (must close before loop destruction)
+    - Redis cache client (singleton connection bound to the loop; issue #012)
     - SQLAlchemy async engine (prevents orphaned asyncpg connections)
     """
     from app.db.session import engine
+    from app.services.cache import cache_service
     from app.services.notifications.discord import discord_service
 
     loop = asyncio.new_event_loop()
@@ -19,5 +21,6 @@ def run_async(coro):
         return loop.run_until_complete(coro)
     finally:
         loop.run_until_complete(discord_service.close())
+        loop.run_until_complete(cache_service.close())
         loop.run_until_complete(engine.dispose())
         loop.close()

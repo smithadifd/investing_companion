@@ -198,10 +198,6 @@ the hosts.
   token silently falls back to Yahoo by design.
 - **`^VIX` and other indices/forex/futures don't come from Schwab** — they delegate per-symbol to Yahoo.
   Don't "fix" a missing Schwab quote for these; the fallback is intentional.
-- **Known bug #48**: `percent_up`/`percent_down` alerts ignore `comparison_period` — don't create
-  percent-based alerts until fixed.
-- **Known bug #49**: forex symbols (`USD`, `JPY`) don't resolve in ratios — use ETF proxies (`FXY`,
-  `UUP`) as a workaround.
 - **TimescaleDB is mandatory** (see § Database) — a plain Postgres image is not a drop-in.
 - **Advisor contract drift**: skipping the § Conventions sync-table on an export/action change ships a
   pack whose version stamps lie to the advisor. Treat it as part of the change, not a follow-up.

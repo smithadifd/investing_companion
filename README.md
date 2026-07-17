@@ -86,12 +86,12 @@ Dual-stack application: Python/FastAPI backend handles data ingestion, analysis,
                               +-----+  +---------+
 ```
 
-Data flows through Celery background tasks that pull from Yahoo Finance and Alpha Vantage on a schedule, normalize it, and store it in TimescaleDB hypertables. The frontend reads from the API, never from external sources directly.
+Data flows through Celery background tasks that pull from Yahoo Finance on a schedule, normalize it, and store it in TimescaleDB hypertables. The frontend reads from the API, never from external sources directly.
 
 ## Features
 
 - **Equity Dashboard** -- Search, quote, and chart any publicly traded stock with TradingView charts
-- **Watchlists** -- Organize equities into named watchlists with custom columns and sorting
+- **Watchlists** -- Organize equities into named watchlists with sorting
 - **Fundamental Analysis** -- P/E, P/B, dividend yield, market cap, and 20+ financial ratios with cross-equity comparison
 - **Market Overview** -- Index tracking (S&P 500, NASDAQ, Dow) with sector heatmaps and daily movers
 - **AI Analysis** -- Claude-powered equity analysis that considers price history, fundamentals, and your watchlist context
@@ -170,7 +170,6 @@ cd frontend && npm test
 | Source | Purpose | Auth |
 |--------|---------|------|
 | Yahoo Finance | Quotes, fundamentals, history | None (unofficial) |
-| Alpha Vantage | Technical indicators, forex | Free API key |
 | Claude API | AI-powered analysis | User-provided key |
 
 ## Support This Project

@@ -15,7 +15,7 @@ advisor --(handoff block)--> executor (Claude Code) --(API calls)--> IC
 `GET /api/v1/export/context-pack` (auth required). `?format=markdown` renders for pasting
 into a conversation; the default JSON is for tooling.
 
-Top-level fields (`schema_version: "1.6"`, `advisor_actions_version: "1.1"`):
+Top-level fields (`schema_version: "1.6"`, `advisor_actions_version: "1.2"`):
 
 | Field | Contents |
 |-------|----------|

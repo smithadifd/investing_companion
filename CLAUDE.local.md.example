@@ -38,8 +38,7 @@ own setup; keep secrets (passwords, tokens) out of the committed example.
   on 0/>1 matches) → execute in dependency order → report IDs → POST an execution receipt to
   `/api/v1/export/handoff-receipts` → clean up the token.
 - **Current watchlist IDs**: your own `id → name` table.
-- **Known bugs to avoid**: e.g. #48 percent alerts ignore `comparison_period`; #49 forex symbols don't
-  resolve in ratios (use ETF proxies). Mirror the live list in AGENTS.md § gotchas.
+- **Known bugs to avoid**: mirror the live list in AGENTS.md § gotchas (empty as of this writing).
 
 ## Session Log
 

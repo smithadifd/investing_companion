@@ -23,6 +23,11 @@ from app.schemas.equity import (
     QuoteResponse,
 )
 from app.services.cache import cache_service
+from app.services.data_providers.base import (
+    MarketDataProvider,
+    ProviderCapability,
+    ProviderError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -241,8 +246,24 @@ def _normalize_dividend_yield(
     return raw_as_fraction
 
 
-class YahooFinanceProvider:
-    """Yahoo Finance data provider using yfinance library."""
+class YahooFinanceProvider(MarketDataProvider):
+    """Yahoo Finance data provider using yfinance library.
+
+    The primary market-data source. Declares all four capabilities and is the
+    provider the resilience layer (``resilience.ResilientProvider``) wraps with
+    retry/backoff/circuit-breaker; Stooq/Alpha Vantage sit behind it as
+    fallbacks (see ``get_quote_provider``).
+    """
+
+    name = "yahoo"
+    capabilities = frozenset(
+        {
+            ProviderCapability.QUOTE,
+            ProviderCapability.HISTORY,
+            ProviderCapability.FUNDAMENTALS,
+            ProviderCapability.SEARCH,
+        }
+    )
 
     async def get_quote(self, symbol: str) -> Optional[QuoteResponse]:
         """Fetch current quote for a symbol. Uses 5-minute cache."""
@@ -260,15 +281,27 @@ class YahooFinanceProvider:
         # Fetch from Yahoo
         yahoo_symbol = normalize_symbol(symbol)
 
-        def _fetch_quote() -> Optional[dict]:
+        def _fetch_quote() -> dict:
             ticker = yf.Ticker(yahoo_symbol)
-            info = ticker.info
-            if not info or "regularMarketPrice" not in info:
-                return None
-            return info
+            return ticker.info or {}
 
         info = await run_in_executor(_fetch_quote)
+
+        # Distinguish a degraded upstream from an honest not-found so the
+        # circuit breaker engages on the former but not the latter:
+        #   - wholly-empty info  => Yahoo rate-limited/degraded  => raise
+        #     ProviderError, so ResilientProvider counts it as a failure and the
+        #     breaker can open instead of hammering a throttled endpoint.
+        #   - populated info lacking a quote (bad ticker) => return None, a clean
+        #     "not found" that must NOT trip the breaker (a batch of invalid
+        #     symbols shouldn't look like an outage).
+        # yfinance doesn't reliably distinguish these beyond "empty vs not", so
+        # this is the documented rule (threshold + self-heal covers edge cases).
         if not info:
+            raise ProviderError(
+                f"Yahoo returned empty info for {symbol} (rate-limited/degraded?)"
+            )
+        if "regularMarketPrice" not in info:
             return None
 
         price = _safe_decimal(info.get("regularMarketPrice"))
@@ -291,6 +324,8 @@ class YahooFinanceProvider:
             volume=_safe_int(info.get("regularMarketVolume")) or 0,
             market_cap=_safe_int(info.get("marketCap")),
             timestamp=datetime.utcnow(),
+            source="yahoo",
+            stale=False,
         )
 
         # Cache the result

@@ -15,6 +15,7 @@ from app.schemas.equity import (
     QuoteResponse,
 )
 from app.services.cache import cache_service
+from app.services.data_providers import get_quote_provider
 from app.services.data_providers.yahoo import YahooFinanceProvider
 
 
@@ -23,6 +24,13 @@ class EquityService:
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+        # Resilient, failover-capable provider (Yahoo primary + Stooq/AV
+        # fallbacks, wrapped in retry/backoff/circuit-breaker) for the public
+        # read path — quotes carry a ``source``/``stale`` degraded flag.
+        self.provider = get_quote_provider()
+        # Yahoo-specific helper kept for get_info-driven metadata
+        # (get_or_create_equity, peer sector lookup) which the fallbacks don't
+        # serve.
         self.yahoo = YahooFinanceProvider()
 
     async def search(self, query: str, limit: int = 20) -> List[EquitySearchResult]:
@@ -50,8 +58,8 @@ class EquityService:
             # Database not available, fall through to external provider
             pass
 
-        # Fall back to Yahoo Finance
-        return await self.yahoo.search(query, limit)
+        # Fall back to the resilient provider chain (Yahoo primary).
+        return await self.provider.search(query, limit)
 
     async def get_quote(self, symbol: str) -> Optional[QuoteResponse]:
         """Get quote with caching."""
@@ -65,8 +73,8 @@ class EquityService:
         except Exception:
             pass  # Cache not available
 
-        # Fetch from provider
-        quote = await self.yahoo.get_quote(symbol)
+        # Fetch from the resilient provider chain (failover marks stale data).
+        quote = await self.provider.get_quote(symbol)
         if quote:
             try:
                 await cache_service.set(
@@ -96,8 +104,8 @@ class EquityService:
         except Exception:
             pass  # Cache not available
 
-        # Fetch from provider
-        history = await self.yahoo.get_history(symbol, period, interval)
+        # Fetch from the resilient provider chain (Yahoo primary, Stooq fallback).
+        history = await self.provider.get_history(symbol, period, interval)
         if history:
             response = HistoryResponse(
                 symbol=symbol.upper(),
@@ -128,8 +136,8 @@ class EquityService:
         except Exception:
             pass  # Cache not available
 
-        # Fetch from provider
-        fundamentals = await self.yahoo.get_fundamentals(symbol)
+        # Fetch from the resilient provider chain (Yahoo primary).
+        fundamentals = await self.provider.get_fundamentals(symbol)
         if fundamentals:
             try:
                 await cache_service.set(

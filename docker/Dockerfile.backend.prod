@@ -43,5 +43,15 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 EXPOSE 8000
 
-# Production command - no reload, use gunicorn with uvicorn workers
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# uvicorn must NOT blanket-trust X-Forwarded-For. The old `--forwarded-allow-ips *`
+# let uvicorn rewrite request.client from attacker-controlled XFF for ANY peer,
+# which defeats the application-level trusted-proxy resolution (get_client_ip +
+# settings.TRUSTED_PROXIES). We default the trust boundary to loopback only via
+# FORWARDED_ALLOW_IPS (config-driven; override at runtime if uvicorn itself must
+# terminate proxy headers). Left at loopback, uvicorn leaves request.client as
+# the real peer, so TRUSTED_PROXIES is the single authority for client identity.
+# See the §3 deploy checklist for setting TRUSTED_PROXIES to Caddy's address.
+ENV FORWARDED_ALLOW_IPS=127.0.0.1
+
+# Production command - no reload; multiple uvicorn workers.
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--proxy-headers"]

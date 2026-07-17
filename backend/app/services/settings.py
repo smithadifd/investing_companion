@@ -5,7 +5,7 @@ import logging
 import uuid
 from typing import Optional
 
-from cryptography.fernet import Fernet, MultiFernet
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from sqlalchemy import delete, select
@@ -158,15 +158,39 @@ class SettingsService:
 
         Routes by version prefix; an unprefixed value is a raw Fernet token
         from the original code and is tried against every known key.
+
+        A decryption failure is re-raised (callers still fail-safe to None) but
+        is logged LOUDLY first: a value stored as ciphertext that won't decrypt
+        almost always means a misconfiguration — e.g. ENCRYPTION_KEY was dropped
+        or changed — not a genuinely-absent secret. Without this, an accidental
+        env change would make every v2 secret silently vanish. No plaintext or
+        key material is ever logged.
         """
-        if encrypted_value.startswith(f"{_VERSION_PRIMARY}:"):
-            token = encrypted_value[len(_VERSION_PRIMARY) + 1:]
-            return self._primary_fernet.decrypt(token.encode()).decode()
-        if encrypted_value.startswith(f"{_VERSION_LEGACY}:"):
-            token = encrypted_value[len(_VERSION_LEGACY) + 1:]
-            return self._legacy_fernet.decrypt(token.encode()).decode()
-        # Unversioned: a raw Fernet token from before this scheme existed.
-        return self._multi_fernet.decrypt(encrypted_value.encode()).decode()
+        try:
+            if encrypted_value.startswith(f"{_VERSION_PRIMARY}:"):
+                token = encrypted_value[len(_VERSION_PRIMARY) + 1:]
+                return self._primary_fernet.decrypt(token.encode()).decode()
+            if encrypted_value.startswith(f"{_VERSION_LEGACY}:"):
+                token = encrypted_value[len(_VERSION_LEGACY) + 1:]
+                return self._legacy_fernet.decrypt(token.encode()).decode()
+            # Unversioned: a raw Fernet token from before this scheme existed.
+            return self._multi_fernet.decrypt(encrypted_value.encode()).decode()
+        except (InvalidToken, ValueError) as exc:
+            prefix = encrypted_value.split(":", 1)[0]
+            version = (
+                prefix
+                if prefix in (_VERSION_PRIMARY, _VERSION_LEGACY)
+                else "unversioned"
+            )
+            logger.error(
+                "Failed to decrypt a stored secret (version=%s): %s. This is a "
+                "DECRYPT FAILURE, not an absent value — it usually means "
+                "ENCRYPTION_KEY is unset/incorrect or the ciphertext is corrupt. "
+                "The value will be treated as absent. No plaintext is logged.",
+                version,
+                type(exc).__name__,
+            )
+            raise
 
     async def get_setting(
         self,

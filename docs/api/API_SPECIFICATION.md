@@ -302,7 +302,7 @@ Response (non-streaming):
   "data": {
     "analysis": "## Bull Case\n\n...",
     "context_used": ["fundamentals", "technicals", "price_history"],
-    "model": "claude-3-5-sonnet-20241022",
+    "model": "claude-sonnet-5",
     "tokens_used": 1500
   }
 }

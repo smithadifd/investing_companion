@@ -366,7 +366,9 @@ export interface RatioQuote {
 
 // AI types
 export type AnalysisType = 'equity' | 'ratio' | 'watchlist' | 'general';
-export type AIModel = 'claude-3-5-sonnet-20241022' | 'claude-3-5-haiku-20241022';
+// Current Claude lineup (kept in sync with backend AIModel enum). Sonnet 5 is
+// the default; the backend resolves an omitted `model` to its configured default.
+export type AIModel = 'claude-sonnet-5' | 'claude-opus-4-8' | 'claude-haiku-4-5-20251001';
 
 export interface AIAnalysisRequest {
   analysis_type: AnalysisType;
@@ -385,6 +387,7 @@ export interface AIAnalysisResponse {
   model: string;
   context_summary: string | null;
   timestamp: string;
+  cached?: boolean;
 }
 
 export interface AISettings {

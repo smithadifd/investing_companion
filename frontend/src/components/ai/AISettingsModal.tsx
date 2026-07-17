@@ -15,14 +15,14 @@ export function AISettingsModal({ isOpen, onClose }: AISettingsModalProps) {
   const updateSettings = useUpdateAISettings();
 
   const [apiKey, setApiKey] = useState('');
-  const [defaultModel, setDefaultModel] = useState('claude-3-5-sonnet-20241022');
+  const [defaultModel, setDefaultModel] = useState('claude-sonnet-5');
   const [customInstructions, setCustomInstructions] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
 
   // Initialize form with current settings
   useEffect(() => {
     if (settings) {
-      setDefaultModel(settings.default_model || 'claude-3-5-sonnet-20241022');
+      setDefaultModel(settings.default_model || 'claude-sonnet-5');
       setCustomInstructions(settings.custom_instructions || '');
     }
   }, [settings]);
@@ -110,11 +110,14 @@ export function AISettingsModal({ isOpen, onClose }: AISettingsModalProps) {
                   onChange={(e) => setDefaultModel(e.target.value)}
                   className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="claude-3-5-sonnet-20241022">
-                    Claude 3.5 Sonnet (Recommended)
+                  <option value="claude-sonnet-5">
+                    Claude Sonnet 5 (Recommended)
                   </option>
-                  <option value="claude-3-5-haiku-20241022">
-                    Claude 3.5 Haiku (Faster, cheaper)
+                  <option value="claude-opus-4-8">
+                    Claude Opus 4.8 (Highest capability)
+                  </option>
+                  <option value="claude-haiku-4-5-20251001">
+                    Claude Haiku 4.5 (Faster, cheaper)
                   </option>
                 </select>
               </div>

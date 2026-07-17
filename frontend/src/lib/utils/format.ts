@@ -92,3 +92,21 @@ export function formatDate(dateString: string): string {
     year: 'numeric',
   }).format(date);
 }
+
+/**
+ * Format an ISO timestamp as a compact "as of" date + time, used to show quote
+ * freshness. Backend timestamps are naive UTC, so append 'Z' when absent.
+ */
+export function formatTimestamp(dateString: string): string {
+  const normalized = /[zZ]|[+-]\d{2}:?\d{2}$/.test(dateString)
+    ? dateString
+    : `${dateString}Z`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return dateString;
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
+}

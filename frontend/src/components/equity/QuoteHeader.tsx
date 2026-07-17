@@ -1,8 +1,13 @@
 'use client';
 
-import { TrendingUp, TrendingDown } from 'lucide-react';
+import { TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react';
 import type { EquityDetail } from '@/lib/api/types';
-import { formatCurrency, formatPercent, formatLargeNumber } from '@/lib/utils/format';
+import {
+  formatCurrency,
+  formatPercent,
+  formatLargeNumber,
+  formatTimestamp,
+} from '@/lib/utils/format';
 
 interface QuoteHeaderProps {
   equity: EquityDetail;
@@ -89,6 +94,28 @@ export function QuoteHeader({ equity }: QuoteHeaderProps) {
           {equity.industry && <span>{equity.industry}</span>}
         </div>
       )}
+
+      <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
+        {quote.timestamp && (
+          <span className="opacity-70">
+            As of {formatTimestamp(quote.timestamp)}
+          </span>
+        )}
+        {quote.stale && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 font-medium text-amber-700 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-400"
+            title={
+              quote.source
+                ? `Primary data source unavailable — showing delayed data via ${quote.source}`
+                : 'Primary data source unavailable — showing delayed fallback data'
+            }
+          >
+            <AlertTriangle className="h-3 w-3" />
+            Delayed data
+            {quote.source ? ` · via ${quote.source}` : ''}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

@@ -95,15 +95,22 @@ Browser → Caddy → {Next.js frontend, FastAPI backend}. Backend layering is *
 models** — endpoints stay thin; business logic lives in `services/`. Celery tasks pull from providers on
 a schedule, normalize, and write to TimescaleDB; the frontend never calls external data sources directly.
 
-**Data providers** are pluggable in `backend/app/services/data_providers/` behind a common interface
-(`get_quote`/`get_history`/`search`) with fallback logic in the aggregator:
+**Data providers** are pluggable in `backend/app/services/data_providers/` behind the
+`MarketDataProvider` ABC (`base.py`) — each provider declares its `capabilities`
+(quote/history/fundamentals/search). The **resilience layer** (`resilience.py`) wraps a
+provider in retry + exponential backoff + a circuit-breaker (`ResilientProvider`) and chains
+providers with health-based failover (`FailoverQuoteProvider`): when the primary's breaker is
+open or it returns no data, the call falls through to a fallback and the quote is stamped
+`stale`/`source` so the UI can flag degraded data. `get_quote_provider()` (`__init__.py`)
+builds the chain — the sibling of `get_extended_quote_provider` (extended-hours selection).
 
-| Provider | Usage | Notes |
-|----------|-------|-------|
-| Yahoo Finance | Quotes, fundamentals, history; `^VIX` and other index/forex/futures fallback | Unofficial — be gentle; may break |
-| Alpha Vantage | Technical indicators, forex | Free key, 5 req/min |
-| Polygon.io | Optional real-time/alerts | Paid |
-| Schwab | Real-time + pre/post-market quotes for briefings | Opt-in OAuth; tokens expire every 7 days |
+| Provider | Role | Usage | Notes |
+|----------|------|-------|-------|
+| Yahoo Finance | Primary | Quotes, fundamentals, history, search; `^VIX` and other index/forex/futures | Unofficial — be gentle; may break; now retry/backoff/breaker-wrapped |
+| Stooq | Fallback | Quotes + daily history (`stooq.py`) | **No key**; US equities/ETFs; always active |
+| Alpha Vantage | Fallback (opt-in) | Quotes (`alpha_vantage.py`) | Free key `ALPHA_VANTAGE_API_KEY`, ~5 req/min; key-gated, inert without it |
+| Polygon.io | — | Documented only | Paid; unimplemented |
+| Schwab | Extended-hours | Real-time + pre/post-market quotes for briefings | Opt-in OAuth; tokens expire every 7 days |
 
 **AI advisor contract** — an external Claude advisor reads a versioned context pack and writes changes
 back through a handoff loop. The single source of truth is `docs/api/handoff-schema.md` (pack shape,

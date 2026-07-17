@@ -22,6 +22,10 @@ export interface Quote {
   volume: number;
   market_cap: number | null;
   timestamp: string;
+  /** Provider that produced the quote (e.g. "yahoo", "stooq"). */
+  source?: string | null;
+  /** True when served by a fallback because the primary was unavailable. */
+  stale?: boolean;
 }
 
 export interface OHLCVData {

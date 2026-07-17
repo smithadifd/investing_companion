@@ -167,10 +167,22 @@ cd frontend && npm test
 
 ## Data Sources
 
-| Source | Purpose | Auth |
-|--------|---------|------|
-| Yahoo Finance | Quotes, fundamentals, history | None (unofficial) |
-| Claude API | AI-powered analysis | User-provided key |
+Market data flows through a resilient provider chain: the primary is wrapped in
+retry + exponential backoff + a circuit breaker, and if it is unavailable the
+request fails over to a fallback. Data served by a fallback is flagged **stale**
+so the UI can show a "delayed data" badge with the source and an "as of"
+timestamp.
+
+| Source | Role | Purpose | Auth |
+|--------|------|---------|------|
+| Yahoo Finance | Primary | Quotes, fundamentals, history, search | None (unofficial) |
+| Stooq | Fallback | Quotes + daily history (US equities/ETFs) | **None** |
+| Alpha Vantage | Fallback (opt-in) | Quotes | Free API key (`ALPHA_VANTAGE_API_KEY`) |
+| Claude API | — | AI-powered analysis | User-provided key |
+
+Stooq needs no key and is always active, so failover works out of the box.
+Alpha Vantage is added to the chain only when its key is configured. Polygon.io
+remains documented-but-unimplemented (paid tier).
 
 ## Support This Project
 

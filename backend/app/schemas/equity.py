@@ -32,6 +32,12 @@ class QuoteResponse(BaseModel):
     volume: int
     market_cap: Optional[int] = None
     timestamp: datetime
+    # Provider-resilience metadata: which provider produced the quote and
+    # whether it is degraded (served by a fallback because the primary was
+    # unavailable). ``timestamp`` above is the "as of" time the UI renders so a
+    # user can see when data went stale.
+    source: Optional[str] = None
+    stale: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

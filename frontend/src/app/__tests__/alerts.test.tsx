@@ -63,6 +63,9 @@ vi.mock('@/lib/hooks/useAlert', () => ({
   useAlertStats: () => ({
     data: mockStats,
   }),
+  useAlertDeliveryHealth: () => ({
+    data: { pending: 0, delivered: 0, failed: 0, last_delivered_at: null, oldest_pending_at: null },
+  }),
   useAllAlertHistory: () => ({
     data: [],
   }),
@@ -212,6 +215,7 @@ describe('AlertsPage - empty state', () => {
     vi.doMock('@/lib/hooks/useAlert', () => ({
       useAlerts: () => ({ data: [], isLoading: false }),
       useAlertStats: () => ({ data: { total_alerts: 0, active_alerts: 0, triggered_today: 0, triggered_this_week: 0 } }),
+      useAlertDeliveryHealth: () => ({ data: { pending: 0, delivered: 0, failed: 0, last_delivered_at: null, oldest_pending_at: null } }),
       useAllAlertHistory: () => ({ data: [] }),
       useToggleAlert: () => ({ mutate: vi.fn() }),
       useDeleteAlert: () => ({ mutate: vi.fn() }),

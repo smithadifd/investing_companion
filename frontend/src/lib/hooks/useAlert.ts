@@ -6,6 +6,7 @@ import type {
   Alert,
   AlertCheckResult,
   AlertCreate,
+  AlertDeliveryHealth,
   AlertHistory,
   AlertStats,
   AlertUpdate,
@@ -42,6 +43,19 @@ export function useAlertStats() {
     queryKey: ['alerts', 'stats'],
     queryFn: () => api.getAlertStats(),
     staleTime: 60 * 1000, // 1 minute
+    refetchInterval: 60 * 1000,
+  });
+}
+
+/**
+ * Hook to fetch alert-delivery outbox health (pending/delivered/failed).
+ * Lets the UI show that a quiet feed means "not triggered," not "send lost."
+ */
+export function useAlertDeliveryHealth() {
+  return useQuery<AlertDeliveryHealth>({
+    queryKey: ['alerts', 'delivery-health'],
+    queryFn: () => api.getAlertDeliveryHealth(),
+    staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
   });
 }

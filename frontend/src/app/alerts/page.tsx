@@ -20,6 +20,7 @@ import {
 import {
   useAlerts,
   useAlertStats,
+  useAlertDeliveryHealth,
   useToggleAlert,
   useDeleteAlert,
   useAllAlertHistory,
@@ -409,6 +410,7 @@ export default function AlertsPage() {
 
   const { data: alerts, isLoading: alertsLoading } = useAlerts();
   const { data: stats } = useAlertStats();
+  const { data: deliveryHealth } = useAlertDeliveryHealth();
   const { data: history } = useAllAlertHistory();
   const toggleAlert = useToggleAlert();
   const deleteAlert = useDeleteAlert();
@@ -502,6 +504,34 @@ export default function AlertsPage() {
             color="bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400"
           />
         </div>
+
+        {/* Notification-delivery health. Quiet when healthy; only surfaces
+            when notifications are backing up (pending) or failed, so a silent
+            feed provably means "nothing triggered," not "a send was lost." */}
+        {deliveryHealth &&
+          (deliveryHealth.failed > 0 || deliveryHealth.pending > 0) && (
+            <div
+              className={`flex items-center gap-2 mb-6 px-4 py-3 rounded-lg text-sm border ${
+                deliveryHealth.failed > 0
+                  ? 'bg-red-50 border-red-200 text-red-700 dark:bg-red-900/20 dark:border-red-900/40 dark:text-red-400'
+                  : 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-900/20 dark:border-amber-900/40 dark:text-amber-400'
+              }`}
+              role="status"
+            >
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>
+                Notification delivery:{' '}
+                <strong>{deliveryHealth.pending}</strong> pending
+                {deliveryHealth.failed > 0 && (
+                  <>
+                    {' · '}
+                    <strong>{deliveryHealth.failed}</strong> failed (retries
+                    exhausted)
+                  </>
+                )}
+              </span>
+            </div>
+          )}
 
         {/* Tabs */}
         <div className="flex gap-1 mb-6 bg-neutral-100 dark:bg-neutral-800 p-1 rounded-lg w-fit">

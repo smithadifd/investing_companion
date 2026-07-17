@@ -6,8 +6,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.alert import AlertDelivery
 from app.schemas.alert import AlertConditionType, AlertCreate, AlertUpdate
 from app.schemas.equity import QuoteResponse
 from app.schemas.watchlist import EntryZone, WatchlistItemCreate, WatchlistItemUpdate
@@ -56,6 +58,27 @@ async def _zone_item(db, *, symbol="EQT", zones=None):
         db, wl, equity, entry_zones=zones if zones is not None else EQT_ZONES
     )
     return equity, item
+
+
+async def _delivery_count(db, alert_id: int) -> int:
+    """Enqueued outbox rows for an alert. Notifications are delivered via the
+    transactional outbox now, so one pending row per fired tier replaces the
+    old inline discord_service.send_alert_notification call."""
+    return await db.scalar(
+        select(func.count(AlertDelivery.id)).where(
+            AlertDelivery.alert_id == alert_id
+        )
+    )
+
+
+async def _latest_delivery_name(db, alert_id: int) -> str:
+    row = await db.execute(
+        select(AlertDelivery)
+        .where(AlertDelivery.alert_id == alert_id)
+        .order_by(AlertDelivery.id.desc())
+    )
+    delivery = row.scalars().first()
+    return delivery.payload["alert_name"] if delivery else ""
 
 
 def _zone_service(db, price: float | None) -> AlertService:
@@ -191,27 +214,25 @@ class TestZoneAlertProcessing:
         fired, _ = await _zone_service(db, 51.0).process_alert(alert)
         assert fired is True
         assert alert.zone_state["Half starter"]["armed"] is False
-        assert mock_discord.send_alert_notification.await_count == 1
-        call = mock_discord.send_alert_notification.await_args.kwargs
-        assert "Half starter" in call["alert_name"]
+        assert await _delivery_count(db, alert.id) == 1
+        assert "Half starter" in await _latest_delivery_name(db, alert.id)
 
         # Still in tier 1 -> no re-fire
         fired, _ = await _zone_service(db, 50.5).process_alert(alert)
         assert fired is False
-        assert mock_discord.send_alert_notification.await_count == 1
+        assert await _delivery_count(db, alert.id) == 1
 
         # Drops into tier 2 -> tier 2 fires, tier 1 does NOT re-fire
         fired, _ = await _zone_service(db, 47.5).process_alert(alert)
         assert fired is True
-        assert mock_discord.send_alert_notification.await_count == 2
-        call = mock_discord.send_alert_notification.await_args.kwargs
-        assert "Full add" in call["alert_name"]
+        assert await _delivery_count(db, alert.id) == 2
+        assert "Full add" in await _latest_delivery_name(db, alert.id)
         assert alert.zone_state["Half starter"]["armed"] is False
 
         # Recovers back into tier 1 from below -> same excursion, no fire
         fired, _ = await _zone_service(db, 51.0).process_alert(alert)
         assert fired is False
-        assert mock_discord.send_alert_notification.await_count == 2
+        assert await _delivery_count(db, alert.id) == 2
 
     @patch("app.services.alert.discord_service")
     async def test_rearms_after_exit_out_the_entry_side(
@@ -247,7 +268,7 @@ class TestZoneAlertProcessing:
 
         fired, _ = await _zone_service(db, 51.5).process_alert(alert)
         assert fired is True
-        assert mock_discord.send_alert_notification.await_count == 2
+        assert await _delivery_count(db, alert.id) == 2
 
     @patch("app.services.alert.discord_service")
     async def test_per_tier_cooldown_blocks_refire_within_window(
@@ -272,7 +293,7 @@ class TestZoneAlertProcessing:
         await _zone_service(db, 53.0).process_alert(alert)
         fired, _ = await _zone_service(db, 51.0).process_alert(alert)
         assert fired is False
-        assert mock_discord.send_alert_notification.await_count == 1
+        assert await _delivery_count(db, alert.id) == 1
 
     @patch("app.services.alert.discord_service")
     async def test_baseline_inside_zone_does_not_fire(
@@ -312,15 +333,13 @@ class TestZoneAlertProcessing:
         await _zone_service(db, 55.0).process_alert(alert)   # baseline
         fired, _ = await _zone_service(db, 45.0).process_alert(alert)
         assert fired is True
-        assert mock_discord.send_alert_notification.await_count == 1
-        call = mock_discord.send_alert_notification.await_args.kwargs
-        assert "Aggressive" in call["alert_name"]
+        assert await _delivery_count(db, alert.id) == 1
+        assert "Aggressive" in await _latest_delivery_name(db, alert.id)
 
         # Recovery up into tier 2: a fresh entry for that tier
         fired, _ = await _zone_service(db, 47.5).process_alert(alert)
         assert fired is True
-        call = mock_discord.send_alert_notification.await_args.kwargs
-        assert "Full add" in call["alert_name"]
+        assert "Full add" in await _latest_delivery_name(db, alert.id)
 
     @patch("app.services.alert.discord_service")
     async def test_fetch_failure_preserves_zone_state(

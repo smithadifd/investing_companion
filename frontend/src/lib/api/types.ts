@@ -493,6 +493,16 @@ export interface AlertStats {
   triggered_this_week: number;
 }
 
+/** Health of the alert-notification delivery outbox. Healthy counts mean a
+ * quiet feed can be trusted: silence is "not triggered," not "a send was lost." */
+export interface AlertDeliveryHealth {
+  pending: number;
+  delivered: number;
+  failed: number;
+  last_delivered_at: string | null;
+  oldest_pending_at: string | null;
+}
+
 export interface AlertCheckResult {
   alert_id: number;
   is_triggered: boolean;

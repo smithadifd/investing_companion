@@ -22,6 +22,20 @@ celery_app.conf.update(
     task_time_limit=300,  # 5 minutes
     worker_prefetch_multiplier=1,
     result_expires=3600,  # 1 hour
+    # --- Delivery reliability (alert outbox) ---
+    # acks_late + reject_on_worker_lost: a task is only acked AFTER it finishes,
+    # so a worker crash mid-run re-queues the message instead of dropping it.
+    # Delivery is AT-LEAST-ONCE with a bounded (<= max_attempts) duplicate
+    # window (Discord has no receiver dedup): a redelivered task claims one row
+    # at a time (FOR UPDATE SKIP LOCKED + per-row lease), so it never double-
+    # sends a row already in flight, and any worker concurrency is safe (no
+    # need to pin a dedicated concurrency=1 delivery queue). The only duplicate
+    # is the deliberate "crash after a successful send" case.
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
+    # visibility_timeout must exceed the delivery lease so a redelivered task
+    # does not race a still-leased row.
+    broker_transport_options={"visibility_timeout": 600},
 )
 
 # Celery Beat schedule for periodic tasks
@@ -40,6 +54,15 @@ else:
         "check-alerts-every-5-minutes": {
             "task": "alerts.check_all_alerts",
             "schedule": 300.0,  # 5 minutes in seconds
+        },
+        # Drain the alert-delivery outbox every 30s: reap stranded rows, then
+        # claim-and-send one row at a time (per-row lease + bounded retry).
+        # Decoupled from evaluation so a send failure never rolls back the
+        # trigger record. Interval must stay below the delivery lease
+        # (DELIVERY_LEASE_SECONDS) so a live lease is never mistaken for stale.
+        "deliver-pending-alerts": {
+            "task": "alerts.deliver_pending_notifications",
+            "schedule": 30.0,
         },
         # Dynamic notification scheduler - checks configured send times every minute
         # Fires morning pulse and EOD wrap tasks when the time matches settings

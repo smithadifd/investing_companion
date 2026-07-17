@@ -11,6 +11,7 @@ import type {
   Alert,
   AlertCheckResult,
   AlertCreate,
+  AlertDeliveryHealth,
   AlertHistory,
   AlertStats,
   AlertUpdate,
@@ -910,6 +911,13 @@ class ApiClient {
    */
   async getAlertStats(): Promise<AlertStats> {
     return this.fetch<AlertStats>('/alerts/stats');
+  }
+
+  /**
+   * Get alert-delivery outbox health (pending/delivered/failed counts)
+   */
+  async getAlertDeliveryHealth(): Promise<AlertDeliveryHealth> {
+    return this.fetch<AlertDeliveryHealth>('/alerts/delivery-health');
   }
 
   /**

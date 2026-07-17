@@ -18,20 +18,30 @@ const periods = [
 
 export function PeriodSelector({ value, onChange }: PeriodSelectorProps) {
   return (
-    <div className="flex gap-1 bg-neutral-100 dark:bg-neutral-700 rounded-lg p-1 overflow-x-auto">
-      {periods.map((period) => (
-        <button
-          key={period.value}
-          onClick={() => onChange(period.value)}
-          className={`px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
-            value === period.value
-              ? 'bg-white dark:bg-neutral-600 text-neutral-900 dark:text-neutral-50 shadow-sm'
-              : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-50'
-          }`}
-        >
-          {period.label}
-        </button>
-      ))}
+    <div
+      role="group"
+      aria-label="Chart time period"
+      className="flex gap-1 bg-neutral-100 dark:bg-neutral-700 rounded-lg p-1 overflow-x-auto"
+    >
+      {periods.map((period) => {
+        const selected = value === period.value;
+        return (
+          <button
+            key={period.value}
+            type="button"
+            aria-pressed={selected}
+            aria-label={`Show ${period.label} chart`}
+            onClick={() => onChange(period.value)}
+            className={`px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
+              selected
+                ? 'bg-white dark:bg-neutral-600 text-neutral-900 dark:text-neutral-50 shadow-sm'
+                : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-50'
+            }`}
+          >
+            {period.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

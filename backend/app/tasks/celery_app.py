@@ -33,6 +33,11 @@ if settings.DEMO_MODE:
             "task": "events.refresh_all_watchlist_events",
             "schedule": crontab(hour=22, minute=0),
         },
+        # Keep the macro calendar self-healing from FRED (no-op without a key)
+        "refresh-macro-calendar-daily": {
+            "task": "events.refresh_macro_calendar",
+            "schedule": crontab(hour=7, minute=30),
+        },
     }
 else:
     celery_app.conf.beat_schedule = {
@@ -52,6 +57,13 @@ else:
         "refresh-watchlist-events-daily": {
             "task": "events.refresh_all_watchlist_events",
             "schedule": crontab(hour=22, minute=0),
+        },
+        # Refresh the macro-release calendar (CPI/NFP/GDP/PCE) from FRED daily
+        # at 7:30 UTC so moved dates self-heal before the morning pulse. No-op
+        # when FRED_API_KEY is unset (seeded dates stay in place).
+        "refresh-macro-calendar-daily": {
+            "task": "events.refresh_macro_calendar",
+            "schedule": crontab(hour=7, minute=30),
         },
         # Persist daily OHLCV bars after market close. Percent-change and
         # percent-from-high alerts read their reference values from this data.

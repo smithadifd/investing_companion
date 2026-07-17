@@ -3,12 +3,15 @@
 Introduces the ``alert_deliveries`` table: a transactional outbox for alert
 notifications. A ``pending`` row is written in the SAME transaction that
 evaluates a trigger and records ``alert_history``; a separate Celery claim/send
-step (per-row lease + bounded retry) transitions it ``pending`` ->
-``delivered`` / ``failed``. This makes delivery crash-safe: a crash mid-send
-neither silently drops the notification nor re-fires the whole evaluation.
+step (claim one row at a time, per-row lease + bounded retry) transitions it
+``pending`` -> ``delivered`` / ``failed``. Delivery is at-least-once with a
+bounded (<= ``max_attempts``) duplicate window — it never silently drops a
+notification and never re-fires the whole evaluation.
 
-``idempotency_key`` is unique per trigger event, so a re-run of the evaluation
-can never enqueue the same notification twice.
+``idempotency_key`` is a STABLE per-trigger identity (scalar alerts: alert +
+cooldown-window bucket; zone tiers: alert + tier + per-fire timestamp), not the
+history-row id, so two concurrent evaluations of a scalar trigger collide on the
+unique index and enqueue once.
 
 The unique index on ``idempotency_key`` is created explicitly via
 ``create_index(unique=True)`` (matching the column's ``unique=True``). The

@@ -204,14 +204,23 @@ class AlertDelivery(Base, TimestampMixin):
     records the ``AlertHistory`` row — never after a send. A separate claim /
     send step (Celery, with a per-row lease + bounded retry) transitions the
     row ``pending`` -> ``delivered`` / ``failed``. This decouples the durable
-    "we decided to notify" fact from the fallible network send, so a crash
-    mid-send neither silently drops the notification (the pending row survives
-    and is retried) nor re-fires the whole evaluation (the notification is
-    never sent inside the evaluation transaction).
+    "we decided to notify" fact from the fallible network send.
 
-    ``idempotency_key`` is unique per trigger event (derived from the alert +
-    its history row, plus the tier for entry-zone alerts), so an evaluation
-    that runs twice can never enqueue the same notification twice.
+    Delivery is AT-LEAST-ONCE with a bounded (<= ``max_attempts``) duplicate
+    window: a crash BEFORE the send re-sends nothing that was lost (the pending
+    row is retried), while a crash AFTER a successful send but before the
+    ``delivered`` commit re-sends once the lease expires (Discord has no
+    receiver-side dedup). Never dropping a price alert is worth that rare,
+    bounded duplicate.
+
+    ``idempotency_key`` is a STABLE per-trigger identity that does NOT depend
+    on the freshly-created history-row id. For scalar alerts it is the alert id
+    plus the cooldown-window bucket of the trigger time, so two concurrent
+    evaluations of the same trigger produce the same key and collide on the
+    unique constraint (overlapping runs enqueue once). Entry-zone tiers, which
+    can legitimately re-fire within a window, key on the tier's per-fire
+    ``last_fired_at`` instead (re-fires stay distinct; overlapping runs are kept
+    apart by the Celery + per-row leases).
     """
 
     __tablename__ = "alert_deliveries"
@@ -232,7 +241,9 @@ class AlertDelivery(Base, TimestampMixin):
         nullable=False,
     )
 
-    # Per-trigger idempotency key: enqueue is a no-op if it already exists.
+    # Stable per-trigger idempotency key (alert + cooldown-window bucket [+
+    # tier]); a concurrent re-evaluation reuses it and collides here instead of
+    # enqueuing a second time.
     idempotency_key: Mapped[str] = mapped_column(
         String(200), nullable=False, unique=True
     )

@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import List, Optional, Tuple
 
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.alert import (
@@ -460,24 +461,18 @@ class AlertService:
 
             # Record the trigger and ENQUEUE the notification (transactional
             # outbox) in ONE transaction. The Discord send happens later, in
-            # the claim/deliver step. Because nothing is sent inside this
-            # transaction, a crash here can neither double-send (nothing went
-            # out) nor silently drop (the pending row is durable and retried).
-            history = AlertHistory(
-                alert_id=alert.id,
-                triggered_value=result.current_value,
-                threshold_value=result.threshold_value,
-                notification_sent=False,
-            )
-            self.db.add(history)
-
-            # Update alert
-            alert.last_triggered_at = datetime.now(timezone.utc)
-            alert.last_checked_value = result.current_value
-
+            # the claim/deliver step. Nothing is sent inside this transaction,
+            # so a crash here neither drops the notification (the pending row
+            # is durable and retried) nor sends it twice from a re-evaluation
+            # (the enqueue is idempotent on a STABLE per-trigger key).
+            now = datetime.now(timezone.utc)
+            # Capture the id up front: after a dedup savepoint rollback the
+            # alert row is expired, and async SQLAlchemy can't lazily reload it
+            # in the except branch.
+            alert_id = alert.id
             target_info = await self._get_target_info(alert)
-            if target_info:
-                payload = self._build_delivery_payload(
+            payload = (
+                self._build_delivery_payload(
                     alert_name=alert.name,
                     target_info=target_info,
                     condition_type=alert.condition_type,
@@ -486,9 +481,41 @@ class AlertService:
                     comparison_period=alert.comparison_period,
                     notes=alert.notes,
                 )
-                await self._enqueue_delivery(alert, history, payload)
-
-            await self.db.commit()
+                if target_info
+                else None
+            )
+            try:
+                # Nested savepoint: a duplicate stable idempotency key rolls
+                # back JUST this trigger write and leaves the shared session
+                # usable (no PendingRollbackError cascading to the rest of the
+                # batch), instead of double-recording a trigger a concurrent
+                # run already handled.
+                async with self.db.begin_nested():
+                    history = AlertHistory(
+                        alert_id=alert.id,
+                        triggered_value=result.current_value,
+                        threshold_value=result.threshold_value,
+                        notification_sent=False,
+                    )
+                    self.db.add(history)
+                    alert.last_triggered_at = now
+                    alert.last_checked_value = result.current_value
+                    if payload is not None:
+                        await self._enqueue_delivery(
+                            alert, history, payload,
+                            self._trigger_idempotency_key(alert, now),
+                        )
+                await self.db.commit()
+            except IntegrityError:
+                # The unique idempotency key collided: a concurrent evaluation
+                # already enqueued this exact trigger. The savepoint has already
+                # rolled back (this alert only — sibling alerts in the batch are
+                # untouched), so just record the no-op dedup.
+                logger.info(
+                    f"Alert {alert_id}: trigger already enqueued by a "
+                    f"concurrent run; deduped"
+                )
+                return False, None
 
             logger.info(
                 f"Alert {alert.id} ({alert.name}) triggered; delivery enqueued"
@@ -530,19 +557,28 @@ class AlertService:
     #
     # Notifications are delivered via a transactional outbox. process_alert /
     # _process_zone_alert enqueue a `pending` AlertDelivery row in the SAME
-    # transaction that records the trigger. This claim/deliver step — run by a
-    # Celery task on a short cadence, with acks_late + retry — atomically
-    # leases a batch of due rows, sends each, and marks it delivered/failed.
+    # transaction that records the trigger. A separate claim/deliver step — a
+    # Celery task on a short cadence, acks_late + bounded retry — claims ONE due
+    # row at a time (leasing it immediately before its own send), sends it, and
+    # marks it delivered/failed.
     #
-    # Crash-safety:
-    #   * crash BEFORE send  -> the pending row is durable, so it is retried
-    #     (no silent drop);
-    #   * a re-run of the evaluation cannot enqueue twice (unique idempotency
-    #     key), and the send is never inside the evaluation transaction (no
-    #     double-send from an evaluation retry);
-    #   * the per-row lease means two overlapping claim runs never grab the
-    #     same row, and a crashed sender's row only becomes claimable again
-    #     after the lease expires.
+    # Delivery guarantee: AT-LEAST-ONCE with a bounded (<= max_attempts)
+    # duplicate window. Discord has no receiver-side dedup, so a crash AFTER a
+    # successful POST but BEFORE the `delivered` commit re-sends once the lease
+    # expires. This is the deliberate tradeoff for price alerts: never drop is
+    # worth a rare, bounded duplicate. Concretely:
+    #   * crash BEFORE send -> the durable pending row is retried (no drop);
+    #   * crash AFTER send, before the delivered-commit -> re-sent after the
+    #     lease expires (bounded duplicate, <= max_attempts);
+    #   * two concurrent EVALUATIONS of the same trigger collapse to one enqueue
+    #     (stable idempotency key + unique constraint), so overlapping runs do
+    #     not each enqueue;
+    #   * claim-one-at-a-time + FOR UPDATE SKIP LOCKED + a per-row lease means a
+    #     row in flight is never re-claimed, so overlapping DELIVERY runs (any
+    #     worker concurrency) do not double-send it;
+    #   * a row whose retries are exhausted reaches a terminal `failed` state —
+    #     either from _send_delivery, or from reap_stranded_deliveries for the
+    #     crash-after-final-claim edge — so nothing is stuck `pending` forever.
 
     @staticmethod
     def _build_delivery_payload(
@@ -574,32 +610,60 @@ class AlertService:
             "condition_override": condition_override,
         }
 
+    @staticmethod
+    def _trigger_idempotency_key(alert: Alert, trigger_time: datetime) -> str:
+        """Stable per-trigger identity for scalar-alert outbox dedup.
+
+        Two concurrent evaluations of the SAME logical trigger must agree on
+        this key so the unique constraint collapses them to a single enqueue.
+        It is derived from the alert id and the cooldown-window bucket of the
+        trigger time (NOT the freshly-minted history id, which differs per
+        evaluation and would make the constraint inert). A genuinely later
+        trigger falls in a later cooldown window and so gets a distinct key.
+        (Entry-zone tiers can legitimately re-fire within a window, so they key
+        on the tier's per-fire ``last_fired_at`` instead — see
+        ``_process_zone_alert``.)
+
+        Caveat: two concurrent evaluations that straddle a cooldown-window
+        boundary get different buckets and would both enqueue — a rare edge,
+        further gated by the app-level cooldown check, and it only risks the
+        already-accepted bounded duplicate, never a drop.
+        """
+        window_seconds = max(alert.cooldown_minutes or 1, 1) * 60
+        bucket = int(trigger_time.timestamp() // window_seconds)
+        return f"alert:{alert.id}:win:{bucket}"
+
     async def _enqueue_delivery(
         self,
         alert: Alert,
         history: AlertHistory,
         payload: dict,
-        key_suffix: str = "",
+        idempotency_key: str,
     ) -> AlertDelivery:
         """Add a pending outbox row to the current (uncommitted) transaction.
 
-        Flushes first so ``history.id`` is available for the idempotency key.
-        The row is committed by the caller alongside the history/alert state,
-        making the enqueue atomic with the trigger record.
+        Flushes first so ``history.id`` is available for the FK. The row is
+        committed by the caller alongside the history/alert state, making the
+        enqueue atomic with the trigger record. ``idempotency_key`` is a stable
+        per-trigger identity (see ``_trigger_idempotency_key``); a concurrent
+        re-evaluation reuses it and collides on the unique constraint, which
+        the caller catches as a clean no-op dedup.
         """
-        await self.db.flush()  # populate history.id
-        key = f"alert:{alert.id}:hist:{history.id}"
-        if key_suffix:
-            key = f"{key}:{key_suffix}"
+        await self.db.flush()  # populate history.id for alert_history_id
         delivery = AlertDelivery(
             alert_id=alert.id,
             alert_history_id=history.id,
             user_id=alert.user_id,
-            idempotency_key=key,
+            idempotency_key=idempotency_key,
             status=AlertDeliveryStatus.PENDING.value,
             payload=payload,
         )
         self.db.add(delivery)
+        # Flush the INSERT here (awaited, inside the caller's savepoint) so a
+        # duplicate-key collision surfaces as an IntegrityError in the greenlet
+        # context — where the savepoint can roll it back cleanly — rather than
+        # at commit/savepoint-release, which mishandles the async unwind.
+        await self.db.flush()
         return delivery
 
     async def claim_pending_deliveries(
@@ -664,25 +728,89 @@ class AlertService:
         limit: int = DELIVERY_BATCH_LIMIT,
         lease_seconds: int = DELIVERY_LEASE_SECONDS,
     ) -> dict:
-        """Claim then send a batch of pending deliveries. Called by Celery."""
-        claimed = await self.claim_pending_deliveries(
-            limit=limit, lease_seconds=lease_seconds
-        )
+        """Drain up to ``limit`` pending deliveries, one claim-and-send at a
+        time. Called by Celery.
+
+        Claiming ONE row per iteration (rather than a whole batch under a
+        single up-front lease) leases each row immediately before its own send.
+        That removes the batch-vs-lease amplifier: a slow send can never let a
+        not-yet-sent tail row's lease expire while this worker still holds it,
+        so a concurrent drain can't re-claim and double-send the tail. Safe
+        under any worker concurrency because the claim uses FOR UPDATE SKIP
+        LOCKED (disjoint single-row claims).
+        """
+        claimed_total = 0
         sent = 0
         failed = 0
-        for delivery in claimed:
-            ok = await self._send_delivery(delivery)
-            if ok:
+        for _ in range(limit):
+            claimed = await self.claim_pending_deliveries(
+                limit=1, lease_seconds=lease_seconds
+            )
+            if not claimed:
+                break
+            claimed_total += 1
+            if await self._send_delivery(claimed[0]):
                 sent += 1
             else:
                 failed += 1
-        return {"claimed": len(claimed), "sent": sent, "failed": failed}
+        return {"claimed": claimed_total, "sent": sent, "failed": failed}
+
+    async def reap_stranded_deliveries(self) -> int:
+        """Force exhausted-but-still-pending rows to a terminal ``failed`` state.
+
+        A crash AFTER the final claim (which bumps ``attempts`` to
+        ``max_attempts``) but BEFORE the send leaves a row ``pending`` with an
+        expired lease and no remaining retry budget: ``claim_pending_deliveries``
+        excludes it (``attempts < max_attempts``), so without this reaper it
+        would be stuck ``pending`` forever — a silent drop. This marks such rows
+        ``failed`` (with a reason) so every row reaches a terminal state and is
+        visible in the health view. Runs cheaply on the delivery cadence.
+        """
+        now = datetime.now(timezone.utc)
+        reap = text(
+            """
+            UPDATE alert_deliveries
+            SET status = :failed,
+                lease_expires_at = NULL,
+                last_error = COALESCE(last_error,
+                    'stranded: retries exhausted before a send completed'),
+                updated_at = now()
+            WHERE status = :pending
+              AND attempts >= max_attempts
+              AND (lease_expires_at IS NULL OR lease_expires_at < :now)
+            RETURNING id, alert_history_id
+            """
+        )
+        result = await self.db.execute(
+            reap,
+            {
+                "failed": AlertDeliveryStatus.FAILED.value,
+                "pending": AlertDeliveryStatus.PENDING.value,
+                "now": now,
+            },
+        )
+        rows = result.all()
+        history_ids = [r[1] for r in rows if r[1] is not None]
+        if history_ids:
+            await self.db.execute(
+                text(
+                    "UPDATE alert_history SET notification_sent = false, "
+                    "notification_error = COALESCE(notification_error, "
+                    "'delivery stranded: retries exhausted') "
+                    "WHERE id = ANY(:ids)"
+                ),
+                {"ids": history_ids},
+            )
+        await self.db.commit()
+        return len(rows)
 
     async def _send_delivery(self, delivery: AlertDelivery) -> bool:
         """Send one claimed delivery and record the outcome.
 
         On success: ``delivered`` and the linked history row is stamped sent.
-        On failure with retries left: cleared lease so the next run retries.
+        On failure with retries left: the row stays ``pending`` and KEEPS its
+        lease as backoff, so it is retried on a later drain (after the lease
+        expires) rather than hot-looped within this one.
         On failure with retries exhausted: ``failed`` (terminal, not dropped —
         it stays queryable in the health view).
         """
@@ -731,8 +859,12 @@ class AlertService:
                     history.notification_channel = None
                     history.notification_error = error
             else:
-                # Leave pending and release the lease so the next claim retries.
-                delivery.lease_expires_at = None
+                # Retries remain: keep the row pending and KEEP the lease as
+                # backoff. Because claim-one-send-one would otherwise re-grab a
+                # lease-cleared row within the same drain, holding the lease
+                # makes the row re-claimable only on a later drain (after the
+                # lease expires), pacing retries instead of hot-looping them.
+                pass
 
         await self.db.commit()
         return success
@@ -1218,41 +1350,65 @@ class AlertService:
                 alert, zones, current_value
             )
 
-            alert.zone_state = new_state
-            alert.last_checked_value = current_value
+            now = datetime.now(timezone.utc)
+            alert_id = alert.id  # capture before any dedup savepoint rollback
+            try:
+                # Nested savepoint so a duplicate tier key rolls back just this
+                # write and leaves the session usable (see process_alert).
+                async with self.db.begin_nested():
+                    alert.zone_state = new_state
+                    alert.last_checked_value = current_value
 
-            for zone in fired:
-                history = AlertHistory(
-                    alert_id=alert.id,
-                    triggered_value=current_value,
-                    threshold_value=zone_entry_edge(zone),
-                    notification_sent=False,
+                    for zone in fired:
+                        history = AlertHistory(
+                            alert_id=alert.id,
+                            triggered_value=current_value,
+                            threshold_value=zone_entry_edge(zone),
+                            notification_sent=False,
+                        )
+                        self.db.add(history)
+                        alert.last_triggered_at = now
+
+                        if target_info:
+                            # Same transactional-outbox path as scalar alerts:
+                            # enqueue one pending row per fired tier, never send
+                            # inline. The tier is folded into the stable
+                            # idempotency key so two tiers of one trigger enqueue
+                            # distinctly while a concurrent re-evaluation still
+                            # dedups per tier.
+                            payload = self._build_delivery_payload(
+                                alert_name=f"{alert.name} - {zone.tier}",
+                                target_info=target_info,
+                                condition_type=alert.condition_type,
+                                threshold_value=zone_entry_edge(zone),
+                                current_value=current_value,
+                                notes=alert.notes,
+                                condition_override=(
+                                    f"in entry zone '{zone.tier}' "
+                                    f"({self._zone_range_desc(zone)})"
+                                ),
+                            )
+                            # Zone tiers legitimately re-fire (re-arm on exit,
+                            # then re-enter), so a coarse cooldown-window key
+                            # would wrongly dedup a real re-entry. Key on the
+                            # tier plus THIS fire's last_fired_at (from
+                            # new_state), distinct per fire; overlapping runs are
+                            # kept apart by the Celery + per-row leases.
+                            fired_at = new_state[zone.tier]["last_fired_at"]
+                            await self._enqueue_delivery(
+                                alert, history, payload,
+                                f"alert:{alert.id}:zone:{zone.tier}:{fired_at}",
+                            )
+
+                await self.db.commit()
+            except IntegrityError:
+                # A concurrent evaluation already enqueued this tier trigger;
+                # the savepoint rolled back, so record the no-op dedup.
+                logger.info(
+                    f"Entry-zone alert {alert_id}: trigger already enqueued by "
+                    f"a concurrent run; deduped"
                 )
-                self.db.add(history)
-                alert.last_triggered_at = datetime.now(timezone.utc)
-
-                if target_info:
-                    # Same transactional-outbox path as scalar alerts: enqueue
-                    # one pending row per fired tier, never send inline. The
-                    # tier is folded into the idempotency key so two tiers of
-                    # the same trigger enqueue distinctly.
-                    payload = self._build_delivery_payload(
-                        alert_name=f"{alert.name} - {zone.tier}",
-                        target_info=target_info,
-                        condition_type=alert.condition_type,
-                        threshold_value=zone_entry_edge(zone),
-                        current_value=current_value,
-                        notes=alert.notes,
-                        condition_override=(
-                            f"in entry zone '{zone.tier}' "
-                            f"({self._zone_range_desc(zone)})"
-                        ),
-                    )
-                    await self._enqueue_delivery(
-                        alert, history, payload, key_suffix=f"tier:{zone.tier}"
-                    )
-
-            await self.db.commit()
+                return False, None
 
             if fired:
                 tiers = ", ".join(z.tier for z in fired)

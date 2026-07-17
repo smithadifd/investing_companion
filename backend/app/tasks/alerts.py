@@ -66,20 +66,29 @@ def check_all_alerts():
 def deliver_pending_notifications(self):
     """Drain the alert-delivery outbox: claim pending rows and send them.
 
-    The claim step atomically leases each row (bounded retry), so this task is
-    safe to run on a short cadence and safe to redeliver on worker loss —
-    ``acks_late`` re-queues a crashed run and the per-row lease prevents a
-    double-send. On an unexpected error the task retries with backoff; the
-    durable pending rows are never lost.
+    Delivery is AT-LEAST-ONCE with a bounded (<= max_attempts) duplicate
+    window: Discord has no receiver dedup, so a crash after a successful POST
+    but before the delivered-commit re-sends once the lease expires. That
+    tradeoff is deliberate — never drop a price alert is worth a rare, bounded
+    duplicate. The claim leases ONE row at a time immediately before its send,
+    so this is safe to run on a short cadence, safe under any worker
+    concurrency (FOR UPDATE SKIP LOCKED), and safe to redeliver on worker loss
+    (``acks_late``). A reaper first sweeps rows stranded ``pending`` with
+    exhausted retries to a terminal ``failed`` state, so nothing is lost. On an
+    unexpected error the task retries with backoff.
     """
     async def _deliver():
         async with AsyncSessionLocal() as session:
             service = AlertService(session)
-            return await service.deliver_pending()
+            reaped = await service.reap_stranded_deliveries()
+            result = await service.deliver_pending()
+            if reaped:
+                result["reaped"] = reaped
+            return result
 
     try:
         result = run_async(_deliver())
-        if result.get("claimed"):
+        if result.get("claimed") or result.get("reaped"):
             logger.info(f"Alert delivery drain: {result}")
         return result
     except Exception as e:

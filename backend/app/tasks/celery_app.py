@@ -25,9 +25,12 @@ celery_app.conf.update(
     # --- Delivery reliability (alert outbox) ---
     # acks_late + reject_on_worker_lost: a task is only acked AFTER it finishes,
     # so a worker crash mid-run re-queues the message instead of dropping it.
-    # Safe here because alert delivery is idempotent at the outbox layer (per-
-    # row lease + unique idempotency key), so a redelivered task cannot double-
-    # send.
+    # Delivery is AT-LEAST-ONCE with a bounded (<= max_attempts) duplicate
+    # window (Discord has no receiver dedup): a redelivered task claims one row
+    # at a time (FOR UPDATE SKIP LOCKED + per-row lease), so it never double-
+    # sends a row already in flight, and any worker concurrency is safe (no
+    # need to pin a dedicated concurrency=1 delivery queue). The only duplicate
+    # is the deliberate "crash after a successful send" case.
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     # visibility_timeout must exceed the delivery lease so a redelivered task
@@ -52,9 +55,11 @@ else:
             "task": "alerts.check_all_alerts",
             "schedule": 300.0,  # 5 minutes in seconds
         },
-        # Drain the alert-delivery outbox every 30s: claim pending rows (lease
-        # + bounded retry) and send them. Decoupled from evaluation so a send
-        # failure never rolls back the trigger record.
+        # Drain the alert-delivery outbox every 30s: reap stranded rows, then
+        # claim-and-send one row at a time (per-row lease + bounded retry).
+        # Decoupled from evaluation so a send failure never rolls back the
+        # trigger record. Interval must stay below the delivery lease
+        # (DELIVERY_LEASE_SECONDS) so a live lease is never mistaken for stale.
         "deliver-pending-alerts": {
             "task": "alerts.deliver_pending_notifications",
             "schedule": 30.0,

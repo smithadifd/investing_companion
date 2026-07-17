@@ -41,17 +41,22 @@ export function PriceChange({
     : 'text-red-600 dark:text-red-400';
 
   const formattedValue = `${showSign && isPositive ? '+' : ''}${numValue.toFixed(2)}%`;
+  // Direction is spelled out so it does not rely on the green/red color alone.
+  const direction = isPositive ? 'up' : 'down';
 
   return (
-    <span className={`inline-flex items-center gap-1 font-medium ${colorClass} ${sizeClasses[size]} ${className}`}>
+    <span
+      className={`inline-flex items-center gap-1 font-medium ${colorClass} ${sizeClasses[size]} ${className}`}
+      aria-label={`${direction} ${Math.abs(numValue).toFixed(2)}%`}
+    >
       {showIcon && (
         isPositive ? (
-          <TrendingUp className={iconSizes[size]} />
+          <TrendingUp aria-hidden="true" className={iconSizes[size]} />
         ) : (
-          <TrendingDown className={iconSizes[size]} />
+          <TrendingDown aria-hidden="true" className={iconSizes[size]} />
         )
       )}
-      {formattedValue}
+      <span aria-hidden="true">{formattedValue}</span>
     </span>
   );
 }

@@ -76,8 +76,11 @@ function EventBadge({ event, compact = false }: { event: EconomicEvent; compact?
   const config = EVENT_TYPE_CONFIG[event.event_type] || EVENT_TYPE_CONFIG.custom;
 
   if (compact) {
+    // Color-coded dot; the label/type is exposed to AT (not color-only).
     return (
       <div
+        role="img"
+        aria-label={`${config.label}: ${event.title}`}
         className={`${config.color} w-2 h-2 rounded-full`}
         title={event.title}
       />
@@ -87,9 +90,9 @@ function EventBadge({ event, compact = false }: { event: EconomicEvent; compact?
   return (
     <div
       className={`${config.color} text-white text-xs px-2 py-0.5 rounded flex items-center gap-1 truncate`}
-      title={event.title}
+      title={`${config.label}: ${event.title}`}
     >
-      {config.icon}
+      <span aria-hidden="true" className="inline-flex">{config.icon}</span>
       <span className="truncate">
         {event.equity?.symbol ? `${event.equity.symbol}` : event.title}
       </span>
@@ -572,8 +575,15 @@ export default function CalendarPage() {
                     Today
                   </button>
                 </div>
-                <div className="flex items-center gap-1 bg-neutral-100 dark:bg-neutral-700 rounded-lg p-1 flex-shrink-0">
+                <div
+                  role="group"
+                  aria-label="Calendar view"
+                  className="flex items-center gap-1 bg-neutral-100 dark:bg-neutral-700 rounded-lg p-1 flex-shrink-0"
+                >
                   <button
+                    type="button"
+                    aria-label="Month grid view"
+                    aria-pressed={viewMode === 'month'}
                     onClick={() => setViewMode('month')}
                     className={`p-2 rounded transition-colors ${
                       viewMode === 'month'
@@ -581,9 +591,12 @@ export default function CalendarPage() {
                         : 'hover:bg-neutral-200 dark:hover:bg-neutral-600'
                     }`}
                   >
-                    <Grid3X3 className="h-4 w-4 text-neutral-700 dark:text-neutral-300" />
+                    <Grid3X3 aria-hidden="true" className="h-4 w-4 text-neutral-700 dark:text-neutral-300" />
                   </button>
                   <button
+                    type="button"
+                    aria-label="List view"
+                    aria-pressed={viewMode === 'list'}
                     onClick={() => setViewMode('list')}
                     className={`p-2 rounded transition-colors ${
                       viewMode === 'list'
@@ -591,7 +604,7 @@ export default function CalendarPage() {
                         : 'hover:bg-neutral-200 dark:hover:bg-neutral-600'
                     }`}
                   >
-                    <List className="h-4 w-4 text-neutral-700 dark:text-neutral-300" />
+                    <List aria-hidden="true" className="h-4 w-4 text-neutral-700 dark:text-neutral-300" />
                   </button>
                 </div>
               </div>

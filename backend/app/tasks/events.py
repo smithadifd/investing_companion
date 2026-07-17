@@ -2,12 +2,15 @@
 
 import asyncio
 import logging
+from datetime import datetime
 
 from sqlalchemy import select
 
+from app.db.models.economic_event import EventSource
 from app.db.models.watchlist import WatchlistItem
 from app.db.models.equity import Equity
 from app.db.session import AsyncSessionLocal
+from app.services.data_providers.fred import FredCalendarProvider
 from app.services.economic_event import EconomicEventService
 from app.tasks.celery_app import celery_app
 from app.tasks.utils import run_async
@@ -71,6 +74,59 @@ def refresh_all_watchlist_events():
         return result
     except Exception as e:
         logger.error(f"Error in watchlist events refresh task: {e}", exc_info=True)
+        raise
+
+
+@celery_app.task(name="events.refresh_macro_calendar")
+def refresh_macro_calendar():
+    """Refresh the macro-release calendar (CPI/NFP/GDP/PCE) from the FRED feed.
+
+    Keeps the hand-maintained seed dates self-healing: a moved release date is
+    updated in place through the shared recurrence-key dedup path, and new
+    forward-looking dates are added as FRED publishes them. Key-gated — when
+    ``FRED_API_KEY`` is unset this no-ops (the seeded dates remain untouched).
+
+    Scheduled daily; also pulls next year once Q4 opens so the forward calendar
+    is populated before the seed lists would have run dry.
+    """
+    logger.info("Starting macro calendar refresh task")
+
+    async def _refresh():
+        provider = FredCalendarProvider()
+        if not provider.is_configured:
+            logger.info("FRED_API_KEY not set; skipping live macro calendar refresh")
+            return {"configured": False, "created": 0, "updated": 0}
+
+        now = datetime.utcnow()
+        years = [now.year]
+        if now.month >= 10:  # Seed next year's calendar heading into Q4.
+            years.append(now.year + 1)
+
+        created = 0
+        updated = 0
+        async with AsyncSessionLocal() as session:
+            service = EconomicEventService(session)
+            for year in years:
+                specs = await provider.get_macro_events(year)
+                if not specs:
+                    continue
+                res = await service.sync_macro_events(
+                    specs, source=EventSource.FRED.value
+                )
+                created += res["created"]
+                updated += res["updated"]
+
+        return {"configured": True, "created": created, "updated": updated}
+
+    try:
+        result = run_async(_refresh())
+        logger.info(
+            f"Macro calendar refresh complete: {result['created']} created, "
+            f"{result['updated']} updated (configured={result['configured']})"
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error in macro calendar refresh task: {e}", exc_info=True)
         raise
 
 

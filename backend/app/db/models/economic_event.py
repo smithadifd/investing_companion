@@ -69,6 +69,7 @@ class EventSource(str, Enum):
     MANUAL = "manual"
     SEED = "seed"
     ALPHA_VANTAGE = "alpha_vantage"
+    FRED = "fred"  # St. Louis Fed live macro-release calendar
 
 
 class EconomicEvent(Base, TimestampMixin):

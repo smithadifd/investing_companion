@@ -3,7 +3,7 @@
 import logging
 import uuid
 from datetime import date, timedelta
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +28,9 @@ from app.schemas.economic_event import (
 )
 from app.services.data_providers.yahoo import YahooFinanceProvider
 from app.services.equity import EquityService
+
+if TYPE_CHECKING:
+    from app.services.data_providers.fred import MacroEventSpec
 
 logger = logging.getLogger(__name__)
 
@@ -454,6 +457,75 @@ class EconomicEventService:
                 logger.warning(f"Failed to refresh events for {equity.symbol}: {e}")
 
         return count
+
+    # -------------------------------------------------------------------------
+    # Macro calendar (FOMC / CPI / NFP / GDP / PCE)
+    # -------------------------------------------------------------------------
+
+    async def upsert_macro_event(
+        self,
+        spec: "MacroEventSpec",
+        source: str = EventSource.SEED.value,
+    ) -> bool:
+        """Upsert a macro event through the recurrence-key dedup path.
+
+        This is the single dedup gate shared by the hand-maintained seed lists
+        and the live FRED feed — neither bypasses it. Identity is
+        ``recurrence_key`` (partial-unique index on ``economic_events``). When a
+        row already exists for the key we UPDATE its mutable fields, so a moved
+        release date self-heals in place instead of duplicating or going stale
+        (the fix issue 015 asked for). Returns ``True`` if a row was created.
+
+        The caller owns the transaction (commit once after a batch).
+        """
+        stmt = select(EconomicEvent).where(
+            EconomicEvent.recurrence_key == spec.recurrence_key
+        )
+        result = await self.db.execute(stmt)
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            existing.event_date = spec.event_date
+            existing.event_time = spec.event_time
+            existing.all_day = spec.all_day
+            existing.title = spec.title
+            existing.description = spec.description
+            existing.importance = spec.importance
+            existing.is_confirmed = spec.is_confirmed
+            existing.source = source
+            return False
+
+        self.db.add(
+            EconomicEvent(
+                event_type=spec.event_type,
+                event_date=spec.event_date,
+                event_time=spec.event_time,
+                all_day=spec.all_day,
+                title=spec.title,
+                description=spec.description,
+                importance=spec.importance,
+                source=source,
+                is_confirmed=spec.is_confirmed,
+                recurrence_key=spec.recurrence_key,
+            )
+        )
+        return True
+
+    async def sync_macro_events(
+        self,
+        specs: "list[MacroEventSpec]",
+        source: str = EventSource.SEED.value,
+    ) -> dict[str, int]:
+        """Upsert a batch of macro specs, committing once.
+
+        Returns ``{"created": n, "updated": m}``.
+        """
+        created = 0
+        for spec in specs:
+            if await self.upsert_macro_event(spec, source=source):
+                created += 1
+        await self.db.commit()
+        return {"created": created, "updated": len(specs) - created}
 
     # -------------------------------------------------------------------------
     # Statistics

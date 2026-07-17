@@ -52,6 +52,7 @@ class EventSource(str, Enum):
     MANUAL = "manual"
     SEED = "seed"
     ALPHA_VANTAGE = "alpha_vantage"
+    FRED = "fred"
 
 
 # Helper lists for filtering

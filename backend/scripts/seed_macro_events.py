@@ -9,11 +9,27 @@ Creates events for:
 - GDP releases (quarterly)
 - Other major economic indicators
 
+Data source
+-----------
+When ``FRED_API_KEY`` is configured, the volatile monthly/quarterly statistical
+releases (CPI/NFP/GDP/PCE) are pulled **live** from the FRED release calendar so
+they stay self-healing and never run dry (issue 015). When the key is absent —
+or a FRED fetch fails — this script falls back to the hand-maintained date lists
+below so the calendar always gets seeded. FOMC meeting dates are not a FRED
+release (the Fed publishes them a year ahead on its own calendar), so they are
+always taken from the seed lists here.
+
+Either way, every event flows through the single ``economic_events``
+recurrence-key dedup path (``EconomicEventService.sync_macro_events``): the live
+feed never bypasses it, and a re-run updates a moved date in place instead of
+duplicating it.
+
 Usage:
     cd backend
     python -m scripts.seed_macro_events
     python -m scripts.seed_macro_events --year 2026
-    python -m scripts.seed_macro_events --clear  # Clear existing seeded events first
+    python -m scripts.seed_macro_events --clear    # Clear auto-seeded events first
+    python -m scripts.seed_macro_events --no-live   # Force the seed lists (skip FRED)
 """
 
 import argparse
@@ -21,11 +37,17 @@ import asyncio
 from datetime import date, time
 from typing import List, Tuple
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import AsyncSessionLocal
 from app.db.models.economic_event import EconomicEvent, EventSource, EventType
+from app.services.data_providers.fred import (
+    FredCalendarProvider,
+    MacroEventSpec,
+    macro_recurrence_key,
+)
+from app.services.economic_event import EconomicEventService
 
 
 # ============================================================================
@@ -190,214 +212,178 @@ PCE_DATES_2025: List[date] = [
 
 
 # ============================================================================
-# Seeding Functions
+# Seed-list -> MacroEventSpec builders (the fallback source)
+#
+# These turn the hand-maintained date lists above into the same source-agnostic
+# ``MacroEventSpec`` the live FRED provider emits, so both flow through one dedup
+# path. ``recurrence_key`` comes from the shared ``macro_recurrence_key`` helper,
+# guaranteeing live and seeded events share the exact dedup identity.
 # ============================================================================
 
+_CPI_META = dict(
+    title="CPI Report",
+    description="Consumer Price Index release. Key inflation indicator tracked by markets and the Fed.",
+    importance="high",
+    event_time=time(8, 30),
+)
+_NFP_META = dict(
+    title="Non-Farm Payrolls",
+    description="Monthly employment situation report. Includes job growth, unemployment rate, and wage data.",
+    importance="high",
+    event_time=time(8, 30),
+)
+_PCE_META = dict(
+    title="PCE Price Index",
+    description="Personal Consumption Expenditures price index. The Fed's preferred inflation measure.",
+    importance="medium",
+    event_time=time(8, 30),
+)
 
-async def create_fomc_events(db: AsyncSession, year: int) -> int:
-    """Create FOMC meeting events."""
+
+def _fomc_specs(year: int) -> List[MacroEventSpec]:
+    """FOMC meeting specs (always seeded — not a FRED release)."""
     dates = FOMC_DATES_2025 if year == 2025 else FOMC_DATES_2026
-    count = 0
-
-    for day1, day2 in dates:
-        # Create event for day 2 (when statement is released)
-        recurrence_key = f"fomc_{day2.year}_{day2.month:02d}"
-
-        existing = await db.execute(
-            select(EconomicEvent).where(EconomicEvent.recurrence_key == recurrence_key)
+    specs: List[MacroEventSpec] = []
+    for _day1, day2 in dates:
+        # The statement lands on day 2.
+        specs.append(
+            MacroEventSpec(
+                event_type=EventType.FOMC.value,
+                event_date=day2,
+                recurrence_key=macro_recurrence_key(EventType.FOMC, day2),
+                title="FOMC Rate Decision",
+                description=(
+                    "Federal Reserve FOMC meeting concludes. Interest rate "
+                    "decision and statement released at 2:00 PM ET."
+                ),
+                importance="high",
+                event_time=time(14, 0),  # 2:00 PM ET
+            )
         )
-        if existing.scalar_one_or_none():
-            continue
+    return specs
 
-        event = EconomicEvent(
-            event_type=EventType.FOMC.value,
-            event_date=day2,
-            event_time=time(14, 0),  # 2:00 PM ET
-            all_day=False,
-            title="FOMC Rate Decision",
-            description="Federal Reserve FOMC meeting concludes. Interest rate decision and statement released at 2:00 PM ET.",
-            importance="high",
-            source=EventSource.SEED.value,
-            is_confirmed=True,
-            recurrence_key=recurrence_key,
+
+def _monthly_specs(
+    event_type: EventType, dates: List[date], meta: dict
+) -> List[MacroEventSpec]:
+    """Build specs for a monthly release from a flat date list."""
+    return [
+        MacroEventSpec(
+            event_type=event_type.value,
+            event_date=d,
+            recurrence_key=macro_recurrence_key(event_type, d),
+            **meta,
         )
-        db.add(event)
-        count += 1
-
-    await db.commit()
-    return count
+        for d in dates
+    ]
 
 
-async def create_cpi_events(db: AsyncSession, year: int) -> int:
-    """Create CPI release events."""
-    dates = CPI_DATES_2025 if year == 2025 else CPI_DATES_2026
-    count = 0
-
-    for event_date in dates:
-        recurrence_key = f"cpi_{event_date.year}_{event_date.month:02d}"
-
-        existing = await db.execute(
-            select(EconomicEvent).where(EconomicEvent.recurrence_key == recurrence_key)
-        )
-        if existing.scalar_one_or_none():
-            continue
-
-        event = EconomicEvent(
-            event_type=EventType.CPI.value,
-            event_date=event_date,
-            event_time=time(8, 30),  # 8:30 AM ET
-            all_day=False,
-            title="CPI Report",
-            description="Consumer Price Index release. Key inflation indicator tracked by markets and the Fed.",
-            importance="high",
-            source=EventSource.SEED.value,
-            is_confirmed=True,
-            recurrence_key=recurrence_key,
-        )
-        db.add(event)
-        count += 1
-
-    await db.commit()
-    return count
-
-
-async def create_nfp_events(db: AsyncSession, year: int) -> int:
-    """Create NFP (Jobs Report) events."""
-    dates = NFP_DATES_2025 if year == 2025 else NFP_DATES_2026
-    count = 0
-
-    for event_date in dates:
-        recurrence_key = f"nfp_{event_date.year}_{event_date.month:02d}"
-
-        existing = await db.execute(
-            select(EconomicEvent).where(EconomicEvent.recurrence_key == recurrence_key)
-        )
-        if existing.scalar_one_or_none():
-            continue
-
-        event = EconomicEvent(
-            event_type=EventType.NFP.value,
-            event_date=event_date,
-            event_time=time(8, 30),  # 8:30 AM ET
-            all_day=False,
-            title="Non-Farm Payrolls",
-            description="Monthly employment situation report. Includes job growth, unemployment rate, and wage data.",
-            importance="high",
-            source=EventSource.SEED.value,
-            is_confirmed=True,
-            recurrence_key=recurrence_key,
-        )
-        db.add(event)
-        count += 1
-
-    await db.commit()
-    return count
-
-
-async def create_gdp_events(db: AsyncSession, year: int) -> int:
-    """Create GDP release events."""
+def _gdp_specs(year: int) -> List[MacroEventSpec]:
+    """GDP specs — month-keyed (one GDP print per calendar month), self-healing."""
     dates = GDP_DATES_2025 if year == 2025 else GDP_DATES_2026
-    count = 0
-
-    for event_date, label in dates:
-        recurrence_key = f"gdp_{event_date.year}_{event_date.month:02d}_{event_date.day:02d}"
-
-        existing = await db.execute(
-            select(EconomicEvent).where(EconomicEvent.recurrence_key == recurrence_key)
-        )
-        if existing.scalar_one_or_none():
-            continue
-
-        event = EconomicEvent(
+    return [
+        MacroEventSpec(
             event_type=EventType.GDP.value,
-            event_date=event_date,
-            event_time=time(8, 30),  # 8:30 AM ET
-            all_day=False,
+            event_date=d,
+            recurrence_key=macro_recurrence_key(EventType.GDP, d),
             title=f"GDP {label}",
             description="Gross Domestic Product report. Measures total economic output.",
             importance="high" if "Advance" in label else "medium",
-            source=EventSource.SEED.value,
-            is_confirmed=True,
-            recurrence_key=recurrence_key,
+            event_time=time(8, 30),
         )
-        db.add(event)
-        count += 1
-
-    await db.commit()
-    return count
+        for d, label in dates
+    ]
 
 
-async def create_pce_events(db: AsyncSession, year: int) -> int:
-    """Create PCE inflation events."""
-    if year != 2025:
-        return 0  # Only have 2025 data for now
+def seed_statistical_specs(year: int) -> List[MacroEventSpec]:
+    """Hand-maintained CPI/NFP/GDP/PCE specs — the fallback when FRED is off."""
+    specs: List[MacroEventSpec] = []
+    specs += _monthly_specs(
+        EventType.CPI, CPI_DATES_2025 if year == 2025 else CPI_DATES_2026, _CPI_META
+    )
+    specs += _monthly_specs(
+        EventType.NFP, NFP_DATES_2025 if year == 2025 else NFP_DATES_2026, _NFP_META
+    )
+    specs += _gdp_specs(year)
+    if year == 2025:  # Only 2025 PCE dates are hand-maintained.
+        specs += _monthly_specs(EventType.PCE, PCE_DATES_2025, _PCE_META)
+    return specs
 
-    dates = PCE_DATES_2025
-    count = 0
 
-    for event_date in dates:
-        recurrence_key = f"pce_{event_date.year}_{event_date.month:02d}"
+# ============================================================================
+# Live-or-seed resolution + orchestration
+# ============================================================================
 
-        existing = await db.execute(
-            select(EconomicEvent).where(EconomicEvent.recurrence_key == recurrence_key)
-        )
-        if existing.scalar_one_or_none():
-            continue
 
-        event = EconomicEvent(
-            event_type=EventType.PCE.value,
-            event_date=event_date,
-            event_time=time(8, 30),  # 8:30 AM ET
-            all_day=False,
-            title="PCE Price Index",
-            description="Personal Consumption Expenditures price index. The Fed's preferred inflation measure.",
-            importance="medium",
-            source=EventSource.SEED.value,
-            is_confirmed=True,
-            recurrence_key=recurrence_key,
-        )
-        db.add(event)
-        count += 1
+async def resolve_macro_specs(
+    provider: FredCalendarProvider, year: int, use_live: bool = True
+) -> List[Tuple[List[MacroEventSpec], str]]:
+    """Decide the source for each event group and build its specs.
 
-    await db.commit()
-    return count
+    Returns ``[(specs, source), ...]`` batches:
+      * FOMC is always seeded.
+      * CPI/NFP/GDP/PCE come from the live FRED feed when configured and it
+        returns data; otherwise they gracefully fall back to the seed lists.
+    """
+    batches: List[Tuple[List[MacroEventSpec], str]] = [
+        (_fomc_specs(year), EventSource.SEED.value)
+    ]
+
+    live_specs: List[MacroEventSpec] = []
+    if use_live and provider.is_configured:
+        live_specs = await provider.get_macro_events(year)
+
+    if live_specs:
+        batches.append((live_specs, EventSource.FRED.value))
+    else:
+        batches.append((seed_statistical_specs(year), EventSource.SEED.value))
+
+    return batches
 
 
 async def clear_seeded_events(db: AsyncSession) -> int:
-    """Clear all seeded events (preserves Yahoo-sourced and custom events)."""
+    """Clear auto-seeded macro events (seed + live FRED).
+
+    Preserves Yahoo-sourced equity events and user custom (manual) events.
+    """
     result = await db.execute(
-        delete(EconomicEvent).where(EconomicEvent.source == EventSource.SEED.value)
+        delete(EconomicEvent).where(
+            EconomicEvent.source.in_(
+                [EventSource.SEED.value, EventSource.FRED.value]
+            )
+        )
     )
     await db.commit()
     return result.rowcount
 
 
-async def seed_macro_events(year: int = 2025, clear: bool = False) -> None:
-    """Main seeding function."""
+async def seed_macro_events(
+    year: int = 2025, clear: bool = False, use_live: bool = True
+) -> None:
+    """Main seeding function: resolve source, upsert through the dedup path."""
+    provider = FredCalendarProvider()
+
     async with AsyncSessionLocal() as db:
+        service = EconomicEventService(db)
+
         if clear:
             deleted = await clear_seeded_events(db)
-            print(f"Cleared {deleted} seeded events")
+            print(f"Cleared {deleted} auto-seeded events")
 
-        print(f"\nSeeding macro events for {year}...")
+        batches = await resolve_macro_specs(provider, year, use_live)
+        live_used = any(src == EventSource.FRED.value for _, src in batches)
+        source_label = "FRED live feed" if live_used else "hand-maintained seed lists"
+        print(f"\nSeeding macro events for {year} (statistical source: {source_label})...")
 
-        fomc_count = await create_fomc_events(db, year)
-        print(f"  FOMC meetings: {fomc_count}")
+        total_created = 0
+        total_seen = 0
+        for specs, source in batches:
+            res = await service.sync_macro_events(specs, source=source)
+            total_created += res["created"]
+            total_seen += res["created"] + res["updated"]
 
-        cpi_count = await create_cpi_events(db, year)
-        print(f"  CPI releases: {cpi_count}")
-
-        nfp_count = await create_nfp_events(db, year)
-        print(f"  NFP reports: {nfp_count}")
-
-        gdp_count = await create_gdp_events(db, year)
-        print(f"  GDP releases: {gdp_count}")
-
-        pce_count = await create_pce_events(db, year)
-        print(f"  PCE releases: {pce_count}")
-
-        total = fomc_count + cpi_count + nfp_count + gdp_count + pce_count
-        print(f"\nTotal events created: {total}")
+        print(f"  Processed {total_seen} events ({total_created} created, "
+              f"{total_seen - total_created} updated in place)")
 
 
 def main():
@@ -412,21 +398,27 @@ def main():
     parser.add_argument(
         "--clear",
         action="store_true",
-        help="Clear existing seeded events first",
+        help="Clear existing auto-seeded events first",
     )
     parser.add_argument(
         "--all",
         action="store_true",
         help="Seed both 2025 and 2026",
     )
+    parser.add_argument(
+        "--no-live",
+        action="store_true",
+        help="Force the hand-maintained seed lists (skip the FRED live feed)",
+    )
 
     args = parser.parse_args()
+    use_live = not args.no_live
 
     if args.all:
-        asyncio.run(seed_macro_events(2025, args.clear))
-        asyncio.run(seed_macro_events(2026, False))  # Don't clear twice
+        asyncio.run(seed_macro_events(2025, args.clear, use_live))
+        asyncio.run(seed_macro_events(2026, False, use_live))  # Don't clear twice
     else:
-        asyncio.run(seed_macro_events(args.year, args.clear))
+        asyncio.run(seed_macro_events(args.year, args.clear, use_live))
 
 
 if __name__ == "__main__":

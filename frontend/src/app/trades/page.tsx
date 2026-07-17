@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   Plus,
   TrendingUp,
@@ -547,8 +547,30 @@ function PositionSizer() {
 
 type TabType = 'trades' | 'portfolio' | 'performance' | 'sizer';
 
+const TAB_ITEMS = [
+  { id: 'trades', label: 'Trades', Icon: BarChart3 },
+  { id: 'portfolio', label: 'Positions', Icon: Wallet },
+  { id: 'performance', label: 'Performance', Icon: LineChart },
+  { id: 'sizer', label: 'Position Sizer', Icon: Calculator },
+] as const;
+
 export default function TradesPage() {
   const [activeTab, setActiveTab] = useState<TabType>('trades');
+  // Roving-focus keyboard nav for the tablist (WAI-ARIA tabs pattern).
+  const tabRefs = useRef<Partial<Record<TabType, HTMLButtonElement | null>>>({});
+  const handleTabKeyDown = (e: React.KeyboardEvent, index: number) => {
+    const count = TAB_ITEMS.length;
+    let next = index;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (index + 1) % count;
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (index - 1 + count) % count;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = count - 1;
+    else return;
+    e.preventDefault();
+    const nextId = TAB_ITEMS[next].id;
+    setActiveTab(nextId);
+    tabRefs.current[nextId]?.focus();
+  };
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
   const [deleteTradeId, setDeleteTradeId] = useState<number | null>(null);
@@ -665,51 +687,38 @@ export default function TradesPage() {
         )}
 
         {/* Tabs */}
-        <div className="flex gap-1 mb-6 bg-neutral-100 dark:bg-neutral-800 p-1 rounded-lg w-fit overflow-x-auto">
-          <button
-            onClick={() => setActiveTab('trades')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
-              activeTab === 'trades'
-                ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 shadow-sm'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-50'
-            }`}
-          >
-            <BarChart3 className="h-4 w-4" />
-            Trades
-          </button>
-          <button
-            onClick={() => setActiveTab('portfolio')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
-              activeTab === 'portfolio'
-                ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 shadow-sm'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-50'
-            }`}
-          >
-            <Wallet className="h-4 w-4" />
-            Positions
-          </button>
-          <button
-            onClick={() => setActiveTab('performance')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
-              activeTab === 'performance'
-                ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 shadow-sm'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-50'
-            }`}
-          >
-            <LineChart className="h-4 w-4" />
-            Performance
-          </button>
-          <button
-            onClick={() => setActiveTab('sizer')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
-              activeTab === 'sizer'
-                ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 shadow-sm'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-50'
-            }`}
-          >
-            <Calculator className="h-4 w-4" />
-            Position Sizer
-          </button>
+        <div
+          role="tablist"
+          aria-label="Trades views"
+          className="flex gap-1 mb-6 bg-neutral-100 dark:bg-neutral-800 p-1 rounded-lg w-fit overflow-x-auto"
+        >
+          {TAB_ITEMS.map(({ id, label, Icon }, index) => {
+            const selected = activeTab === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                id={`trades-tab-${id}`}
+                ref={(el) => {
+                  tabRefs.current[id] = el;
+                }}
+                aria-selected={selected}
+                aria-controls={`trades-tabpanel-${id}`}
+                tabIndex={selected ? 0 : -1}
+                onClick={() => setActiveTab(id)}
+                onKeyDown={(e) => handleTabKeyDown(e, index)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
+                  selected
+                    ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 shadow-sm'
+                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-50'
+                }`}
+              >
+                <Icon aria-hidden="true" className="h-4 w-4" />
+                {label}
+              </button>
+            );
+          })}
         </div>
 
         {/* Account filter (only once accounts exist) */}
@@ -742,7 +751,12 @@ export default function TradesPage() {
 
         {/* Tab Content */}
         {activeTab === 'trades' && (
-          <div className="bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden">
+          <div
+            role="tabpanel"
+            id="trades-tabpanel-trades"
+            aria-labelledby="trades-tab-trades"
+            className="bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden"
+          >
             {trades.length === 0 ? (
               <div className="text-center py-12">
                 <BarChart3 className="h-12 w-12 text-neutral-300 dark:text-neutral-600 mx-auto mb-4" />
@@ -792,7 +806,7 @@ export default function TradesPage() {
         )}
 
         {activeTab === 'portfolio' && (
-          <div>
+          <div role="tabpanel" id="trades-tabpanel-portfolio" aria-labelledby="trades-tab-portfolio">
             {hasAccounts && (
               <label className="flex items-center gap-2 mb-3 text-sm text-neutral-600 dark:text-neutral-400 cursor-pointer w-fit">
                 <input
@@ -833,7 +847,7 @@ export default function TradesPage() {
         )}
 
         {activeTab === 'performance' && (
-          <div>
+          <div role="tabpanel" id="trades-tabpanel-performance" aria-labelledby="trades-tab-performance">
             {performance ? (
               <PerformanceMetricsDisplay metrics={performance.metrics} />
             ) : (
@@ -850,7 +864,11 @@ export default function TradesPage() {
           </div>
         )}
 
-        {activeTab === 'sizer' && <PositionSizer />}
+        {activeTab === 'sizer' && (
+          <div role="tabpanel" id="trades-tabpanel-sizer" aria-labelledby="trades-tab-sizer">
+            <PositionSizer />
+          </div>
+        )}
       </div>
 
       {/* Create Modal */}

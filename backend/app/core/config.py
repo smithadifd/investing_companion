@@ -121,6 +121,11 @@ class Settings(BaseSettings):
     ALPHA_VANTAGE_API_KEY: str = ""
     POLYGON_API_KEY: str = ""
     FINNHUB_API_KEY: str = ""
+    # FRED (St. Louis Fed) — free API key gating the live macro-release calendar
+    # (CPI/NFP/GDP/PCE). Get one at https://fredaccount.stlouisfed.org/apikeys.
+    # When empty, the macro-calendar seeder falls back to its hand-maintained
+    # date lists so the calendar never runs dry (see scripts/seed_macro_events.py).
+    FRED_API_KEY: str = ""
     DISCORD_WEBHOOK_URL: str = ""
 
     # Schwab (opt-in real-time / all-session quotes via OAuth; never required)

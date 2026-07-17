@@ -5,6 +5,7 @@ stale-data stamping. All deterministic: the clock and sleep are injected, and
 provider behavior is driven by in-memory fakes — no live network, no DB.
 """
 
+import asyncio
 from datetime import datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock
@@ -227,6 +228,54 @@ class TestResilientBreaker:
         quote = await resilient.get_quote("AAPL")
         assert quote is not None
         assert breaker.state == CircuitState.CLOSED
+
+
+class TestHalfOpenSingleFlight:
+    """A concurrent burst against a recovering provider must send ONE probe,
+    not admit the whole herd. (This exact case shipped uncaught.)"""
+
+    async def test_only_one_probe_admitted_during_concurrent_burst(self):
+        clock = _FakeClock()
+        breaker = CircuitBreaker(
+            failure_threshold=1, recovery_timeout=10, clock=clock
+        )
+        breaker.record_failure()  # -> OPEN
+        clock.advance(10)  # next state read promotes to HALF_OPEN
+
+        gate = asyncio.Event()
+        calls = {"n": 0}
+
+        class SlowProvider(MarketDataProvider):
+            name = "slow"
+            capabilities = ALL_CAPS
+
+            async def get_quote(self, symbol):
+                calls["n"] += 1
+                await gate.wait()  # keep the probe in-flight
+                return _quote()
+
+        resilient = ResilientProvider(
+            SlowProvider(), max_retries=0, breaker=breaker, sleep=AsyncMock()
+        )
+
+        async def one():
+            try:
+                await resilient.get_quote("AAPL")
+                return "ok"
+            except CircuitOpenError:
+                return "rejected"
+
+        tasks = [asyncio.create_task(one()) for _ in range(20)]
+        await asyncio.sleep(0.02)  # let all 20 pass the allow() gate
+
+        # Exactly one probe reached the upstream; the other 19 fast-failed.
+        assert calls["n"] == 1
+
+        gate.set()  # release the in-flight probe
+        results = await asyncio.gather(*tasks)
+        assert results.count("ok") == 1
+        assert results.count("rejected") == 19
+        assert breaker.state == CircuitState.CLOSED  # probe succeeded -> closed
 
 
 # ---------------------------------------------------------------------------

@@ -110,7 +110,7 @@ def parse_history_csv(text: str) -> List[OHLCVData]:
     Rows with unparseable prices are dropped. A body that isn't the expected
     CSV (Stooq returns a bare ``No data`` line for unknown symbols) yields [].
     """
-    if not text or "N/D" in text.splitlines()[0:1] or "," not in text:
+    if not text or "," not in text:
         return []
 
     bars: List[OHLCVData] = []
@@ -127,9 +127,13 @@ def parse_history_csv(text: str) -> List[OHLCVData]:
         close = _safe_decimal(row.get("Close", ""))
         if close is None:
             continue
-        open_ = _safe_decimal(row.get("Open", "")) or close
-        high = _safe_decimal(row.get("High", "")) or close
-        low = _safe_decimal(row.get("Low", "")) or close
+        # Explicit None checks: a legitimate 0.00 must survive, not be replaced.
+        open_ = _safe_decimal(row.get("Open", ""))
+        open_ = close if open_ is None else open_
+        high = _safe_decimal(row.get("High", ""))
+        high = close if high is None else high
+        low = _safe_decimal(row.get("Low", ""))
+        low = close if low is None else low
         bars.append(
             OHLCVData(
                 timestamp=ts,
@@ -148,7 +152,10 @@ def quote_from_bars(symbol: str, bars: List[OHLCVData]) -> Optional[QuoteRespons
 
     Change / percent-change are measured against the prior bar's close, so the
     figures are honest end-of-day values (previous_close is populated when a
-    second bar is available).
+    second bar is available). ``timestamp`` is stamped with the latest *bar's*
+    date, not fetch-time, so the UI's "As of" reflects the real data age
+    (Stooq's daily bar can lag the live print — the reason a Stooq quote is
+    flagged stale by the failover layer).
     """
     if not bars:
         return None
@@ -171,7 +178,7 @@ def quote_from_bars(symbol: str, bars: List[OHLCVData]) -> Optional[QuoteRespons
         previous_close=prev_close,
         volume=last.volume or 0,
         market_cap=None,
-        timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
+        timestamp=last.timestamp,  # data age, not fetch-time
         source="stooq",
         stale=False,  # the failover layer flags degraded fallback data
     )

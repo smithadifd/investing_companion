@@ -67,6 +67,22 @@ class TestQuoteFromBars:
         assert quote.change_percent == pytest.approx(Decimal("1.463"), abs=Decimal("0.01"))
         assert quote.source == "stooq"
 
+    def test_timestamp_is_latest_bar_not_fetch_time(self):
+        from datetime import datetime
+
+        quote = quote_from_bars("AAPL", parse_history_csv(_CSV))
+        # "As of" reflects the real data age (latest bar), not now().
+        assert quote.timestamp == datetime(2026, 6, 9)
+
+    def test_zero_open_is_preserved_not_replaced_by_close(self):
+        csv_zero = (
+            "Date,Open,High,Low,Close,Volume\n"
+            "2026-06-09,0.00,105.0,0.00,104.0,1500000\n"
+        )
+        bars = parse_history_csv(csv_zero)
+        assert bars[0].open == Decimal("0.00")
+        assert bars[0].low == Decimal("0.00")
+
     def test_single_bar_has_no_change(self):
         bars = parse_history_csv(
             "Date,Open,High,Low,Close,Volume\n2026-06-09,102.5,105.0,102.0,104.0,1500000\n"

@@ -53,8 +53,13 @@ class CircuitBreaker:
     Counts *failed calls* (a call that exhausts its retry budget), not
     individual retry attempts. After ``failure_threshold`` consecutive failures
     it opens and every call fast-fails for ``recovery_timeout`` seconds, then
-    transitions to half-open to let one probe through: a probe success closes
-    the breaker, a probe failure re-opens it for another cool-down.
+    transitions to half-open to let **exactly one** probe through: a probe
+    success closes the breaker, a probe failure re-opens it for another
+    cool-down. Half-open is single-flight — ``allow()`` admits the first caller
+    and rejects every other caller until that probe resolves, so a concurrent
+    burst against a recovering upstream sends one probe, not a thundering herd.
+    ``allow()`` is synchronous with no await between the check and the flag set,
+    so on a single-threaded event loop the admission is atomic per coroutine.
 
     The clock is injectable (``clock``) so tests are deterministic — no real
     ``time`` dependency in the resilience unit tests.
@@ -73,6 +78,8 @@ class CircuitBreaker:
         self._state = CircuitState.CLOSED
         self._failures = 0
         self._opened_at: Optional[float] = None
+        # True while a half-open probe is admitted but not yet resolved.
+        self._probe_in_flight = False
 
     @property
     def state(self) -> CircuitState:
@@ -83,6 +90,8 @@ class CircuitBreaker:
             and self._clock() - self._opened_at >= self.recovery_timeout
         ):
             self._state = CircuitState.HALF_OPEN
+            # Fresh half-open window: the one allowed probe hasn't gone out yet.
+            self._probe_in_flight = False
         return self._state
 
     @property
@@ -90,13 +99,27 @@ class CircuitBreaker:
         return self._failures
 
     def allow(self) -> bool:
-        """True when a call may proceed (closed, or a half-open probe)."""
-        return self.state in (CircuitState.CLOSED, CircuitState.HALF_OPEN)
+        """True when a call may proceed (closed, or the single half-open probe).
+
+        In half-open, admits exactly one probe: the first caller flips
+        ``_probe_in_flight`` and proceeds; concurrent callers see the flag and
+        are rejected until ``record_success``/``record_failure`` clears it.
+        """
+        state = self.state
+        if state == CircuitState.CLOSED:
+            return True
+        if state == CircuitState.HALF_OPEN:
+            if self._probe_in_flight:
+                return False
+            self._probe_in_flight = True
+            return True
+        return False
 
     def record_success(self) -> None:
         """A call succeeded — reset to healthy."""
         self._failures = 0
         self._opened_at = None
+        self._probe_in_flight = False
         self._state = CircuitState.CLOSED
 
     def record_failure(self) -> None:
@@ -113,6 +136,7 @@ class CircuitBreaker:
         self._state = CircuitState.OPEN
         self._opened_at = self._clock()
         self._failures = max(self._failures, self.failure_threshold)
+        self._probe_in_flight = False
 
 
 class ResilientProvider(MarketDataProvider):

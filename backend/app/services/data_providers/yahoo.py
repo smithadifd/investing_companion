@@ -205,13 +205,19 @@ def _normalize_dividend_yield(
     scale flowing to the cache, the API response, the UI and the AI layer.
 
     When ``dividend_rate`` and ``price`` are both available they are used as
-    ground truth: the true fractional yield is ``rate / price``, so we keep
-    whichever of ``value`` (already a fraction) or ``value / 100`` (``value`` was
-    a percent) is closer to it. That resolves the genuinely ambiguous sub-1%
-    yield case — e.g. AAPL's ~0.32% yield, whose percent form ``0.32`` is itself
-    < 1 and so indistinguishable from a fraction by magnitude alone. Without that
-    context we fall back to a magnitude heuristic: a value > 1 can only be a
-    percent (yields over 100% do not exist), so scale it down.
+    ground truth (defense-in-depth): the true fractional yield is ``rate / price``,
+    and the fraction/percent readings are always 100x apart, so we keep whichever
+    of ``value`` (already a fraction) or ``value / 100`` (``value`` was a percent)
+    is closer to it. That path is robust to either input shape and resolves the
+    genuinely ambiguous sub-1% yield case — e.g. AAPL's ~0.32% yield, whose
+    percent form ``0.32`` is itself < 1 and so indistinguishable from a fraction
+    by magnitude alone.
+
+    Without that ground truth we scale down unconditionally: the pinned yfinance
+    (``==1.1.0``) always reports a percent, and a magnitude heuristic would
+    silently leave such a sub-1% percent yield mis-scaled 100x. A warning is
+    logged so that a future pin bump which changes the reported shape is
+    observable rather than silent.
     """
     raw = _safe_decimal(value)
     if raw is None or raw <= 0:
@@ -227,7 +233,12 @@ def _normalize_dividend_yield(
             return raw_as_fraction
         return raw
 
-    return raw_as_fraction if raw > 1 else raw
+    logger.warning(
+        "dividendYield %r normalized without a rate/price cross-check; assuming "
+        "percent scale per the pinned yfinance. Re-verify if the pin changes.",
+        value,
+    )
+    return raw_as_fraction
 
 
 class YahooFinanceProvider:

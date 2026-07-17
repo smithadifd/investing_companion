@@ -1,5 +1,6 @@
 """AI analysis service using Claude API."""
 
+import hashlib
 import logging
 import uuid
 from datetime import datetime
@@ -20,16 +21,25 @@ from app.schemas.ai import (
     AnalysisType,
     EquityContext,
     RatioContext,
+    WatchlistContext,
+    WatchlistHolding,
 )
+from app.services.ai_budget import token_budget
+from app.services.cache import cache_service
 from app.services.equity import EquityService
 from app.services.ratio import RatioService
+from app.services.settings import SettingsService
+from app.services.watchlist import WatchlistService
 
 logger = logging.getLogger(__name__)
 
-# Setting keys
-SETTING_API_KEY = "claude_api_key"
+# Setting keys owned by the AI service. The API *key* is NOT stored here — it is
+# converged onto SettingsService.CLAUDE_API_KEY (encrypted, per-user) so the read
+# and both write paths share one encrypted source of truth (see get_api_key).
 SETTING_DEFAULT_MODEL = "ai_default_model"
 SETTING_CUSTOM_INSTRUCTIONS = "ai_custom_instructions"
+
+MAX_TOKENS = 2048
 
 
 def _decimal_to_float(value) -> Optional[float]:
@@ -45,22 +55,34 @@ class AIService:
     """Service for AI-powered analysis using Claude API."""
 
     def __init__(
-        self, db: AsyncSession, user_id: Optional[uuid.UUID] = None
+        self,
+        db: AsyncSession,
+        user_id: Optional[uuid.UUID] = None,
+        *,
+        cache=None,
+        budget=None,
     ) -> None:
         self.db = db
         self.user_id = user_id
+        # Collaborators default to the module singletons but are injectable for tests.
+        self._cache = cache if cache is not None else cache_service
+        self._budget = budget if budget is not None else token_budget
+        self._settings_service = SettingsService(db)
 
     async def get_api_key(self) -> Optional[str]:
-        """Get Claude API key from settings or environment."""
-        # First check user settings
-        stmt = select(UserSetting).where(UserSetting.key == SETTING_API_KEY)
-        result = await self.db.execute(stmt)
-        setting = result.scalar_one_or_none()
+        """Get the Claude API key through the shared encrypted accessor.
 
-        if setting and setting.value:
-            return setting.value
+        Reads ``CLAUDE_API_KEY`` via SettingsService, which decrypts values in
+        ``ENCRYPTED_KEYS`` — the same accessor the Settings page and the AI
+        settings endpoint write through. Falls back to the app-level env key.
+        """
+        key = await self._settings_service.get_setting(
+            SettingsService.CLAUDE_API_KEY, self.user_id
+        )
+        if key:
+            return key
 
-        # Fall back to environment variable
+        # Fall back to environment variable (app-level, not per-user).
         return settings.CLAUDE_API_KEY or None
 
     async def get_settings(self) -> AISettingsResponse:
@@ -72,7 +94,7 @@ class AIService:
         result = await self.db.execute(stmt)
         model_setting = result.scalar_one_or_none()
         default_model = (
-            model_setting.value if model_setting else AIModel.CLAUDE_SONNET.value
+            model_setting.value if model_setting else settings.AI_DEFAULT_MODEL
         )
 
         # Get custom instructions
@@ -92,7 +114,19 @@ class AIService:
     async def update_settings(self, data: AISettingsUpdate) -> AISettingsResponse:
         """Update AI settings."""
         if data.api_key is not None:
-            await self._upsert_setting(SETTING_API_KEY, data.api_key, is_encrypted=True)
+            # Route the key write through the SAME encrypted accessor used for
+            # reads (and by the Settings page), so both endpoints stay converged.
+            if data.api_key == "":
+                await self._settings_service.delete_setting(
+                    SettingsService.CLAUDE_API_KEY, self.user_id
+                )
+            else:
+                await self._settings_service.set_setting(
+                    SettingsService.CLAUDE_API_KEY,
+                    data.api_key,
+                    self.user_id,
+                    "Claude API key for AI analysis",
+                )
 
         if data.default_model is not None:
             await self._upsert_setting(SETTING_DEFAULT_MODEL, data.default_model)
@@ -105,20 +139,42 @@ class AIService:
         await self.db.commit()
         return await self.get_settings()
 
-    async def _upsert_setting(
-        self, key: str, value: str, is_encrypted: bool = False
-    ) -> None:
-        """Insert or update a setting."""
+    async def _upsert_setting(self, key: str, value: str) -> None:
+        """Insert or update a (non-secret) AI setting."""
         stmt = select(UserSetting).where(UserSetting.key == key)
         result = await self.db.execute(stmt)
         setting = result.scalar_one_or_none()
 
         if setting:
             setting.value = value
-            setting.is_encrypted = is_encrypted
         else:
-            setting = UserSetting(key=key, value=value, is_encrypted=is_encrypted)
+            setting = UserSetting(key=key, value=value)
             self.db.add(setting)
+
+    def _resolve_model(
+        self, request: AIAnalysisRequest, default_model: Optional[str] = None
+    ) -> AIModel:
+        """Resolve the model to use.
+
+        Precedence: explicit request model → the stored user default →
+        ``settings.AI_DEFAULT_MODEL`` → Sonnet. Any unknown/retired id is
+        skipped rather than passed to the API, so the default can never resolve
+        to an EOL model.
+        """
+        candidates = [
+            request.model.value if request.model else None,
+            default_model,
+            settings.AI_DEFAULT_MODEL,
+            AIModel.CLAUDE_SONNET.value,
+        ]
+        for candidate in candidates:
+            if not candidate:
+                continue
+            try:
+                return AIModel(candidate)
+            except ValueError:
+                logger.warning("Ignoring unknown AI model id: %s", candidate)
+        return AIModel.CLAUDE_SONNET
 
     async def _get_equity_context(self, symbol: str) -> Optional[EquityContext]:
         """Build context for equity analysis."""
@@ -177,6 +233,36 @@ class AIService:
             change_1d=_decimal_to_float(history.change_1d),
             change_1m=_decimal_to_float(history.change_1m),
             description=history.ratio.description,
+        )
+
+    async def _get_watchlist_context(
+        self, watchlist_id: int
+    ) -> Optional[WatchlistContext]:
+        """Build context for watchlist analysis."""
+        watchlist_service = WatchlistService(self.db, self.user_id)
+        watchlist = await watchlist_service.get_watchlist(watchlist_id)
+
+        if not watchlist:
+            return None
+
+        holdings = [
+            WatchlistHolding(
+                symbol=item.equity.symbol,
+                name=item.equity.name,
+                price=_decimal_to_float(item.quote.price) if item.quote else None,
+                change_percent=_decimal_to_float(item.quote.change_percent)
+                if item.quote
+                else None,
+                target_price=_decimal_to_float(item.target_price),
+                thesis=item.thesis,
+            )
+            for item in watchlist.items
+        ]
+
+        return WatchlistContext(
+            name=watchlist.name,
+            description=watchlist.description,
+            holdings=holdings,
         )
 
     def _build_system_prompt(self, custom_instructions: Optional[str] = None) -> str:
@@ -282,6 +368,93 @@ User's question: {user_prompt}
 
 Please provide analysis of this ratio and its implications."""
 
+    def _build_watchlist_prompt(
+        self, user_prompt: str, context: WatchlistContext
+    ) -> str:
+        """Build the full prompt for watchlist analysis."""
+        if context.holdings:
+            lines = []
+            for h in context.holdings:
+                price_str = self._format_value(h.price, ".2f", "$")
+                change_str = self._format_value(h.change_percent, ".2f", "", "%")
+                target_str = self._format_value(h.target_price, ".2f", "$")
+                label = f"{h.symbol}" + (f" ({h.name})" if h.name else "")
+                line = f"- {label}: {price_str} ({change_str}), target {target_str}"
+                if h.thesis:
+                    line += f" — thesis: {h.thesis}"
+                lines.append(line)
+            holdings_str = "\n".join(lines)
+        else:
+            holdings_str = "(no holdings)"
+
+        context_str = f"""
+Watchlist: {context.name}
+Description: {context.description or 'N/A'}
+
+Holdings ({len(context.holdings)}):
+{holdings_str}
+"""
+
+        return f"""Here is the current data for the "{context.name}" watchlist:
+
+{context_str}
+
+User's question: {user_prompt}
+
+Please provide analysis across this watchlist addressing the user's question."""
+
+    async def _build_prompt_and_context(
+        self, request: AIAnalysisRequest
+    ) -> tuple[str, Optional[str]]:
+        """Resolve the rendered user prompt and a short context summary.
+
+        Handles all four analysis types explicitly. EQUITY/RATIO/WATCHLIST fetch
+        and inline live context; GENERAL is a deliberately context-less mode that
+        sends the raw prompt. No type falls through silently.
+        """
+        user_prompt = request.prompt
+        context_summary: Optional[str] = None
+
+        if not request.include_context:
+            return user_prompt, context_summary
+
+        if request.analysis_type == AnalysisType.EQUITY and request.symbol:
+            context = await self._get_equity_context(request.symbol)
+            if context:
+                user_prompt = self._build_equity_prompt(request.prompt, context)
+                context_summary = f"{context.symbol} - {context.name}"
+
+        elif request.analysis_type == AnalysisType.RATIO and request.ratio_id:
+            context = await self._get_ratio_context(request.ratio_id)
+            if context:
+                user_prompt = self._build_ratio_prompt(request.prompt, context)
+                context_summary = (
+                    f"{context.name} "
+                    f"({context.numerator_symbol}/{context.denominator_symbol})"
+                )
+
+        elif request.analysis_type == AnalysisType.WATCHLIST and request.watchlist_id:
+            context = await self._get_watchlist_context(request.watchlist_id)
+            if context:
+                user_prompt = self._build_watchlist_prompt(request.prompt, context)
+                context_summary = f"Watchlist: {context.name} ({len(context.holdings)})"
+
+        # AnalysisType.GENERAL: no context by design — raw prompt is sent as-is.
+        return user_prompt, context_summary
+
+    def _cache_signature(
+        self, model: AIModel, system_prompt: str, user_prompt: str
+    ) -> str:
+        """Stable signature for the response cache.
+
+        Identical (user, model, system, rendered prompt) → identical cache key.
+        Scoped by user so one user's cached analysis is never served to another.
+        """
+        raw = "\x00".join(
+            [str(self.user_id), model.value, system_prompt, user_prompt]
+        )
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
     async def analyze(self, request: AIAnalysisRequest) -> AIAnalysisResponse:
         """Perform AI analysis (non-streaming)."""
         try:
@@ -295,47 +468,45 @@ Please provide analysis of this ratio and its implications."""
         if not api_key:
             raise ValueError("Claude API key not configured")
 
-        # Get custom instructions
-        settings = await self.get_settings()
+        ai_settings = await self.get_settings()
+        model = self._resolve_model(request, ai_settings.default_model)
+        system_prompt = self._build_system_prompt(ai_settings.custom_instructions)
+        user_prompt, context_summary = await self._build_prompt_and_context(request)
 
-        # Build context and prompt based on analysis type
-        context_summary = None
-        user_prompt = request.prompt
+        signature = self._cache_signature(model, system_prompt, user_prompt)
+        cache_key = self._cache.ai_response_key(signature)
 
-        if request.analysis_type == AnalysisType.EQUITY and request.symbol:
-            if request.include_context:
-                context = await self._get_equity_context(request.symbol)
-                if context:
-                    user_prompt = self._build_equity_prompt(request.prompt, context)
-                    context_summary = f"{context.symbol} - {context.name}"
+        # Cache hit: return immediately (costs no tokens, skips the budget).
+        cached = await self._cache_get(cache_key)
+        if cached is not None:
+            cached["cached"] = True
+            return AIAnalysisResponse(**cached)
 
-        elif request.analysis_type == AnalysisType.RATIO and request.ratio_id:
-            if request.include_context:
-                context = await self._get_ratio_context(request.ratio_id)
-                if context:
-                    user_prompt = self._build_ratio_prompt(request.prompt, context)
-                    context_summary = f"{context.name} ({context.numerator_symbol}/{context.denominator_symbol})"
+        # Fail closed if the per-day token budget is exhausted.
+        await self._budget.check(self.user_id)
 
-        # Call Claude API
         client = anthropic.Anthropic(api_key=api_key)
-
         message = client.messages.create(
-            model=request.model.value,
-            max_tokens=2048,
-            system=self._build_system_prompt(settings.custom_instructions),
+            model=model.value,
+            max_tokens=MAX_TOKENS,
+            system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
 
         response_text = message.content[0].text if message.content else ""
+        await self._budget.record(self.user_id, _usage_tokens(message))
 
-        return AIAnalysisResponse(
+        response = AIAnalysisResponse(
             analysis_type=request.analysis_type,
             prompt=request.prompt,
             response=response_text,
-            model=request.model.value,
+            model=model.value,
             context_summary=context_summary,
             timestamp=datetime.utcnow(),
+            cached=False,
         )
+        await self._cache_set(cache_key, response)
+        return response
 
     async def analyze_stream(
         self, request: AIAnalysisRequest
@@ -352,32 +523,75 @@ Please provide analysis of this ratio and its implications."""
         if not api_key:
             raise ValueError("Claude API key not configured")
 
-        # Get custom instructions
         ai_settings = await self.get_settings()
+        model = self._resolve_model(request, ai_settings.default_model)
+        system_prompt = self._build_system_prompt(ai_settings.custom_instructions)
+        user_prompt, _ = await self._build_prompt_and_context(request)
 
-        # Build context and prompt based on analysis type
-        user_prompt = request.prompt
+        signature = self._cache_signature(model, system_prompt, user_prompt)
+        cache_key = self._cache.ai_response_key(signature)
 
-        if request.analysis_type == AnalysisType.EQUITY and request.symbol:
-            if request.include_context:
-                context = await self._get_equity_context(request.symbol)
-                if context:
-                    user_prompt = self._build_equity_prompt(request.prompt, context)
+        # Cache hit: replay the stored text as a single chunk (no tokens spent).
+        cached = await self._cache_get(cache_key)
+        if cached is not None and cached.get("response"):
+            yield cached["response"]
+            return
 
-        elif request.analysis_type == AnalysisType.RATIO and request.ratio_id:
-            if request.include_context:
-                context = await self._get_ratio_context(request.ratio_id)
-                if context:
-                    user_prompt = self._build_ratio_prompt(request.prompt, context)
+        # Fail closed if the per-day token budget is exhausted.
+        await self._budget.check(self.user_id)
 
-        # Call Claude API with streaming
         client = anthropic.Anthropic(api_key=api_key)
-
+        chunks: list[str] = []
         with client.messages.stream(
-            model=request.model.value,
-            max_tokens=2048,
-            system=self._build_system_prompt(ai_settings.custom_instructions),
+            model=model.value,
+            max_tokens=MAX_TOKENS,
+            system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         ) as stream:
             for text in stream.text_stream:
+                chunks.append(text)
                 yield text
+            final_message = stream.get_final_message()
+
+        await self._budget.record(self.user_id, _usage_tokens(final_message))
+
+        response = AIAnalysisResponse(
+            analysis_type=request.analysis_type,
+            prompt=request.prompt,
+            response="".join(chunks),
+            model=model.value,
+            timestamp=datetime.utcnow(),
+            cached=False,
+        )
+        await self._cache_set(cache_key, response)
+
+    async def _cache_get(self, key: str) -> Optional[dict]:
+        """Read a cached response; degrade gracefully on cache errors."""
+        if settings.AI_RESPONSE_CACHE_TTL <= 0:
+            return None
+        try:
+            return await self._cache.get(key)
+        except Exception as exc:  # noqa: BLE001 - cache is best-effort
+            logger.warning("AI response cache read failed: %s", exc)
+            return None
+
+    async def _cache_set(self, key: str, response: AIAnalysisResponse) -> None:
+        """Store a response in the cache; degrade gracefully on cache errors."""
+        if settings.AI_RESPONSE_CACHE_TTL <= 0:
+            return
+        try:
+            await self._cache.set(
+                key, response.model_dump(mode="json"), settings.AI_RESPONSE_CACHE_TTL
+            )
+        except Exception as exc:  # noqa: BLE001 - cache is best-effort
+            logger.warning("AI response cache write failed: %s", exc)
+
+
+def _usage_tokens(message) -> int:
+    """Total (input + output) tokens for a Claude message, if reported."""
+    usage = getattr(message, "usage", None)
+    if usage is None:
+        return 0
+    return int(getattr(usage, "input_tokens", 0) or 0) + int(
+        getattr(usage, "output_tokens", 0) or 0
+    )

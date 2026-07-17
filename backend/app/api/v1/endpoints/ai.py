@@ -18,10 +18,22 @@ from app.schemas.ai import (
 )
 from app.schemas.common import DataResponse
 from app.services.ai import AIService
+from app.services.ai_budget import BudgetExceededError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+
+
+def format_sse(payload: str) -> str:
+    """Frame a payload as a single, spec-compliant SSE event.
+
+    Every line of ``payload`` is ``data:``-prefixed and the event is terminated
+    by a blank line (``\\n\\n``). This is the fix for the previous
+    ``f"data: {chunk}\\n\\n"`` framing, which produced bare (non-``data:``) lines
+    whenever a chunk contained a newline — corrupting multi-line streamed text.
+    """
+    return "".join(f"data: {line}\n" for line in payload.split("\n")) + "\n"
 
 
 def get_ai_service(
@@ -72,6 +84,11 @@ async def analyze(
     try:
         result = await service.analyze(request)
         return DataResponse(data=result)
+    except BudgetExceededError as e:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(e),
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -104,15 +121,17 @@ async def analyze_stream(
     async def generate() -> AsyncGenerator[str, None]:
         try:
             async for chunk in service.analyze_stream(request):
-                yield f"data: {chunk}\n\n"
-            yield "data: [DONE]\n\n"
+                yield format_sse(chunk)
+            yield format_sse("[DONE]")
+        except BudgetExceededError as e:
+            yield format_sse(f"ERROR: {str(e)}")
         except ValueError as e:
-            yield f"data: ERROR: {str(e)}\n\n"
+            yield format_sse(f"ERROR: {str(e)}")
         except RuntimeError as e:
-            yield f"data: ERROR: {str(e)}\n\n"
+            yield format_sse(f"ERROR: {str(e)}")
         except Exception as e:
             logger.error(f"AI streaming error: {e}")
-            yield "data: ERROR: Failed to perform analysis\n\n"
+            yield format_sse("ERROR: Failed to perform analysis")
 
     return StreamingResponse(
         generate(),

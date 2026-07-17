@@ -102,7 +102,7 @@ export function AIAnalysisPanel({
       symbol,
       ratio_id: ratioId,
       watchlist_id: watchlistId,
-      model: (settings?.default_model as AIModel) || 'claude-3-5-sonnet-20241022',
+      model: (settings?.default_model as AIModel) || 'claude-sonnet-5',
       include_context: true,
     });
   };

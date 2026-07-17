@@ -139,6 +139,14 @@ class Settings(BaseSettings):
 
     # AI (fallback, users provide their own)
     CLAUDE_API_KEY: str = ""
+    # Default Claude model for in-app analysis. Configurable so the default is
+    # never hardcoded to an id that can go EOL; must be one of AIModel's values.
+    AI_DEFAULT_MODEL: str = "claude-sonnet-5"
+    # Redis response-cache TTL for AI analyses (seconds); 0 disables the cache.
+    AI_RESPONSE_CACHE_TTL: int = 3600
+    # Per-user, per-day token ceiling (input+output) for in-app AI. Fails closed
+    # when exceeded (429 to the caller). 0 disables the budget.
+    AI_DAILY_TOKEN_BUDGET: int = 1_000_000
 
     # Context pack outbox (advisor bridge). When set, the app can publish the
     # context pack to this directory; a host-side rclone job syncs it to a

@@ -822,6 +822,10 @@ class ApiClient {
 
     const decoder = new TextDecoder();
     let buffer = '';
+    // An SSE event may carry multiple `data:` lines; they must be re-joined with
+    // '\n' (per spec) and dispatched on the blank-line boundary. This mirrors the
+    // backend `format_sse` framing so multi-line streamed text is preserved.
+    let dataLines: string[] = [];
 
     while (true) {
       const { done, value } = await reader.read();
@@ -832,8 +836,14 @@ class ApiClient {
       buffer = lines.pop() || '';
 
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
+        if (line.startsWith('data:')) {
+          // Strip 'data:' and at most one leading space (SSE spec).
+          dataLines.push(line.replace(/^data: ?/, ''));
+        } else if (line === '') {
+          // Blank line: event boundary — assemble and dispatch.
+          if (dataLines.length === 0) continue;
+          const data = dataLines.join('\n');
+          dataLines = [];
           if (data === '[DONE]') {
             return;
           }

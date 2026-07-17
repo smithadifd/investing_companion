@@ -300,3 +300,19 @@ class AlertStats(BaseModel):
     active_alerts: int
     triggered_today: int
     triggered_this_week: int
+
+
+class AlertDeliveryHealth(BaseModel):
+    """User-visible health of the alert-notification delivery outbox.
+
+    ``pending`` > 0 with an old ``oldest_pending_at`` means notifications are
+    backing up (worker/webhook trouble); ``failed`` > 0 means retries were
+    exhausted. When all three are healthy, silence provably means "not
+    triggered," not "the send was lost."
+    """
+
+    pending: int
+    delivered: int
+    failed: int
+    last_delivered_at: Optional[datetime] = None
+    oldest_pending_at: Optional[datetime] = None

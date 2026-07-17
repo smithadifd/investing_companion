@@ -4,11 +4,24 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.alert import AlertDelivery
 from app.schemas.equity import QuoteResponse
 from app.services.alert import AlertService
 from tests.factories import create_test_alert, create_test_equity
+
+
+async def _delivery_count(db: AsyncSession, alert_id: int) -> int:
+    """Pending/complete outbox rows enqueued for an alert. Notifications are
+    delivered via the transactional outbox, so process_alert enqueues one row
+    per fire instead of calling discord_service inline."""
+    return await db.scalar(
+        select(func.count(AlertDelivery.id)).where(
+            AlertDelivery.alert_id == alert_id
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -612,6 +625,12 @@ class TestProcessAlert:
         was_triggered, error = await service.process_alert(alert)
         assert was_triggered is True
         assert error is None
+        # Send is deferred to the outbox: process_alert enqueues one delivery
+        # and does NOT send inline (crash-safety).
+        mock_discord.send_alert_notification.assert_not_awaited()
+        assert await _delivery_count(db, alert.id) == 1
+        # The separate claim/deliver step performs the actual send.
+        await service.deliver_pending()
         mock_discord.send_alert_notification.assert_awaited_once()
 
     @patch("app.services.alert.discord_service")
@@ -670,16 +689,16 @@ class TestSustainedConfirmation:
             assert error is None
             assert was_triggered is False
             assert alert.consecutive_met_count == expected_count
-        # Check 3: sustained -> fires
+        # Check 3: sustained -> fires (enqueues exactly one delivery)
         was_triggered, _ = await service.process_alert(alert)
         assert was_triggered is True
         assert alert.consecutive_met_count == 3
-        mock_discord.send_alert_notification.assert_awaited_once()
-        # Check 4: still below -> counter grows, no re-fire
+        assert await _delivery_count(db, alert.id) == 1
+        # Check 4: still below -> counter grows, no re-fire (no new delivery)
         was_triggered, _ = await service.process_alert(alert)
         assert was_triggered is False
         assert alert.consecutive_met_count == 4
-        mock_discord.send_alert_notification.assert_awaited_once()
+        assert await _delivery_count(db, alert.id) == 1
 
     @patch("app.services.alert.discord_service")
     async def test_recovery_resets_counter(self, mock_discord, db: AsyncSession):

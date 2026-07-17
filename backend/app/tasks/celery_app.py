@@ -22,6 +22,17 @@ celery_app.conf.update(
     task_time_limit=300,  # 5 minutes
     worker_prefetch_multiplier=1,
     result_expires=3600,  # 1 hour
+    # --- Delivery reliability (alert outbox) ---
+    # acks_late + reject_on_worker_lost: a task is only acked AFTER it finishes,
+    # so a worker crash mid-run re-queues the message instead of dropping it.
+    # Safe here because alert delivery is idempotent at the outbox layer (per-
+    # row lease + unique idempotency key), so a redelivered task cannot double-
+    # send.
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
+    # visibility_timeout must exceed the delivery lease so a redelivered task
+    # does not race a still-leased row.
+    broker_transport_options={"visibility_timeout": 600},
 )
 
 # Celery Beat schedule for periodic tasks
@@ -40,6 +51,13 @@ else:
         "check-alerts-every-5-minutes": {
             "task": "alerts.check_all_alerts",
             "schedule": 300.0,  # 5 minutes in seconds
+        },
+        # Drain the alert-delivery outbox every 30s: claim pending rows (lease
+        # + bounded retry) and send them. Decoupled from evaluation so a send
+        # failure never rolls back the trigger record.
+        "deliver-pending-alerts": {
+            "task": "alerts.deliver_pending_notifications",
+            "schedule": 30.0,
         },
         # Dynamic notification scheduler - checks configured send times every minute
         # Fires morning pulse and EOD wrap tasks when the time matches settings

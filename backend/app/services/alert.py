@@ -7,10 +7,15 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Optional, Tuple
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.alert import Alert, AlertHistory
+from app.db.models.alert import (
+    Alert,
+    AlertDelivery,
+    AlertDeliveryStatus,
+    AlertHistory,
+)
 from app.db.models.equity import Equity
 from app.db.models.price_history import PriceHistory
 from app.db.models.ratio import Ratio
@@ -19,6 +24,7 @@ from app.schemas.alert import (
     AlertCheckResult,
     AlertConditionType,
     AlertCreate,
+    AlertDeliveryHealth,
     AlertHistoryResponse,
     AlertResponse,
     AlertStats,
@@ -45,6 +51,12 @@ PERIOD_LOOKBACK = {
     "6m": timedelta(days=180),
     "1y": timedelta(days=365),
 }
+
+# Outbox delivery tuning. The lease is the window a claimed row is hidden from
+# other workers; it must comfortably exceed one Discord send. Bounded retries
+# stop a permanently-broken webhook from being retried forever.
+DELIVERY_LEASE_SECONDS = 120
+DELIVERY_BATCH_LIMIT = 100
 
 
 class AlertService:
@@ -335,12 +347,13 @@ class AlertService:
                 Alert, AlertHistory.alert_id == Alert.id
             ).where(Alert.user_id == self.user_id)
 
-        total, active, today, week = await asyncio.gather(
-            self.db.scalar(total_stmt),
-            self.db.scalar(active_stmt),
-            self.db.scalar(today_stmt),
-            self.db.scalar(week_stmt),
-        )
+        # Serialized, NOT asyncio.gather: a single AsyncSession is a stateful
+        # transaction object and is not safe for concurrent operations. These
+        # four counts share self.db, so they must run one at a time.
+        total = await self.db.scalar(total_stmt)
+        active = await self.db.scalar(active_stmt)
+        today = await self.db.scalar(today_stmt)
+        week = await self.db.scalar(week_stmt)
 
         return AlertStats(
             total_alerts=total or 0,
@@ -416,15 +429,18 @@ class AlertService:
                 threshold = Decimal(str(alert.threshold_value))
                 alert.was_above_threshold = result.current_value >= threshold
                 if alert.confirm_checks is not None:
-                    # Advance the sustained counter; must mirror the
-                    # prospective count _evaluate_sustained computed
+                    # Advance the sustained counter. This MUST equal the
+                    # prospective count _evaluate_sustained decided against —
+                    # both call the same _next_sustained_count helper so the
+                    # two can never drift (pinned by test_sustained_counter_
+                    # lockstep).
                     beyond = (
                         result.current_value > threshold
                         if alert.condition_type == "crosses_above"
                         else result.current_value < threshold
                     )
-                    alert.consecutive_met_count = (
-                        (alert.consecutive_met_count or 0) + 1 if beyond else 0
+                    alert.consecutive_met_count = self._next_sustained_count(
+                        alert.consecutive_met_count, beyond
                     )
 
             if not result.is_triggered:
@@ -442,7 +458,11 @@ class AlertService:
                 await self.db.commit()
                 return False, None
 
-            # Create history record
+            # Record the trigger and ENQUEUE the notification (transactional
+            # outbox) in ONE transaction. The Discord send happens later, in
+            # the claim/deliver step. Because nothing is sent inside this
+            # transaction, a crash here can neither double-send (nothing went
+            # out) nor silently drop (the pending row is durable and retried).
             history = AlertHistory(
                 alert_id=alert.id,
                 triggered_value=result.current_value,
@@ -455,28 +475,24 @@ class AlertService:
             alert.last_triggered_at = datetime.now(timezone.utc)
             alert.last_checked_value = result.current_value
 
-            # Send notification
             target_info = await self._get_target_info(alert)
             if target_info:
-                success, error = await discord_service.send_alert_notification(
+                payload = self._build_delivery_payload(
                     alert_name=alert.name,
-                    target_symbol=target_info.symbol,
-                    target_name=target_info.name,
+                    target_info=target_info,
                     condition_type=alert.condition_type,
-                    threshold_value=alert.threshold_value,
+                    threshold_value=result.threshold_value,
                     current_value=result.current_value,
                     comparison_period=alert.comparison_period,
-                    is_ratio=(target_info.type == AlertTargetType.RATIO),
                     notes=alert.notes,
                 )
-
-                history.notification_sent = success
-                history.notification_channel = "discord" if success else None
-                history.notification_error = error if not success else None
+                await self._enqueue_delivery(alert, history, payload)
 
             await self.db.commit()
 
-            logger.info(f"Alert {alert.id} ({alert.name}) triggered successfully")
+            logger.info(
+                f"Alert {alert.id} ({alert.name}) triggered; delivery enqueued"
+            )
             return True, None
 
         except Exception as e:
@@ -509,6 +525,261 @@ class AlertService:
             "triggered": triggered,
             "errors": errors,
         }
+
+    # ==================== Delivery outbox ====================
+    #
+    # Notifications are delivered via a transactional outbox. process_alert /
+    # _process_zone_alert enqueue a `pending` AlertDelivery row in the SAME
+    # transaction that records the trigger. This claim/deliver step — run by a
+    # Celery task on a short cadence, with acks_late + retry — atomically
+    # leases a batch of due rows, sends each, and marks it delivered/failed.
+    #
+    # Crash-safety:
+    #   * crash BEFORE send  -> the pending row is durable, so it is retried
+    #     (no silent drop);
+    #   * a re-run of the evaluation cannot enqueue twice (unique idempotency
+    #     key), and the send is never inside the evaluation transaction (no
+    #     double-send from an evaluation retry);
+    #   * the per-row lease means two overlapping claim runs never grab the
+    #     same row, and a crashed sender's row only becomes claimable again
+    #     after the lease expires.
+
+    @staticmethod
+    def _build_delivery_payload(
+        *,
+        alert_name: str,
+        target_info: AlertTargetInfo,
+        condition_type: str,
+        threshold_value: Decimal,
+        current_value: Decimal,
+        comparison_period: Optional[str] = None,
+        notes: Optional[str] = None,
+        condition_override: Optional[str] = None,
+    ) -> dict:
+        """Snapshot everything the sender needs, JSON-safe (Decimals -> str).
+
+        Snapshotting at enqueue time means the claim step never re-reads the
+        alert (which may have been edited or deleted by the time it sends).
+        """
+        return {
+            "alert_name": alert_name,
+            "target_symbol": target_info.symbol,
+            "target_name": target_info.name,
+            "condition_type": condition_type,
+            "threshold_value": str(threshold_value),
+            "current_value": str(current_value),
+            "comparison_period": comparison_period,
+            "is_ratio": target_info.type == AlertTargetType.RATIO,
+            "notes": notes,
+            "condition_override": condition_override,
+        }
+
+    async def _enqueue_delivery(
+        self,
+        alert: Alert,
+        history: AlertHistory,
+        payload: dict,
+        key_suffix: str = "",
+    ) -> AlertDelivery:
+        """Add a pending outbox row to the current (uncommitted) transaction.
+
+        Flushes first so ``history.id`` is available for the idempotency key.
+        The row is committed by the caller alongside the history/alert state,
+        making the enqueue atomic with the trigger record.
+        """
+        await self.db.flush()  # populate history.id
+        key = f"alert:{alert.id}:hist:{history.id}"
+        if key_suffix:
+            key = f"{key}:{key_suffix}"
+        delivery = AlertDelivery(
+            alert_id=alert.id,
+            alert_history_id=history.id,
+            user_id=alert.user_id,
+            idempotency_key=key,
+            status=AlertDeliveryStatus.PENDING.value,
+            payload=payload,
+        )
+        self.db.add(delivery)
+        return delivery
+
+    async def claim_pending_deliveries(
+        self,
+        limit: int = DELIVERY_BATCH_LIMIT,
+        lease_seconds: int = DELIVERY_LEASE_SECONDS,
+    ) -> List[AlertDelivery]:
+        """Atomically lease a batch of due pending deliveries.
+
+        ``FOR UPDATE SKIP LOCKED`` makes concurrent workers claim disjoint
+        rows. A row is due when it is still ``pending``, its retry budget is
+        not exhausted, and it holds no live lease. Claiming bumps ``attempts``
+        and stamps a fresh lease, then commits — so the lease is durable before
+        any send is attempted.
+        """
+        now = datetime.now(timezone.utc)
+        lease_until = now + timedelta(seconds=lease_seconds)
+        claim = text(
+            """
+            UPDATE alert_deliveries
+            SET attempts = attempts + 1,
+                lease_expires_at = :lease_until,
+                updated_at = now()
+            WHERE id IN (
+                SELECT id FROM alert_deliveries
+                WHERE status = :pending
+                  AND attempts < max_attempts
+                  AND (lease_expires_at IS NULL OR lease_expires_at < :now)
+                ORDER BY created_at
+                LIMIT :limit
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING id
+            """
+        )
+        result = await self.db.execute(
+            claim,
+            {
+                "lease_until": lease_until,
+                "now": now,
+                "pending": AlertDeliveryStatus.PENDING.value,
+                "limit": limit,
+            },
+        )
+        ids = [row[0] for row in result.all()]
+        await self.db.commit()
+        if not ids:
+            return []
+        # populate_existing so identity-mapped rows reflect the bumped attempts
+        # and fresh lease written by the raw UPDATE above (they aren't expired
+        # because the session uses expire_on_commit=False).
+        rows = await self.db.execute(
+            select(AlertDelivery)
+            .where(AlertDelivery.id.in_(ids))
+            .order_by(AlertDelivery.created_at)
+            .execution_options(populate_existing=True)
+        )
+        return list(rows.scalars().all())
+
+    async def deliver_pending(
+        self,
+        limit: int = DELIVERY_BATCH_LIMIT,
+        lease_seconds: int = DELIVERY_LEASE_SECONDS,
+    ) -> dict:
+        """Claim then send a batch of pending deliveries. Called by Celery."""
+        claimed = await self.claim_pending_deliveries(
+            limit=limit, lease_seconds=lease_seconds
+        )
+        sent = 0
+        failed = 0
+        for delivery in claimed:
+            ok = await self._send_delivery(delivery)
+            if ok:
+                sent += 1
+            else:
+                failed += 1
+        return {"claimed": len(claimed), "sent": sent, "failed": failed}
+
+    async def _send_delivery(self, delivery: AlertDelivery) -> bool:
+        """Send one claimed delivery and record the outcome.
+
+        On success: ``delivered`` and the linked history row is stamped sent.
+        On failure with retries left: cleared lease so the next run retries.
+        On failure with retries exhausted: ``failed`` (terminal, not dropped —
+        it stays queryable in the health view).
+        """
+        payload = delivery.payload or {}
+        try:
+            success, error = await discord_service.send_alert_notification(
+                alert_name=payload["alert_name"],
+                target_symbol=payload["target_symbol"],
+                target_name=payload["target_name"],
+                condition_type=payload["condition_type"],
+                threshold_value=Decimal(str(payload["threshold_value"])),
+                current_value=Decimal(str(payload["current_value"])),
+                comparison_period=payload.get("comparison_period"),
+                is_ratio=payload.get("is_ratio", False),
+                notes=payload.get("notes"),
+                condition_override=payload.get("condition_override"),
+            )
+        except Exception as e:  # noqa: BLE001 - any send error must not crash the batch
+            success, error = False, str(e)
+            logger.error(
+                f"Delivery {delivery.id} send raised: {e}", exc_info=True
+            )
+
+        history = None
+        if delivery.alert_history_id is not None:
+            history = await self.db.get(AlertHistory, delivery.alert_history_id)
+
+        if success:
+            delivery.status = AlertDeliveryStatus.DELIVERED.value
+            delivery.delivered_at = datetime.now(timezone.utc)
+            delivery.lease_expires_at = None
+            delivery.last_error = None
+            if history is not None:
+                history.notification_sent = True
+                history.notification_channel = "discord"
+                history.notification_error = None
+        else:
+            delivery.last_error = error
+            if delivery.attempts >= delivery.max_attempts:
+                # Retries exhausted: terminal failure, surfaced in the health
+                # view rather than silently lost.
+                delivery.status = AlertDeliveryStatus.FAILED.value
+                delivery.lease_expires_at = None
+                if history is not None:
+                    history.notification_sent = False
+                    history.notification_channel = None
+                    history.notification_error = error
+            else:
+                # Leave pending and release the lease so the next claim retries.
+                delivery.lease_expires_at = None
+
+        await self.db.commit()
+        return success
+
+    async def get_delivery_health(self) -> AlertDeliveryHealth:
+        """Read-only pending/delivered/failed counts (+ freshness).
+
+        Scoped to the caller when ``user_id`` is set. Cheap: single-table
+        counts backed by ``idx_alert_deliveries_status``.
+        """
+        def _scoped(stmt):
+            if self.user_id is not None:
+                return stmt.where(AlertDelivery.user_id == self.user_id)
+            return stmt
+
+        count_base = _scoped(select(func.count(AlertDelivery.id)))
+        pending = await self.db.scalar(
+            count_base.where(
+                AlertDelivery.status == AlertDeliveryStatus.PENDING.value
+            )
+        )
+        delivered = await self.db.scalar(
+            count_base.where(
+                AlertDelivery.status == AlertDeliveryStatus.DELIVERED.value
+            )
+        )
+        failed = await self.db.scalar(
+            count_base.where(
+                AlertDelivery.status == AlertDeliveryStatus.FAILED.value
+            )
+        )
+        last_delivered_at = await self.db.scalar(
+            _scoped(select(func.max(AlertDelivery.delivered_at)))
+        )
+        oldest_pending_at = await self.db.scalar(
+            _scoped(select(func.min(AlertDelivery.created_at))).where(
+                AlertDelivery.status == AlertDeliveryStatus.PENDING.value
+            )
+        )
+
+        return AlertDeliveryHealth(
+            pending=pending or 0,
+            delivered=delivered or 0,
+            failed=failed or 0,
+            last_delivered_at=last_delivered_at,
+            oldest_pending_at=oldest_pending_at,
+        )
 
     # ==================== Private Methods ====================
 
@@ -735,6 +1006,17 @@ class AlertService:
 
         return False, f"Unknown condition type: {condition}"
 
+    @staticmethod
+    def _next_sustained_count(current_count: Optional[int], beyond: bool) -> int:
+        """The consecutive-checks-met counter after one more check.
+
+        Single source of truth for the sustained-confirmation counter. Both
+        ``_evaluate_sustained`` (which decides whether to fire) and
+        ``process_alert`` (which persists the counter) call this, so the value
+        fired against and the value stored can never drift apart.
+        """
+        return (current_count or 0) + 1 if beyond else 0
+
     def _evaluate_sustained(
         self, alert: Alert, current_value: Decimal, above: bool
     ) -> Tuple[bool, str]:
@@ -757,7 +1039,9 @@ class AlertService:
         threshold = Decimal(str(alert.threshold_value))
         beyond = current_value > threshold if above else current_value < threshold
         needed = alert.confirm_checks or 1
-        count = (alert.consecutive_met_count or 0) + 1 if beyond else 0
+        # Same helper process_alert uses to PERSIST the counter, so the count
+        # this check fires against always equals the count that gets stored.
+        count = self._next_sustained_count(alert.consecutive_met_count, beyond)
         direction = "above" if above else "below"
 
         if not beyond:
@@ -948,10 +1232,13 @@ class AlertService:
                 alert.last_triggered_at = datetime.now(timezone.utc)
 
                 if target_info:
-                    success, error = await discord_service.send_alert_notification(
+                    # Same transactional-outbox path as scalar alerts: enqueue
+                    # one pending row per fired tier, never send inline. The
+                    # tier is folded into the idempotency key so two tiers of
+                    # the same trigger enqueue distinctly.
+                    payload = self._build_delivery_payload(
                         alert_name=f"{alert.name} - {zone.tier}",
-                        target_symbol=target_info.symbol,
-                        target_name=target_info.name,
+                        target_info=target_info,
                         condition_type=alert.condition_type,
                         threshold_value=zone_entry_edge(zone),
                         current_value=current_value,
@@ -961,9 +1248,9 @@ class AlertService:
                             f"({self._zone_range_desc(zone)})"
                         ),
                     )
-                    history.notification_sent = success
-                    history.notification_channel = "discord" if success else None
-                    history.notification_error = error if not success else None
+                    await self._enqueue_delivery(
+                        alert, history, payload, key_suffix=f"tier:{zone.tier}"
+                    )
 
             await self.db.commit()
 
@@ -1016,9 +1303,10 @@ class AlertService:
             # Find equity IDs for numerator and denominator
             num_stmt = select(Equity).where(Equity.symbol == ratio.numerator_symbol)
             den_stmt = select(Equity).where(Equity.symbol == ratio.denominator_symbol)
-            num_result, den_result = await asyncio.gather(
-                self.db.execute(num_stmt), self.db.execute(den_stmt)
-            )
+            # Serialized, NOT asyncio.gather: both queries share self.db and an
+            # AsyncSession is not safe for concurrent operations.
+            num_result = await self.db.execute(num_stmt)
+            den_result = await self.db.execute(den_stmt)
             num_equity = num_result.scalar_one_or_none()
             den_equity = den_result.scalar_one_or_none()
             if not num_equity or not den_equity:
@@ -1028,10 +1316,10 @@ class AlertService:
                 )
                 return None
 
-            num_close, den_close = await asyncio.gather(
-                self._get_closest_close(num_equity.id, target_time),
-                self._get_closest_close(den_equity.id, target_time),
-            )
+            # Serialized, NOT asyncio.gather: each _get_closest_close issues a
+            # query on the shared self.db, which is not concurrency-safe.
+            num_close = await self._get_closest_close(num_equity.id, target_time)
+            den_close = await self._get_closest_close(den_equity.id, target_time)
             if num_close is None:
                 await self._backfill_equity_history(num_equity.id)
                 num_close = await self._get_closest_close(num_equity.id, target_time)

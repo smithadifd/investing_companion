@@ -10,6 +10,7 @@ from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.alert import (
     AlertCreate,
+    AlertDeliveryHealth,
     AlertHistoryResponse,
     AlertResponse,
     AlertStats,
@@ -96,6 +97,23 @@ async def get_alert_stats(
     """
     stats = await service.get_stats()
     return DataResponse(data=stats)
+
+
+@router.get("/delivery-health", response_model=DataResponse[AlertDeliveryHealth])
+async def get_alert_delivery_health(
+    current_user: User = Depends(get_current_user),
+    service: AlertService = Depends(get_alert_service),
+) -> DataResponse[AlertDeliveryHealth]:
+    """
+    Alert-delivery outbox health for the current user.
+
+    Returns pending / delivered / failed notification counts (plus the last
+    delivery time and the age of the oldest still-pending notification), so a
+    quiet feed can be trusted: healthy counts mean "nothing triggered," not
+    "a send was silently lost."
+    """
+    health = await service.get_delivery_health()
+    return DataResponse(data=health)
 
 
 @router.get("/history", response_model=DataResponse[List[AlertHistoryResponse]])

@@ -7,15 +7,26 @@ from app.db.session import AsyncSessionLocal
 from app.services.alert import AlertService
 from app.services.notifications.discord import discord_service
 from app.tasks.celery_app import celery_app
+from app.tasks.locks import redis_lease
 from app.tasks.utils import run_async
 
 logger = logging.getLogger(__name__)
+
+# Best-effort lease so two beats can't evaluate the whole book at once. TTL >
+# the 5-minute cadence's expected runtime; it auto-expires if a worker dies.
+_CHECK_LOCK_KEY = "lock:alerts.check_all_alerts"
+_CHECK_LOCK_TTL = 290
 
 
 @celery_app.task(name="alerts.check_all_alerts")
 def check_all_alerts():
     """
-    Check all active alerts and send notifications for triggered ones.
+    Check all active alerts and enqueue notifications for triggered ones.
+
+    Evaluation only records triggers and enqueues outbox rows; the actual
+    Discord send is drained by ``deliver_pending_notifications``. A per-task
+    lease keeps two overlapping beats from double-evaluating the book (the
+    outbox's per-row lease + idempotency key make delivery safe regardless).
 
     This task is scheduled to run periodically via Celery Beat.
     """
@@ -28,7 +39,13 @@ def check_all_alerts():
             return result
 
     try:
-        result = run_async(_check())
+        with redis_lease(_CHECK_LOCK_KEY, _CHECK_LOCK_TTL) as acquired:
+            if not acquired:
+                logger.info(
+                    "alerts.check_all_alerts already running elsewhere; skipping"
+                )
+                return {"skipped": "locked"}
+            result = run_async(_check())
         logger.info(
             f"Alert check complete: {result['checked']} checked, "
             f"{result['triggered']} triggered, {result['errors']} errors"
@@ -37,6 +54,37 @@ def check_all_alerts():
     except Exception as e:
         logger.error(f"Error in alert check task: {e}", exc_info=True)
         raise
+
+
+@celery_app.task(
+    bind=True,
+    name="alerts.deliver_pending_notifications",
+    acks_late=True,
+    max_retries=3,
+    default_retry_delay=30,
+)
+def deliver_pending_notifications(self):
+    """Drain the alert-delivery outbox: claim pending rows and send them.
+
+    The claim step atomically leases each row (bounded retry), so this task is
+    safe to run on a short cadence and safe to redeliver on worker loss —
+    ``acks_late`` re-queues a crashed run and the per-row lease prevents a
+    double-send. On an unexpected error the task retries with backoff; the
+    durable pending rows are never lost.
+    """
+    async def _deliver():
+        async with AsyncSessionLocal() as session:
+            service = AlertService(session)
+            return await service.deliver_pending()
+
+    try:
+        result = run_async(_deliver())
+        if result.get("claimed"):
+            logger.info(f"Alert delivery drain: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error draining alert deliveries: {e}", exc_info=True)
+        raise self.retry(exc=e)
 
 
 @celery_app.task(name="alerts.check_single_alert")

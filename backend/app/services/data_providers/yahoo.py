@@ -23,6 +23,7 @@ from app.schemas.equity import (
     QuoteResponse,
 )
 from app.services.cache import cache_service
+from app.services.data_providers.base import MarketDataProvider, ProviderCapability
 
 logger = logging.getLogger(__name__)
 
@@ -241,8 +242,24 @@ def _normalize_dividend_yield(
     return raw_as_fraction
 
 
-class YahooFinanceProvider:
-    """Yahoo Finance data provider using yfinance library."""
+class YahooFinanceProvider(MarketDataProvider):
+    """Yahoo Finance data provider using yfinance library.
+
+    The primary market-data source. Declares all four capabilities and is the
+    provider the resilience layer (``resilience.ResilientProvider``) wraps with
+    retry/backoff/circuit-breaker; Stooq/Alpha Vantage sit behind it as
+    fallbacks (see ``get_quote_provider``).
+    """
+
+    name = "yahoo"
+    capabilities = frozenset(
+        {
+            ProviderCapability.QUOTE,
+            ProviderCapability.HISTORY,
+            ProviderCapability.FUNDAMENTALS,
+            ProviderCapability.SEARCH,
+        }
+    )
 
     async def get_quote(self, symbol: str) -> Optional[QuoteResponse]:
         """Fetch current quote for a symbol. Uses 5-minute cache."""
@@ -291,6 +308,8 @@ class YahooFinanceProvider:
             volume=_safe_int(info.get("regularMarketVolume")) or 0,
             market_cap=_safe_int(info.get("marketCap")),
             timestamp=datetime.utcnow(),
+            source="yahoo",
+            stale=False,
         )
 
         # Cache the result

@@ -49,9 +49,25 @@ class DiscordNotificationService:
                     setting = result.scalar_one_or_none()
 
                     if setting and setting.value:
-                        # Discord webhook URLs are not encrypted, use directly
-                        self._cached_db_url = setting.value
-                        logger.info("Discord webhook URL loaded from user settings")
+                        # DISCORD_WEBHOOK_URL is an encrypted-at-rest key (see
+                        # SettingsService.ENCRYPTED_KEYS); decrypt when the row
+                        # is flagged as such. Older rows saved before that
+                        # change stay plaintext (is_encrypted=False) and are
+                        # used as-is.
+                        value = setting.value
+                        if setting.is_encrypted:
+                            from app.services.settings import SettingsService
+
+                            try:
+                                value = SettingsService(session)._decrypt(value)
+                            except Exception:
+                                logger.warning(
+                                    "Failed to decrypt Discord webhook URL from settings"
+                                )
+                                value = None
+                        self._cached_db_url = value
+                        if value:
+                            logger.info("Discord webhook URL loaded from user settings")
 
                 self._cache_checked = True
             except Exception as e:

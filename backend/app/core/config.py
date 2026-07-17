@@ -31,6 +31,31 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     SECRET_KEY: str = "dev-secret-key-change-in-production"
 
+    # Encryption key for secrets-at-rest (Schwab/Claude tokens in user_settings).
+    # SEPARATE from SECRET_KEY on purpose: rotating the JWT signing key must not
+    # touch the data-encryption key (and vice versa). Provision a durable value
+    # with:  python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # A raw 32-byte urlsafe-base64 Fernet key is used directly; any other string
+    # is stretched via PBKDF2. When EMPTY the app falls back to the legacy
+    # SECRET_KEY-derived key (v1) for backward-compat during the transition and
+    # logs a warning — see app/services/settings.py. New ciphertext is written
+    # under this key (v2) only when it is set.
+    ENCRYPTION_KEY: str = ""
+
+    # Reverse proxies whose X-Forwarded-For we trust (IPs or CIDRs, comma-sep).
+    # Empty (default) = trust NO proxy: XFF is ignored and the direct peer is
+    # used for rate-limit identity, so a client can't spoof its rate-limit key.
+    # Set this to your Caddy/ingress address(es) when deployed behind a proxy.
+    TRUSTED_PROXIES: Union[List[str], str] = []
+
+    # Content-Security-Policy applied to responses (see SecurityHeadersMiddleware).
+    # Default is API-appropriate: deny everything (JSON API serves no page assets).
+    # Interactive docs (/docs, /redoc) get a relaxed policy in the middleware.
+    CONTENT_SECURITY_POLICY: str = (
+        "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; "
+        "form-action 'none'"
+    )
+
     @model_validator(mode="after")
     def validate_production_settings(self) -> "Settings":
         """Validate that production has secure configuration."""
@@ -45,6 +70,21 @@ class Settings(BaseSettings):
                 )
             if len(self.SECRET_KEY) < 32:
                 errors.append("SECRET_KEY must be at least 32 characters in production")
+
+            # Encourage (but don't yet require) a dedicated ENCRYPTION_KEY in
+            # production. Absent it, secrets fall back to the legacy
+            # SECRET_KEY-derived key — which couples rotation of the two keys.
+            # This is a WARNING (not fatal) so live installs keep booting during
+            # the transition; the re-encrypt migration (§3) flips it to required.
+            if not self.ENCRYPTION_KEY:
+                print(
+                    "WARNING: ENCRYPTION_KEY is not set. Secrets-at-rest fall back "
+                    "to the legacy SECRET_KEY-derived key; rotating SECRET_KEY will "
+                    "then brick stored Schwab/Claude tokens. Set ENCRYPTION_KEY "
+                    "(python -c \"from cryptography.fernet import Fernet; "
+                    "print(Fernet.generate_key().decode())\").",
+                    file=sys.stderr,
+                )
 
             # Check database password (extract from URL)
             if "investing_dev" in self.DATABASE_URL or ":investing@" in self.DATABASE_URL:
@@ -104,6 +144,14 @@ class Settings(BaseSettings):
         """Parse CORS_ORIGINS from comma-separated string or list."""
         if isinstance(v, str):
             return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
+
+    @field_validator("TRUSTED_PROXIES", mode="before")
+    @classmethod
+    def parse_trusted_proxies(cls, v):
+        """Parse TRUSTED_PROXIES from comma-separated string or list."""
+        if isinstance(v, str):
+            return [entry.strip() for entry in v.split(",") if entry.strip()]
         return v
 
     # Authentication

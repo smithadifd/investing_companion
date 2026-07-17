@@ -2,10 +2,11 @@
 Investing Companion API
 Main FastAPI application entry point
 """
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings as app_settings
+from app.core.dependencies import require_auth_for_detailed_health
 from app.core.middleware import SecurityHeadersMiddleware
 
 app = FastAPI(
@@ -30,10 +31,15 @@ app.add_middleware(
 
 
 @app.get("/health")
-async def health_check(detailed: bool = False):
+async def health_check(
+    detailed: bool = False,
+    _auth: None = Depends(require_auth_for_detailed_health),
+):
     """Health check endpoint for container orchestration.
 
-    Basic check returns just status. Use ?detailed=true for full checks.
+    Basic check returns just status (public liveness). ``?detailed=true`` runs
+    DB/Redis/Celery checks and leaks infra state, so it requires a valid bearer
+    token (see require_auth_for_detailed_health).
     """
     import time
 

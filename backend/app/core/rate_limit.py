@@ -99,14 +99,11 @@ async def check_login_rate_limit(
     """
     rate_limiter = await get_rate_limiter()
 
-    # Get client IP
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        client_ip = forwarded_for.split(",")[0].strip()
-    elif request.client:
-        client_ip = request.client.host
-    else:
-        client_ip = "unknown"
+    # Resolve client IP with trusted-proxy awareness: XFF is only honored from a
+    # configured trusted proxy, so a client can't spoof its rate-limit identity.
+    from app.core.dependencies import get_client_ip
+
+    client_ip = get_client_ip(request) or "unknown"
 
     # Check IP rate limit (more lenient - 20 attempts per 15 min)
     ip_limited, ip_remaining = await rate_limiter.is_rate_limited(

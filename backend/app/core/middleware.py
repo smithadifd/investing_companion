@@ -32,6 +32,24 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Control referrer information sent with requests
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
 
+        # Content-Security-Policy. This is a JSON API, so the default denies all
+        # resource loads. The interactive docs (/docs, /redoc) render HTML that
+        # pulls Swagger UI / ReDoc assets from jsDelivr and use inline
+        # script/style, so they get a scoped relaxation (docs are disabled in
+        # production anyway).
+        path = request.url.path
+        if path.startswith(("/docs", "/redoc")):
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; "
+                "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
+                "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
+                "img-src 'self' https://cdn.jsdelivr.net https://fastapi.tiangolo.com data:; "
+                "font-src 'self' https://cdn.jsdelivr.net; "
+                "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+            )
+        else:
+            response.headers["Content-Security-Policy"] = settings.CONTENT_SECURITY_POLICY
+
         # Prevent caching of sensitive data
         if request.url.path.startswith("/api/v1/auth"):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"

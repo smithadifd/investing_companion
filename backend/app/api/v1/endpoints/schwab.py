@@ -18,6 +18,7 @@ import logging
 import secrets
 import uuid
 from typing import Optional
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
@@ -54,6 +55,31 @@ def _settings_redirect(result: str) -> RedirectResponse:
         url=f"{base}/settings?schwab={result}",
         status_code=status.HTTP_302_FOUND,
     )
+
+
+def _trusted_received_url(request: Request) -> Optional[str]:
+    """Build the OAuth received-URL from the CONFIGURED callback base.
+
+    The token exchange (schwab-py / authlib) parses ``code``/``state`` out of
+    this URL. Using ``request.url`` would trust the inbound Host header, letting
+    a spoofed host reach the exchange (host-header injection / open-redirect).
+    Instead we take scheme+host+path from ``settings.SCHWAB_CALLBACK_URL`` and
+    carry over only the query string. If the request's Host doesn't match the
+    configured callback host we reject outright. Returns None on rejection.
+    """
+    configured = urlsplit(settings.SCHWAB_CALLBACK_URL)
+    if configured.hostname:
+        req_host = request.url.hostname
+        if req_host and req_host != configured.hostname:
+            logger.warning(
+                "Schwab callback host %r does not match configured %r; rejecting",
+                req_host,
+                configured.hostname,
+            )
+            return None
+    base = settings.SCHWAB_CALLBACK_URL
+    query = request.url.query
+    return f"{base}?{query}" if query else base
 
 
 def _exchange_code_for_token(state: str, received_url: str) -> dict:
@@ -182,9 +208,13 @@ async def schwab_callback(
     except ValueError:
         return _settings_redirect("error")
 
+    received_url = _trusted_received_url(request)
+    if received_url is None:
+        return _settings_redirect("error")
+
     try:
         wrapped_token = await asyncio.to_thread(
-            _exchange_code_for_token, state, str(request.url)
+            _exchange_code_for_token, state, received_url
         )
     except Exception as e:
         logger.error(f"Schwab token exchange failed: {e}", exc_info=True)

@@ -1,10 +1,11 @@
 """User settings service - manage user configuration and API keys."""
 
 import base64
+import logging
 import uuid
 from typing import Optional
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, MultiFernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from sqlalchemy import delete, select
@@ -14,6 +15,29 @@ from app.core.config import settings
 from app.db.models.user import User
 from app.db.models.user_settings import UserSetting
 from app.schemas.auth import AppSettings, AppSettingsUpdate
+
+logger = logging.getLogger(__name__)
+
+# Version tags for the secrets-at-rest ciphertext scheme. Stored values are
+# prefixed with "<version>:" so the decrypt path knows which key produced them.
+#
+#   v1  -> legacy key: PBKDF2(SECRET_KEY, static salt). What the OLD code wrote.
+#   v2  -> the dedicated ENCRYPTION_KEY (see config.ENCRYPTION_KEY).
+#   (no prefix) -> a raw Fernet token written by the ORIGINAL code, before this
+#                  scheme existed. Still decryptable via the legacy key.
+#
+# NON-BRICKING GUARANTEE: the legacy derivation below is frozen forever. Any
+# ciphertext ever written (unprefixed legacy token, or v1:) stays decryptable
+# even after ENCRYPTION_KEY is provisioned. Only NEW writes move to v2. The
+# actual re-encryption of existing rows to v2 is a separate supervised
+# migration, not something that happens at boot.
+_VERSION_LEGACY = "v1"
+_VERSION_PRIMARY = "v2"
+# NEVER change this salt: existing ciphertext is derived from it.
+_LEGACY_SALT = b"investing_companion_salt"
+# Distinct salt for the PBKDF2 fallback when ENCRYPTION_KEY is a passphrase
+# rather than a generated Fernet key. Decoupled from the legacy salt on purpose.
+_ENCRYPTION_KEY_SALT = b"investing_companion_encryption_key_v2"
 
 
 class SettingsService:
@@ -36,37 +60,113 @@ class SettingsService:
     # the old implicit "oldest active user" resolution used by background tasks.
     OWNER_USER_ID = "OWNER_USER_ID"
 
-    # Keys that should be encrypted
+    # Keys that should be encrypted. DISCORD_WEBHOOK_URL is a bearer credential
+    # (anyone with the URL can post to the channel), so it is encrypted at rest
+    # like the API keys. Existing plaintext rows stay readable (the per-row
+    # is_encrypted flag drives decryption) and get encrypted on next write.
     ENCRYPTED_KEYS = {
         CLAUDE_API_KEY,
         ALPHA_VANTAGE_API_KEY,
         POLYGON_API_KEY,
         SCHWAB_TOKEN,
+        DISCORD_WEBHOOK_URL,
     }
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
-        self._fernet = self._create_fernet()
+        # Legacy cipher (v1): derived from SECRET_KEY. Frozen — required to keep
+        # decrypting anything the old code wrote.
+        self._legacy_fernet = self._create_legacy_fernet()
+        # Primary cipher (v2): the dedicated ENCRYPTION_KEY when provisioned,
+        # else the legacy cipher (backward-compat fallback + warning).
+        self._primary_fernet, self._has_dedicated_key = self._create_primary_fernet()
+        # Try every known key when decrypting an unversioned legacy token.
+        self._multi_fernet = MultiFernet([self._primary_fernet, self._legacy_fernet])
 
-    def _create_fernet(self) -> Fernet:
-        """Create Fernet cipher using app secret key."""
-        # Derive a key from the secret
+    @staticmethod
+    def _create_legacy_fernet() -> Fernet:
+        """Cipher derived from SECRET_KEY + static salt (the original scheme).
+
+        Frozen forever: existing DB ciphertext depends on this exact derivation.
+        """
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
-            salt=b"investing_companion_salt",  # Static salt is fine here
+            salt=_LEGACY_SALT,
             iterations=100000,
         )
         key = base64.urlsafe_b64encode(kdf.derive(settings.SECRET_KEY.encode()))
         return Fernet(key)
 
+    @staticmethod
+    def _create_primary_fernet() -> tuple[Fernet, bool]:
+        """Return (cipher, has_dedicated_key) for the primary (v2) key.
+
+        Prefers the dedicated ENCRYPTION_KEY. If it is unset, falls back to the
+        legacy SECRET_KEY-derived cipher and logs a warning — so nothing breaks
+        during the transition, but the coupling is loud.
+        """
+        raw = (settings.ENCRYPTION_KEY or "").strip()
+        if not raw:
+            logger.warning(
+                "ENCRYPTION_KEY is not set; encrypting secrets with the legacy "
+                "SECRET_KEY-derived key. Provision ENCRYPTION_KEY to decouple "
+                "data encryption from JWT signing."
+            )
+            return SettingsService._create_legacy_fernet(), False
+        return Fernet(SettingsService._normalize_encryption_key(raw)), True
+
+    @staticmethod
+    def _normalize_encryption_key(raw: str) -> bytes:
+        """Coerce ENCRYPTION_KEY into a valid 32-byte urlsafe-base64 Fernet key.
+
+        A value that is already a valid Fernet key is used verbatim (the
+        recommended path — generate one with ``Fernet.generate_key()``). Any
+        other string is stretched deterministically via PBKDF2 so operators can
+        supply a passphrase without bricking round-trips.
+        """
+        candidate = raw.encode()
+        try:
+            # A real Fernet key is urlsafe-b64 that decodes to exactly 32 bytes.
+            if len(base64.urlsafe_b64decode(candidate)) == 32:
+                Fernet(candidate)  # validates format
+                return candidate
+        except Exception:
+            pass
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=_ENCRYPTION_KEY_SALT,
+            iterations=100000,
+        )
+        return base64.urlsafe_b64encode(kdf.derive(candidate))
+
     def _encrypt(self, value: str) -> str:
-        """Encrypt a value."""
-        return self._fernet.encrypt(value.encode()).decode()
+        """Encrypt a value, tagging it with the producing key's version.
+
+        Writes v2 when a dedicated ENCRYPTION_KEY is set, else v1 (legacy
+        derivation) so the value stays decryptable during the transition.
+        """
+        if self._has_dedicated_key:
+            token = self._primary_fernet.encrypt(value.encode()).decode()
+            return f"{_VERSION_PRIMARY}:{token}"
+        token = self._legacy_fernet.encrypt(value.encode()).decode()
+        return f"{_VERSION_LEGACY}:{token}"
 
     def _decrypt(self, encrypted_value: str) -> str:
-        """Decrypt a value."""
-        return self._fernet.decrypt(encrypted_value.encode()).decode()
+        """Decrypt a value written under any scheme version (non-bricking).
+
+        Routes by version prefix; an unprefixed value is a raw Fernet token
+        from the original code and is tried against every known key.
+        """
+        if encrypted_value.startswith(f"{_VERSION_PRIMARY}:"):
+            token = encrypted_value[len(_VERSION_PRIMARY) + 1:]
+            return self._primary_fernet.decrypt(token.encode()).decode()
+        if encrypted_value.startswith(f"{_VERSION_LEGACY}:"):
+            token = encrypted_value[len(_VERSION_LEGACY) + 1:]
+            return self._legacy_fernet.decrypt(token.encode()).decode()
+        # Unversioned: a raw Fernet token from before this scheme existed.
+        return self._multi_fernet.decrypt(encrypted_value.encode()).decode()
 
     async def get_setting(
         self,

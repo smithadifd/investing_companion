@@ -159,7 +159,9 @@ class TestSchwabCallback:
         )
 
         response = await client.get(
-            "/api/v1/schwab/callback", params={"code": "abc", "state": "good"}
+            "/api/v1/schwab/callback",
+            params={"code": "abc", "state": "good"},
+            headers={"host": "example.com"},  # matches SCHWAB_CALLBACK_URL host
         )
         assert response.status_code == 302
         assert response.headers["location"].endswith("/settings?schwab=connected")
@@ -193,10 +195,74 @@ class TestSchwabCallback:
         monkeypatch.setattr(schwab_endpoint, "_exchange_code_for_token", _boom)
 
         response = await client.get(
-            "/api/v1/schwab/callback", params={"code": "abc", "state": "good"}
+            "/api/v1/schwab/callback",
+            params={"code": "abc", "state": "good"},
+            headers={"host": "example.com"},
         )
         assert response.status_code == 302
         assert response.headers["location"].endswith("/settings?schwab=error")
+
+    async def test_mismatched_host_is_rejected(
+        self, client, test_user, schwab_configured, monkeypatch
+    ):
+        """A spoofed/mismatched Host header must be rejected before the token
+        exchange (host-header injection / open-redirect guard, fix #4)."""
+        monkeypatch.setattr(
+            cache_service, "get", AsyncMock(return_value=str(test_user.id))
+        )
+        monkeypatch.setattr(cache_service, "delete", AsyncMock())
+
+        import app.api.v1.endpoints.schwab as schwab_endpoint
+
+        called = {"n": 0}
+
+        def _should_not_run(state, received_url):
+            called["n"] += 1
+            return _wrapped_token()
+
+        monkeypatch.setattr(
+            schwab_endpoint, "_exchange_code_for_token", _should_not_run
+        )
+
+        response = await client.get(
+            "/api/v1/schwab/callback",
+            params={"code": "abc", "state": "good"},
+            headers={"host": "evil.example.net"},  # != configured example.com
+        )
+        assert response.status_code == 302
+        assert response.headers["location"].endswith("/settings?schwab=error")
+        assert called["n"] == 0  # exchange never reached
+
+    async def test_exchange_uses_configured_host_not_request_host(
+        self, client, test_user, schwab_configured, monkeypatch
+    ):
+        """The URL handed to the token exchange must be built from the CONFIGURED
+        callback base, not the inbound request URL."""
+        monkeypatch.setattr(
+            cache_service, "get", AsyncMock(return_value=str(test_user.id))
+        )
+        monkeypatch.setattr(cache_service, "delete", AsyncMock())
+
+        import app.api.v1.endpoints.schwab as schwab_endpoint
+
+        captured = {}
+
+        def _capture(state, received_url):
+            captured["url"] = received_url
+            return _wrapped_token()
+
+        monkeypatch.setattr(schwab_endpoint, "_exchange_code_for_token", _capture)
+
+        response = await client.get(
+            "/api/v1/schwab/callback",
+            params={"code": "abc", "state": "good"},
+            headers={"host": "example.com"},
+        )
+        assert response.status_code == 302
+        assert captured["url"].startswith(
+            "https://example.com/api/v1/schwab/callback"
+        )
+        assert "code=abc" in captured["url"] and "state=good" in captured["url"]
 
     async def test_blocked_in_demo_mode(self, client, schwab_configured, monkeypatch):
         import app.core.demo as demo

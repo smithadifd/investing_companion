@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, userEvent } from '@/test/utils';
+import type { EquitySearchResult } from '@/lib/api/types';
 
 // --- SearchBar combobox needs router + debounce + search-hook stubs ---------
 vi.mock('next/navigation', () => ({
@@ -20,9 +22,16 @@ vi.mock('@/lib/hooks/useEquity', () => ({
 }));
 
 import { SearchBar } from '@/components/search/SearchBar';
+import { EquitySearchInput } from '@/components/equity/EquitySearchInput';
 import { PeriodSelector } from '@/components/equity/PeriodSelector';
 import { PriceChange } from '@/components/ui/PriceChange';
 import { NewsSentimentBadge } from '@/components/news/NewsSentimentBadge';
+
+// EquitySearchInput is controlled; a tiny harness owns the query state.
+function EquitySearchHarness({ onSelect }: { onSelect: (r: EquitySearchResult) => void }) {
+  const [value, setValue] = useState('');
+  return <EquitySearchInput value={value} onChange={setValue} onSelect={onSelect} />;
+}
 
 describe('SearchBar combobox a11y', () => {
   it('exposes combobox semantics and a labelled listbox of options', async () => {
@@ -49,6 +58,28 @@ describe('SearchBar combobox a11y', () => {
     await user.keyboard('{ArrowDown}');
     expect(options[0]).toHaveAttribute('aria-selected', 'true');
     expect(input).toHaveAttribute('aria-activedescendant', options[0].id);
+  });
+});
+
+describe('EquitySearchInput combobox keyboard a11y', () => {
+  it('supports arrow-key navigation, aria-activedescendant, and Enter-to-select', async () => {
+    const onSelect = vi.fn();
+    const user = userEvent.setup();
+    render(<EquitySearchHarness onSelect={onSelect} />);
+
+    const input = screen.getByRole('combobox', { name: /search for a stock symbol/i });
+    await user.click(input);
+    await user.keyboard('A');
+
+    const options = await screen.findAllByRole('option');
+    expect(options.length).toBeGreaterThan(0);
+
+    await user.keyboard('{ArrowDown}');
+    expect(options[0]).toHaveAttribute('aria-selected', 'true');
+    expect(input).toHaveAttribute('aria-activedescendant', options[0].id);
+
+    await user.keyboard('{Enter}');
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ symbol: 'AAPL' }));
   });
 });
 

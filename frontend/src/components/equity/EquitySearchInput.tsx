@@ -26,11 +26,17 @@ export function EquitySearchInput({
   autoFocus = false,
 }: EquitySearchInputProps) {
   const [showResults, setShowResults] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const { data: searchResults, isLoading } = useEquitySearch(value, value.length >= 1);
   const options = searchResults ?? [];
   const listboxOpen = showResults && options.length > 0;
+
+  // Reset the keyboard highlight whenever the result set changes.
+  useEffect(() => {
+    setActiveIndex(-1);
+  }, [searchResults]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -51,6 +57,28 @@ export function EquitySearchInput({
   const handleSelect = (result: EquitySearchResult) => {
     onSelect(result);
     setShowResults(false);
+    setActiveIndex(-1);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      setShowResults(false);
+      setActiveIndex(-1);
+      return;
+    }
+    if (options.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setShowResults(true);
+      setActiveIndex((i) => (i + 1) % options.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setShowResults(true);
+      setActiveIndex((i) => (i <= 0 ? options.length - 1 : i - 1));
+    } else if (e.key === 'Enter' && activeIndex >= 0) {
+      e.preventDefault();
+      handleSelect(options[activeIndex]);
+    }
   };
 
   return (
@@ -63,9 +91,13 @@ export function EquitySearchInput({
           aria-expanded={listboxOpen}
           aria-controls={LISTBOX_ID}
           aria-autocomplete="list"
+          aria-activedescendant={
+            listboxOpen && activeIndex >= 0 ? optionId(activeIndex) : undefined
+          }
           aria-busy={isLoading}
           value={value}
           onChange={handleChange}
+          onKeyDown={handleKeyDown}
           onFocus={() => searchResults && searchResults.length > 0 && setShowResults(true)}
           placeholder={placeholder}
           className="w-full px-3 py-2 pl-10 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -90,12 +122,17 @@ export function EquitySearchInput({
               key={result.symbol}
               id={optionId(index)}
               role="option"
-              aria-selected={false}
+              aria-selected={index === activeIndex}
+              onMouseEnter={() => setActiveIndex(index)}
               onMouseDown={(e) => {
                 e.preventDefault();
                 handleSelect(result);
               }}
-              className="w-full px-3 py-2 text-left cursor-pointer hover:bg-neutral-100 dark:hover:bg-neutral-600 transition-colors"
+              className={`w-full px-3 py-2 text-left cursor-pointer transition-colors ${
+                index === activeIndex
+                  ? 'bg-neutral-100 dark:bg-neutral-600'
+                  : 'hover:bg-neutral-100 dark:hover:bg-neutral-600'
+              }`}
             >
               <span className="font-medium text-neutral-900 dark:text-neutral-50">
                 {result.symbol}

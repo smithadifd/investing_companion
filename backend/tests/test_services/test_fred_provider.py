@@ -68,10 +68,11 @@ class TestRecurrenceKey:
         assert macro_recurrence_key(EventType.PCE, date(2025, 1, 31)) == "pce_2025_01"
         assert macro_recurrence_key(EventType.FOMC, date(2026, 1, 28)) == "fomc_2026_01"
 
-    def test_gdp_key_is_day_specific(self):
-        assert (
-            macro_recurrence_key(EventType.GDP, date(2026, 1, 29)) == "gdp_2026_01_29"
-        )
+    def test_gdp_key_is_month_bucketed_and_self_healing(self):
+        # One GDP print per calendar month -> month bucket, so a moved GDP date
+        # within the month collapses to the same key (self-heals in place).
+        assert macro_recurrence_key(EventType.GDP, date(2026, 1, 29)) == "gdp_2026_01"
+        assert macro_recurrence_key(EventType.GDP, date(2026, 1, 30)) == "gdp_2026_01"
 
 
 class TestDatesToSpecs:
@@ -135,7 +136,7 @@ class TestGetMacroEventsLive:
 
         specs = await provider.get_macro_events(2026)
         keys = {s.recurrence_key for s in specs}
-        assert keys == {"cpi_2026_01", "nfp_2026_01", "gdp_2026_01_29", "pce_2026_01"}
+        assert keys == {"cpi_2026_01", "nfp_2026_01", "gdp_2026_01", "pce_2026_01"}
 
 
 class TestResolveMacroSpecs:

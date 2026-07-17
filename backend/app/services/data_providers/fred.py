@@ -112,14 +112,16 @@ _EVENT_META: dict[EventType, dict] = {
 
 
 def macro_recurrence_key(event_type: EventType, d: date) -> str:
-    """Build the dedup key for a live macro event.
+    """Build the dedup key for a macro event: ``<type>_<year>_<month>``.
 
-    Mirrors the seeder exactly: monthly releases key on year+month (so a moved
-    date within a month updates in place — the issue-015 self-heal), GDP keys on
-    the full date (multiple quarterly vintages can share a month).
+    Keyed on the release's *occurrence* (year + month), NOT the publication day,
+    so a moved date within the month updates the existing row in place instead
+    of duplicating — the issue-015 self-heal, uniformly across every macro type.
+
+    This holds for GDP too: the release schedule has exactly one GDP print per
+    calendar month (a quarter's Advance, Second, and Third estimates land in
+    three consecutive months), so a month bucket identifies it unambiguously.
     """
-    if event_type is EventType.GDP:
-        return f"gdp_{d.year}_{d.month:02d}_{d.day:02d}"
     return f"{event_type.value}_{d.year}_{d.month:02d}"
 
 

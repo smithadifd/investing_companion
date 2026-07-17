@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   Plus,
   TrendingUp,
@@ -547,8 +547,30 @@ function PositionSizer() {
 
 type TabType = 'trades' | 'portfolio' | 'performance' | 'sizer';
 
+const TAB_ITEMS = [
+  { id: 'trades', label: 'Trades', Icon: BarChart3 },
+  { id: 'portfolio', label: 'Positions', Icon: Wallet },
+  { id: 'performance', label: 'Performance', Icon: LineChart },
+  { id: 'sizer', label: 'Position Sizer', Icon: Calculator },
+] as const;
+
 export default function TradesPage() {
   const [activeTab, setActiveTab] = useState<TabType>('trades');
+  // Roving-focus keyboard nav for the tablist (WAI-ARIA tabs pattern).
+  const tabRefs = useRef<Partial<Record<TabType, HTMLButtonElement | null>>>({});
+  const handleTabKeyDown = (e: React.KeyboardEvent, index: number) => {
+    const count = TAB_ITEMS.length;
+    let next = index;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (index + 1) % count;
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (index - 1 + count) % count;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = count - 1;
+    else return;
+    e.preventDefault();
+    const nextId = TAB_ITEMS[next].id;
+    setActiveTab(nextId);
+    tabRefs.current[nextId]?.focus();
+  };
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
   const [deleteTradeId, setDeleteTradeId] = useState<number | null>(null);
@@ -670,12 +692,7 @@ export default function TradesPage() {
           aria-label="Trades views"
           className="flex gap-1 mb-6 bg-neutral-100 dark:bg-neutral-800 p-1 rounded-lg w-fit overflow-x-auto"
         >
-          {([
-            { id: 'trades', label: 'Trades', Icon: BarChart3 },
-            { id: 'portfolio', label: 'Positions', Icon: Wallet },
-            { id: 'performance', label: 'Performance', Icon: LineChart },
-            { id: 'sizer', label: 'Position Sizer', Icon: Calculator },
-          ] as const).map(({ id, label, Icon }) => {
+          {TAB_ITEMS.map(({ id, label, Icon }, index) => {
             const selected = activeTab === id;
             return (
               <button
@@ -683,10 +700,14 @@ export default function TradesPage() {
                 type="button"
                 role="tab"
                 id={`trades-tab-${id}`}
+                ref={(el) => {
+                  tabRefs.current[id] = el;
+                }}
                 aria-selected={selected}
                 aria-controls={`trades-tabpanel-${id}`}
                 tabIndex={selected ? 0 : -1}
                 onClick={() => setActiveTab(id)}
+                onKeyDown={(e) => handleTabKeyDown(e, index)}
                 className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
                   selected
                     ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 shadow-sm'

@@ -279,7 +279,7 @@ def _monthly_specs(
 
 
 def _gdp_specs(year: int) -> List[MacroEventSpec]:
-    """GDP specs — day-keyed (multiple quarterly vintages can share a month)."""
+    """GDP specs — month-keyed (one GDP print per calendar month), self-healing."""
     dates = GDP_DATES_2025 if year == 2025 else GDP_DATES_2026
     return [
         MacroEventSpec(

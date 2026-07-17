@@ -14,14 +14,27 @@ Chosen defaults
   bars is plenty for the app's percent-change / percent-from-high reference
   windows; the daily aggregate below preserves long-range history past that.
 * **Continuous aggregate** — ``price_history_daily``, a daily OHLCV roll-up
-  (first/max/min/last + summed volume), refreshed daily. It survives raw
+  using ``first(open, ts)`` / ``max(high)`` / ``min(low)`` / ``last(close, ts)``
+  + summed volume — the pattern from TimescaleDB's own financial-tick tutorial,
+  which needs no Toolkit extension (the pinned ``timescale/timescaledb:2.25.0-pg15``
+  image ships raw ``first``/``last`` but not ``candlestick_agg``). It survives raw
   retention, so long-horizon charts keep working after the raw bars are dropped.
-  It is created ``WITH NO DATA``; the first scheduled refresh (or a manual
+  Created ``WITH NO DATA``; the first scheduled refresh (or a manual
   ``CALL refresh_continuous_aggregate(...)``) backfills it.
 
 Apply-gated: this is NOT applied automatically. Per the repo's deploy contract,
 Alembic runs against prod as a deploy step, and the TimescaleDB policy functions
 here require a live TimescaleDB (they are no-ops / errors on vanilla Postgres).
+
+VERIFICATION STATUS — **UNVERIFIED against a live Timescale.** CI only runs
+``Base.metadata.create_all`` (never ``alembic upgrade``), and Docker was not
+available in the authoring environment, so the CAGG DDL and the up/down policy
+calls here have NOT been executed. The two version-sensitive points were fixed
+from the TimescaleDB 2.25 docs: (1) raw ``first``/``last`` inside a CAGG is the
+documented, Toolkit-free OHLC pattern; (2) ``remove_continuous_aggregate_policy``
+takes ``if_not_exists`` (asymmetric with the ``if_exists`` retention/compression
+removers). **§3 deploy MUST run ``alembic upgrade head`` then ``alembic
+downgrade -1`` against the pinned image before rolling to prod.**
 
 Revision ID: 20260717_001
 Revises: 20260715_002
@@ -104,8 +117,10 @@ def downgrade() -> None:
     # Reverse order: drop the CAGG (and its policy) first, then retention, then
     # compression. Disabling compression requires decompressing any compressed
     # chunks first, so do that before clearing the compress settings.
+    # NOTE: the CAGG policy remover uses `if_not_exists` (not `if_exists`) — a
+    # long-standing API asymmetry vs. the retention/compression removers below.
     op.execute(
-        f"SELECT remove_continuous_aggregate_policy('{CAGG_NAME}', if_exists => true);"
+        f"SELECT remove_continuous_aggregate_policy('{CAGG_NAME}', if_not_exists => true);"
     )
     op.execute(f"DROP MATERIALIZED VIEW IF EXISTS {CAGG_NAME};")
 

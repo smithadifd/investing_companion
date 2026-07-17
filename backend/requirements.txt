@@ -37,7 +37,13 @@ redis>=5.0.0
 # ===========================================
 # Data & Finance
 # ===========================================
-yfinance>=0.2.36
+# Pinned exactly: the floating `>=0.2.36` floor let the resolver drift across a
+# yfinance change in `dividendYield` scale (fraction in older releases, percent
+# in the 1.x line) that renders/stores the yield 100x wrong. 1.1.0 is the
+# version this repo currently resolves to and is verified against; the
+# provider-boundary normalization in data_providers/yahoo.py keeps the canonical
+# (fraction) scale correct regardless. Bumping is a separate, tested change.
+yfinance==1.1.0
 pandas>=2.2.0
 numpy>=1.26.0
 ta>=0.11.0  # Technical analysis library

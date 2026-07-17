@@ -187,6 +187,60 @@ def _safe_int(value: Any) -> Optional[int]:
         return None
 
 
+def _normalize_dividend_yield(
+    value: Any,
+    dividend_rate: Any = None,
+    price: Any = None,
+) -> Optional[Decimal]:
+    """Normalize yfinance's ``dividendYield`` to a FRACTION (the canonical scale).
+
+    yfinance is inconsistent across versions: older releases report the yield as
+    a fraction (``0.025`` for 2.5%) while newer releases (the 1.x line) report it
+    as a percent (``2.5`` for 2.5%). With an unpinned dependency the same field
+    could be stored and rendered 100x off. Everything downstream expects a
+    FRACTION — the frontend ``FundamentalsCard``/``PeerComparison`` and the AI
+    context multiply by 100 for display, and the DB column is ``Numeric(5, 4)``
+    (a percent-scale value above ~10% would overflow it). Normalizing here, at
+    the single provider boundary where the value is ingested, keeps one canonical
+    scale flowing to the cache, the API response, the UI and the AI layer.
+
+    When ``dividend_rate`` and ``price`` are both available they are used as
+    ground truth (defense-in-depth): the true fractional yield is ``rate / price``,
+    and the fraction/percent readings are always 100x apart, so we keep whichever
+    of ``value`` (already a fraction) or ``value / 100`` (``value`` was a percent)
+    is closer to it. That path is robust to either input shape and resolves the
+    genuinely ambiguous sub-1% yield case — e.g. AAPL's ~0.32% yield, whose
+    percent form ``0.32`` is itself < 1 and so indistinguishable from a fraction
+    by magnitude alone.
+
+    Without that ground truth we scale down unconditionally: the pinned yfinance
+    (``==1.1.0``) always reports a percent, and a magnitude heuristic would
+    silently leave such a sub-1% percent yield mis-scaled 100x. A warning is
+    logged so that a future pin bump which changes the reported shape is
+    observable rather than silent.
+    """
+    raw = _safe_decimal(value)
+    if raw is None or raw <= 0:
+        return raw  # None, 0, or a nonsensical negative — nothing to scale
+
+    raw_as_fraction = raw / Decimal(100)  # interpretation if `value` was a percent
+
+    rate = _safe_decimal(dividend_rate)
+    px = _safe_decimal(price)
+    if rate is not None and px is not None and px > 0:
+        implied = rate / px
+        if abs(raw_as_fraction - implied) < abs(raw - implied):
+            return raw_as_fraction
+        return raw
+
+    logger.warning(
+        "dividendYield %r normalized without a rate/price cross-check; assuming "
+        "percent scale per the pinned yfinance. Re-verify if the pin changes.",
+        value,
+    )
+    return raw_as_fraction
+
+
 class YahooFinanceProvider:
     """Yahoo Finance data provider using yfinance library."""
 
@@ -396,7 +450,11 @@ class YahooFinanceProvider:
             price_to_book=_safe_decimal(info.get("priceToBook")),
             price_to_sales=_safe_decimal(info.get("priceToSalesTrailing12Months")),
             eps_ttm=_safe_decimal(info.get("trailingEps")),
-            dividend_yield=_safe_decimal(info.get("dividendYield")),
+            dividend_yield=_normalize_dividend_yield(
+                info.get("dividendYield"),
+                dividend_rate=info.get("dividendRate"),
+                price=info.get("regularMarketPrice") or info.get("currentPrice"),
+            ),
             beta=_safe_decimal(info.get("beta")),
             week_52_high=_safe_decimal(info.get("fiftyTwoWeekHigh")),
             week_52_low=_safe_decimal(info.get("fiftyTwoWeekLow")),
@@ -448,6 +506,7 @@ class YahooFinanceProvider:
                         "dividendDate": info.get("dividendDate"),
                         "dividendRate": info.get("dividendRate"),
                         "dividendYield": info.get("dividendYield"),
+                        "regularMarketPrice": info.get("regularMarketPrice"),
                     }
             except Exception as e:
                 logger.debug(f"Could not fetch info for {symbol}: {e}")
@@ -494,7 +553,11 @@ class YahooFinanceProvider:
             ex_div_date = _parse_timestamp(info.get("exDividendDate"))
             div_date = _parse_timestamp(info.get("dividendDate"))
             div_rate = _safe_decimal(info.get("dividendRate"))
-            div_yield = _safe_decimal(info.get("dividendYield"))
+            div_yield = _normalize_dividend_yield(
+                info.get("dividendYield"),
+                dividend_rate=info.get("dividendRate"),
+                price=info.get("regularMarketPrice"),
+            )
 
             if ex_div_date or div_rate:
                 dividend_info = DividendInfo(

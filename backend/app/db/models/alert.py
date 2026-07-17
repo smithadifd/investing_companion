@@ -214,13 +214,14 @@ class AlertDelivery(Base, TimestampMixin):
     bounded duplicate.
 
     ``idempotency_key`` is a STABLE per-trigger identity that does NOT depend
-    on the freshly-created history-row id. For scalar alerts it is the alert id
-    plus the cooldown-window bucket of the trigger time, so two concurrent
-    evaluations of the same trigger produce the same key and collide on the
-    unique constraint (overlapping runs enqueue once). Entry-zone tiers, which
-    can legitimately re-fire within a window, key on the tier's per-fire
-    ``last_fired_at`` instead (re-fires stay distinct; overlapping runs are kept
-    apart by the Celery + per-row leases).
+    on the freshly-created history-row id, so two concurrent evaluations of the
+    same trigger produce the same key and collide on the unique constraint
+    (overlapping runs enqueue once). Scalar alerts key on the alert id plus the
+    cooldown-window bucket of the trigger time. Entry-zone tiers, which can
+    legitimately re-fire within a window, key on the tier plus its PRE-fire
+    ``last_fired_at`` — shared persisted state that concurrent evaluators read
+    identically (so they collide too), yet distinct across legitimate re-fires
+    (each fire advances ``last_fired_at``).
     """
 
     __tablename__ = "alert_deliveries"

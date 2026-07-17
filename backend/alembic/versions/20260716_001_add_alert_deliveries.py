@@ -9,8 +9,8 @@ bounded (<= ``max_attempts``) duplicate window — it never silently drops a
 notification and never re-fires the whole evaluation.
 
 ``idempotency_key`` is a STABLE per-trigger identity (scalar alerts: alert +
-cooldown-window bucket; zone tiers: alert + tier + per-fire timestamp), not the
-history-row id, so two concurrent evaluations of a scalar trigger collide on the
+cooldown-window bucket; zone tiers: alert + tier + PRE-fire timestamp), not the
+history-row id, so two concurrent evaluations of the same trigger collide on the
 unique index and enqueue once.
 
 The unique index on ``idempotency_key`` is created explicitly via

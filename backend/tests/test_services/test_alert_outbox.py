@@ -13,21 +13,35 @@ without poisoning the session), stranded-pending rows are reaped to ``failed``,
 and the health view reports pending/delivered/failed.
 """
 
+import asyncio
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.alert import AlertDelivery, AlertDeliveryStatus, AlertHistory
+import app.services.alert as alertmod
+from app.db.models.alert import (
+    Alert,
+    AlertDelivery,
+    AlertDeliveryStatus,
+    AlertHistory,
+)
 from app.db.models.equity import Equity
 from app.db.models.user import User
 from app.schemas.equity import QuoteResponse
 from app.services.alert import AlertService
-from tests.factories import create_test_alert, create_test_equity, create_test_user
+from tests.factories import (
+    create_test_alert,
+    create_test_equity,
+    create_test_user,
+    create_test_watchlist,
+    create_test_watchlist_item,
+)
 
 
 def _mock_quote(price: float, high: float | None = None, low: float | None = None) -> QuoteResponse:
@@ -528,3 +542,164 @@ class TestReaper:
         assert reaped == 0
         d = (await _deliveries(db, alert.id))[0]
         assert d.status == AlertDeliveryStatus.PENDING.value
+
+
+class TestSendTimeoutInvariant:
+    """A send is aborted (hard total timeout) well before its lease expires, so
+    an in-flight send can never be re-claimed and double-sent."""
+
+    def test_send_timeout_under_lease_with_margin(self):
+        # The enforced invariant (also asserted at import in alert.py).
+        assert (
+            alertmod.DELIVERY_SEND_TIMEOUT_SECONDS * 2
+            <= alertmod.DELIVERY_LEASE_SECONDS
+        )
+
+    @patch("app.services.alert.discord_service")
+    async def test_slow_send_fails_fast_before_lease(self, mock_discord, db):
+        # A send that would exceed its timeout is aborted and marked
+        # retryable at ~the timeout — far under the lease — so the row is never
+        # reclaimable while a send is genuinely in flight.
+        send_completed = {"done": False}
+
+        async def slow_send(**kwargs):
+            await asyncio.sleep(0.3)  # would run past the shrunk timeout
+            send_completed["done"] = True
+            return (True, None)
+
+        mock_discord.send_alert_notification = AsyncMock(side_effect=slow_send)
+        service, alert = await _make_triggered_alert(db, "TMO1")
+        await service.process_alert(alert)
+
+        with patch.object(alertmod, "DELIVERY_SEND_TIMEOUT_SECONDS", 0.05):
+            t0 = time.monotonic()
+            result = await service.deliver_pending(
+                lease_seconds=alertmod.DELIVERY_LEASE_SECONDS
+            )
+            elapsed = time.monotonic() - t0
+
+        assert result == {"claimed": 1, "sent": 0, "failed": 1}
+        # Aborted at ~0.05s, nowhere near the 120s lease.
+        assert elapsed < 1.0
+        assert send_completed["done"] is False  # the send was cancelled
+        d = (await _deliveries(db, alert.id))[0]
+        assert d.status == AlertDeliveryStatus.PENDING.value  # retryable
+        assert "timeout" in (d.last_error or "").lower()
+
+
+async def _make_zone_alert(session, symbol, user_id):
+    """entry_zone alert on a single tier [50, 52] for concurrency tests."""
+    equity = await create_test_equity(session, symbol=symbol)
+    wl = await create_test_watchlist(session, name=f"WL {symbol}", user_id=user_id)
+    item = await create_test_watchlist_item(
+        session, wl, equity, entry_zones=[{"tier": "T1", "low": "50", "high": "52"}]
+    )
+    alert = await create_test_alert(
+        session, equity, condition_type="entry_zone", threshold_value=0,
+        watchlist_item_id=item.id, user_id=user_id,
+    )
+    return equity, alert
+
+
+class TestTrueConcurrencyDedup:
+    """Two genuinely-concurrent evaluators (separate sessions/connections) of one
+    trigger enqueue the notification exactly once — the unique idempotency key
+    collides and the loser is swallowed. Uses the engine fixture for real
+    multi-connection concurrency."""
+
+    async def _cleanup(self, engine, user_id, equity_id):
+        async with AsyncSession(engine) as sc:
+            await sc.execute(delete(User).where(User.id == user_id))
+            await sc.execute(delete(Equity).where(Equity.id == equity_id))
+            await sc.commit()
+
+    @patch("app.services.alert.discord_service")
+    async def test_concurrent_scalar_evaluations_enqueue_once(
+        self, mock_discord, engine
+    ):
+        mock_discord.send_alert_notification = AsyncMock(return_value=(True, None))
+        suffix = uuid.uuid4().hex[:8]
+        async with AsyncSession(engine, expire_on_commit=False) as s0:
+            user = await create_test_user(s0, email=f"cc-{suffix}@example.com")
+            equity = await create_test_equity(s0, symbol=f"CC{suffix[:5].upper()}")
+            alert = await create_test_alert(
+                s0, equity, condition_type="above", threshold_value=100.0,
+                user_id=user.id,
+            )
+            await s0.commit()
+            user_id, equity_id, alert_id = user.id, equity.id, alert.id
+        try:
+            async with AsyncSession(engine, expire_on_commit=False) as s1, \
+                    AsyncSession(engine, expire_on_commit=False) as s2:
+                a1 = await s1.get(Alert, alert_id)
+                a2 = await s2.get(Alert, alert_id)
+                svc1 = AlertService(s1)
+                svc1.yahoo = AsyncMock(
+                    get_quote=AsyncMock(return_value=_mock_quote(105.0))
+                )
+                svc2 = AlertService(s2)
+                svc2.yahoo = AsyncMock(
+                    get_quote=AsyncMock(return_value=_mock_quote(105.0))
+                )
+                r1, r2 = await asyncio.gather(
+                    svc1.process_alert(a1), svc2.process_alert(a2)
+                )
+                # Exactly one enqueues; the other collides on the key -> dedup.
+                assert sorted([r1[0], r2[0]]) == [False, True]
+                assert r1[1] is None and r2[1] is None
+            async with AsyncSession(engine) as s3:
+                n = await s3.scalar(
+                    select(func.count(AlertDelivery.id)).where(
+                        AlertDelivery.alert_id == alert_id
+                    )
+                )
+                assert n == 1
+        finally:
+            await self._cleanup(engine, user_id, equity_id)
+
+    @patch("app.services.alert.discord_service")
+    async def test_concurrent_zone_evaluations_enqueue_once(
+        self, mock_discord, engine
+    ):
+        mock_discord.send_alert_notification = AsyncMock(return_value=(True, None))
+        suffix = uuid.uuid4().hex[:8]
+        async with AsyncSession(engine, expire_on_commit=False) as s0:
+            user = await create_test_user(s0, email=f"zc-{suffix}@example.com")
+            equity, alert = await _make_zone_alert(
+                s0, f"ZC{suffix[:5].upper()}", user.id
+            )
+            # Baseline above the zone: arms the tier, no fire.
+            svc0 = AlertService(s0)
+            svc0.yahoo = AsyncMock(get_quote=AsyncMock(return_value=_mock_quote(55.0)))
+            await svc0.process_alert(alert)
+            await s0.commit()
+            user_id, equity_id, alert_id = user.id, equity.id, alert.id
+        try:
+            async with AsyncSession(engine, expire_on_commit=False) as s1, \
+                    AsyncSession(engine, expire_on_commit=False) as s2:
+                a1 = await s1.get(Alert, alert_id)
+                a2 = await s2.get(Alert, alert_id)
+                svc1 = AlertService(s1)
+                svc1.yahoo = AsyncMock(
+                    get_quote=AsyncMock(return_value=_mock_quote(51.0))
+                )
+                svc2 = AlertService(s2)
+                svc2.yahoo = AsyncMock(
+                    get_quote=AsyncMock(return_value=_mock_quote(51.0))
+                )
+                # Both evaluators see the same committed pre-fire zone_state, so
+                # they compute the SAME key (tier + pre-fire last_fired_at) and
+                # collide — the fix for the zone path's option-B bug.
+                r1, r2 = await asyncio.gather(
+                    svc1.process_alert(a1), svc2.process_alert(a2)
+                )
+                assert sorted([r1[0], r2[0]]) == [False, True]
+            async with AsyncSession(engine) as s3:
+                n = await s3.scalar(
+                    select(func.count(AlertDelivery.id)).where(
+                        AlertDelivery.alert_id == alert_id
+                    )
+                )
+                assert n == 1  # concurrent zone dedup
+        finally:
+            await self._cleanup(engine, user_id, equity_id)

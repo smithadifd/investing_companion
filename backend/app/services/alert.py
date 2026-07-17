@@ -54,10 +54,29 @@ PERIOD_LOOKBACK = {
 }
 
 # Outbox delivery tuning. The lease is the window a claimed row is hidden from
-# other workers; it must comfortably exceed one Discord send. Bounded retries
-# stop a permanently-broken webhook from being retried forever.
+# other workers. Bounded retries stop a permanently-broken webhook from being
+# retried forever.
 DELIVERY_LEASE_SECONDS = 120
 DELIVERY_BATCH_LIMIT = 100
+# Hard TOTAL wall-clock bound on a single send, enforced with asyncio.wait_for
+# in _send_delivery (httpx's own timeout is per-operation, not a total bound and
+# not inclusive of any internal retries, so it can't be relied on here).
+DELIVERY_SEND_TIMEOUT_SECONDS = 30
+
+# INVARIANT (enforced): a send is aborted well before its lease can expire, so a
+# genuinely in-flight send is never re-claimed and double-sent by another
+# worker. If a future change (longer timeout, internal send-retries summing past
+# the lease, a per-read rather than total timeout) violates this, fail fast at
+# import instead of silently reopening the in-flight-reclaim window.
+_LEASE_SAFETY_MARGIN = 2  # require the lease to be at least 2x the send timeout
+assert (
+    DELIVERY_SEND_TIMEOUT_SECONDS * _LEASE_SAFETY_MARGIN <= DELIVERY_LEASE_SECONDS
+), (
+    "alert-delivery invariant violated: DELIVERY_SEND_TIMEOUT_SECONDS "
+    f"({DELIVERY_SEND_TIMEOUT_SECONDS}s) x{_LEASE_SAFETY_MARGIN} must be <= "
+    f"DELIVERY_LEASE_SECONDS ({DELIVERY_LEASE_SECONDS}s) so an in-flight send "
+    "cannot outlive its lease and be double-sent"
+)
 
 
 class AlertService:
@@ -816,18 +835,31 @@ class AlertService:
         """
         payload = delivery.payload or {}
         try:
-            success, error = await discord_service.send_alert_notification(
-                alert_name=payload["alert_name"],
-                target_symbol=payload["target_symbol"],
-                target_name=payload["target_name"],
-                condition_type=payload["condition_type"],
-                threshold_value=Decimal(str(payload["threshold_value"])),
-                current_value=Decimal(str(payload["current_value"])),
-                comparison_period=payload.get("comparison_period"),
-                is_ratio=payload.get("is_ratio", False),
-                notes=payload.get("notes"),
-                condition_override=payload.get("condition_override"),
+            # Hard total timeout: abort the send well before the lease expires
+            # (see the DELIVERY_SEND_TIMEOUT_SECONDS invariant) so an in-flight
+            # send can never be re-claimed by another worker mid-flight.
+            success, error = await asyncio.wait_for(
+                discord_service.send_alert_notification(
+                    alert_name=payload["alert_name"],
+                    target_symbol=payload["target_symbol"],
+                    target_name=payload["target_name"],
+                    condition_type=payload["condition_type"],
+                    threshold_value=Decimal(str(payload["threshold_value"])),
+                    current_value=Decimal(str(payload["current_value"])),
+                    comparison_period=payload.get("comparison_period"),
+                    is_ratio=payload.get("is_ratio", False),
+                    notes=payload.get("notes"),
+                    condition_override=payload.get("condition_override"),
+                ),
+                timeout=DELIVERY_SEND_TIMEOUT_SECONDS,
             )
+        except asyncio.TimeoutError:
+            # Aborted before the lease could expire -> failed/retryable, never
+            # left in flight past its lease.
+            success, error = False, (
+                f"send exceeded {DELIVERY_SEND_TIMEOUT_SECONDS}s hard timeout"
+            )
+            logger.error(f"Delivery {delivery.id} send timed out")
         except Exception as e:  # noqa: BLE001 - any send error must not crash the batch
             success, error = False, str(e)
             logger.error(
@@ -1346,6 +1378,13 @@ class AlertService:
                 # outage can't corrupt the per-tier dedup
                 return False, None
 
+            # Snapshot the PRE-fire per-tier state before it is overwritten by
+            # new_state below. The pre-fire last_fired_at is shared persisted
+            # state that concurrent evaluators read identically, so it yields a
+            # STABLE dedup key (unlike the post-fire timestamp, which each
+            # evaluator computes fresh).
+            prev_zone_state = dict(alert.zone_state or {})
+
             new_state, fired = self._evaluate_zone_transitions(
                 alert, zones, current_value
             )
@@ -1388,16 +1427,19 @@ class AlertService:
                                     f"({self._zone_range_desc(zone)})"
                                 ),
                             )
-                            # Zone tiers legitimately re-fire (re-arm on exit,
-                            # then re-enter), so a coarse cooldown-window key
-                            # would wrongly dedup a real re-entry. Key on the
-                            # tier plus THIS fire's last_fired_at (from
-                            # new_state), distinct per fire; overlapping runs are
-                            # kept apart by the Celery + per-row leases.
-                            fired_at = new_state[zone.tier]["last_fired_at"]
+                            # Stable per-fire key: tier + the PRE-fire
+                            # last_fired_at (shared across concurrent evaluators
+                            # -> they collide and enqueue once). It stays
+                            # distinct across legitimate re-fires because each
+                            # fire advances last_fired_at, so the next fire's
+                            # "previous" value differs. ("init" for the first
+                            # fire, when there is no prior timestamp.)
+                            prev_fired_at = (
+                                prev_zone_state.get(zone.tier) or {}
+                            ).get("last_fired_at") or "init"
                             await self._enqueue_delivery(
                                 alert, history, payload,
-                                f"alert:{alert.id}:zone:{zone.tier}:{fired_at}",
+                                f"alert:{alert.id}:zone:{zone.tier}:{prev_fired_at}",
                             )
 
                 await self.db.commit()

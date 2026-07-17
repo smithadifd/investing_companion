@@ -90,6 +90,11 @@ class CacheService:
         """Generate cache key for market-wide news."""
         return "news:market"
 
+    @staticmethod
+    def ai_response_key(signature: str) -> str:
+        """Generate cache key for an AI analysis response by request signature."""
+        return f"ai:resp:{signature}"
+
 
 # Global cache instance
 cache_service = CacheService()

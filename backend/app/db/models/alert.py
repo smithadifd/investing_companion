@@ -187,3 +187,104 @@ class AlertHistory(Base):
 
     def __repr__(self) -> str:
         return f"<AlertHistory(id={self.id}, alert_id={self.alert_id}, triggered_at={self.triggered_at})>"
+
+
+class AlertDeliveryStatus(str, Enum):
+    """Lifecycle of a single alert-notification delivery."""
+
+    PENDING = "pending"      # enqueued, not yet delivered
+    DELIVERED = "delivered"  # confirmed sent to the channel
+    FAILED = "failed"        # retries exhausted; will not be retried
+
+
+class AlertDelivery(Base, TimestampMixin):
+    """Transactional outbox row for a single alert notification.
+
+    One row is written in the SAME transaction that evaluates the trigger and
+    records the ``AlertHistory`` row — never after a send. A separate claim /
+    send step (Celery, with a per-row lease + bounded retry) transitions the
+    row ``pending`` -> ``delivered`` / ``failed``. This decouples the durable
+    "we decided to notify" fact from the fallible network send.
+
+    Delivery is AT-LEAST-ONCE with a bounded (<= ``max_attempts``) duplicate
+    window: a crash BEFORE the send re-sends nothing that was lost (the pending
+    row is retried), while a crash AFTER a successful send but before the
+    ``delivered`` commit re-sends once the lease expires (Discord has no
+    receiver-side dedup). Never dropping a price alert is worth that rare,
+    bounded duplicate.
+
+    ``idempotency_key`` is a STABLE per-trigger identity that does NOT depend
+    on the freshly-created history-row id, so two concurrent evaluations of the
+    same trigger produce the same key and collide on the unique constraint
+    (overlapping runs enqueue once). Scalar alerts key on the alert id plus the
+    cooldown-window bucket of the trigger time. Entry-zone tiers, which can
+    legitimately re-fire within a window, key on the tier plus its PRE-fire
+    ``last_fired_at`` — shared persisted state that concurrent evaluators read
+    identically (so they collide too), yet distinct across legitimate re-fires
+    (each fire advances ``last_fired_at``).
+    """
+
+    __tablename__ = "alert_deliveries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    alert_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False
+    )
+    # The history row this delivery corresponds to (nullable so a delivery can
+    # outlive history pruning; ON DELETE SET NULL keeps the audit row).
+    alert_history_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("alert_history.id", ondelete="SET NULL"), nullable=True
+    )
+    # Denormalized owner so the health view is a cheap single-table count.
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # Stable per-trigger idempotency key (alert + cooldown-window bucket [+
+    # tier]); a concurrent re-evaluation reuses it and collides here instead of
+    # enqueuing a second time.
+    idempotency_key: Mapped[str] = mapped_column(
+        String(200), nullable=False, unique=True
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=AlertDeliveryStatus.PENDING.value,
+        server_default=AlertDeliveryStatus.PENDING.value,
+    )
+
+    # Everything the sender needs, snapshotted at enqueue time so the claim
+    # step never has to re-read (a possibly-since-edited) alert.
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    max_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=5, server_default="5"
+    )
+    # Set when a worker claims the row; the row is only re-claimable once this
+    # lease expires, so a crashed sender can't wedge a notification forever.
+    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    delivered_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        Index("idx_alert_deliveries_alert_id", "alert_id"),
+        Index("idx_alert_deliveries_user_id", "user_id"),
+        # Drives the claim scan (pending + free lease) and the health counts.
+        Index("idx_alert_deliveries_status", "status", "lease_expires_at"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<AlertDelivery(id={self.id}, alert_id={self.alert_id}, "
+            f"status={self.status}, attempts={self.attempts})>"
+        )

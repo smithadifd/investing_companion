@@ -56,9 +56,15 @@ class CacheService:
         await client.delete(key)
 
     async def close(self) -> None:
-        """Close Redis connection."""
+        """Close Redis connection.
+
+        Resets the client to None (mirroring the Discord service) so the next
+        access rebuilds a connection bound to the current event loop — required
+        for the per-task loop lifecycle in Celery's ``run_async`` (issue #012).
+        """
         if self._redis:
             await self._redis.close()
+            self._redis = None
 
     @staticmethod
     def quote_key(symbol: str) -> str:

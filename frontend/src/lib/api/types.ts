@@ -195,6 +195,7 @@ export interface WatchlistExportItem {
   notes: string | null;
   target_price: number | string | null;
   thesis: string | null;
+  entry_zones: EntryZone[] | null;
   added_at: string;
 }
 
@@ -210,6 +211,7 @@ export interface WatchlistImportItem {
   notes?: string;
   target_price?: number;
   thesis?: string;
+  entry_zones?: EntryZone[] | null;
 }
 
 export interface WatchlistImport {

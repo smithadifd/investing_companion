@@ -100,6 +100,20 @@ else:
             "task": "schwab.check_token_expiry",
             "schedule": crontab(hour=13, minute=0),
         },
+        # Daily Strategy Brief agent (docs/issues/014): its own independent
+        # crontab, deliberately NOT wired into check-notification-schedule's
+        # per-user dynamic ET time above - that scheduler drives the morning
+        # pulse only. Fixed at 11:30 UTC so the brief lands before the pulse's
+        # 08:00 ET default. DST drift (not adjusted): 11:30 UTC is 06:30 ET in
+        # winter (EST, UTC-5) and 07:30 ET in summer (EDT, UTC-4) - both still
+        # comfortably ahead of 08:00 ET. Market holidays (not adjusted): the
+        # agent still runs on a closed trading day; its context sources
+        # degrade gracefully (empty quotes/events) rather than erroring, so
+        # this is a low-value but harmless no-op-ish brief, not a crash.
+        "strategy-brief-daily": {
+            "task": "agents.strategy_brief_run",
+            "schedule": crontab(minute=30, hour=11, day_of_week="mon-fri"),
+        },
     }
 
 # Auto-discover tasks from these modules

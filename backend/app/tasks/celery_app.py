@@ -101,13 +101,20 @@ else:
             "schedule": crontab(hour=13, minute=0),
         },
         # Trade Journal & Pattern Analysis weekly review (docs/issues/014 #2).
-        # Sunday 22:00 UTC (~Sunday evening ET); DST shifts the exact ET
+        # Monday 05:30 UTC (~00:30 ET EST / 01:30 ET EDT) - shortly AFTER the
+        # ET week actually ends (Monday 00:00 ET), so compute_review_window()
+        # always finds a fully-COMPLETED week to review rather than the week
+        # still in progress (codex-flagged schedule/window mismatch: the
+        # previous Sunday-22:00-UTC trigger fired while the week was still
+        # live, missing Sunday-evening activity and never getting rerun after
+        # the week actually closed - fixed on both sides, see
+        # compute_review_window's docstring). DST shifts the exact ET
         # wall-clock time by an hour across the year - accepted, not
         # corrected here. The task itself is a quiet no-op when the agent is
         # disabled, unkeyed, or over budget.
         "trade-journal-weekly-review": {
             "task": "agents.trade_journal_run",
-            "schedule": crontab(minute=0, hour=22, day_of_week="sun"),
+            "schedule": crontab(minute=30, hour=5, day_of_week="mon"),
         },
     }
 

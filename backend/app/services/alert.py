@@ -34,7 +34,7 @@ from app.schemas.alert import (
     AlertUpdate,
     AlertWithHistoryResponse,
 )
-from app.services.data_providers.yahoo import YahooFinanceProvider
+from app.services.data_providers.yahoo import YahooFinanceProvider, normalize_symbol
 from app.services.entry_zones import is_in_zone, parse_zones, zone_entry_edge
 from app.services.equity import EquityService
 from app.services.notifications.discord import discord_service
@@ -1498,9 +1498,21 @@ class AlertService:
             if not ratio:
                 return None
 
-            # Find equity IDs for numerator and denominator
-            num_stmt = select(Equity).where(Equity.symbol == ratio.numerator_symbol)
-            den_stmt = select(Equity).where(Equity.symbol == ratio.denominator_symbol)
+            # Find equity IDs for numerator and denominator. Normalize first so
+            # a bare forex leg ("JPY", "USD/JPY") matches the Equity row under
+            # Yahoo's ticker form ("JPY=X") the same way get_quote/get_history
+            # resolve it (issue #49) - an exact match on the raw ratio symbol
+            # silently no-ops for forex legs, since they're never stored under
+            # their bare form. A bare "USD" leg is the one exception:
+            # normalize_symbol passes it through unchanged (USD has no price on
+            # its own), so it still finds no equity and the reference no-ops -
+            # use a currency pair (USD/JPY) or an ETF proxy (UUP) instead.
+            num_stmt = select(Equity).where(
+                Equity.symbol == normalize_symbol(ratio.numerator_symbol)
+            )
+            den_stmt = select(Equity).where(
+                Equity.symbol == normalize_symbol(ratio.denominator_symbol)
+            )
             # Serialized, NOT asyncio.gather: both queries share self.db and an
             # AsyncSession is not safe for concurrent operations.
             num_result = await self.db.execute(num_stmt)

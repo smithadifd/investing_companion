@@ -4,7 +4,7 @@ import { useState, useRef } from 'react';
 import { Loader2, FileJson } from 'lucide-react';
 import { useImportWatchlist } from '@/lib/hooks/useWatchlist';
 import { Modal } from '@/components/ui/Modal';
-import type { WatchlistImport } from '@/lib/api/types';
+import type { EntryZone, WatchlistImport } from '@/lib/api/types';
 
 interface ImportWatchlistModalProps {
   onClose: () => void;
@@ -38,16 +38,27 @@ export function ImportWatchlistModal({
         throw new Error('Invalid watchlist format');
       }
 
-      // Transform to import format
+      // Transform to import format. Preserve every field the export side
+      // emits (see WatchlistExportItem in lib/api/types.ts) so an
+      // export -> import round-trip doesn't silently drop data.
       const importData: WatchlistImport = {
         name: data.name,
         description: data.description,
-        items: data.items.map((item: { symbol: string; notes?: string; target_price?: number; thesis?: string }) => ({
-          symbol: item.symbol,
-          notes: item.notes,
-          target_price: item.target_price,
-          thesis: item.thesis,
-        })),
+        items: data.items.map(
+          (item: {
+            symbol: string;
+            notes?: string;
+            target_price?: number;
+            thesis?: string;
+            entry_zones?: EntryZone[] | null;
+          }) => ({
+            symbol: item.symbol,
+            notes: item.notes,
+            target_price: item.target_price,
+            thesis: item.thesis,
+            entry_zones: item.entry_zones,
+          })
+        ),
       };
 
       setPreview(importData);

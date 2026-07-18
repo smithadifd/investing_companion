@@ -150,4 +150,46 @@ describe('ImportWatchlistModal round-trip', () => {
     const item = mockMutateAsync.mock.calls[0][0].items[0];
     expect(item.entry_zones).toBeNull();
   });
+
+  it('passes an explicit null catalyst_tags through unmodified', async () => {
+    const user = userEvent.setup();
+    render(<ImportWatchlistModal onClose={onClose} onSuccess={onSuccess} />);
+
+    const nullTags: WatchlistExport = {
+      ...exportedWatchlist,
+      items: [{ ...exportedWatchlist.items[0], catalyst_tags: null }],
+    };
+    const input = document.getElementById('file-upload') as HTMLInputElement;
+    await user.upload(input, makeExportFile(nullTags));
+
+    await screen.findByText('Uranium & Nuclear');
+    await user.click(screen.getByRole('button', { name: /^Import$/i }));
+
+    await waitFor(() => expect(mockMutateAsync).toHaveBeenCalledTimes(1));
+    const item = mockMutateAsync.mock.calls[0][0].items[0];
+    // The modal must not collapse/rewrite this - null-vs-[] canonicalization
+    // is the backend's job (data.catalyst_tags or None), not the client's.
+    expect(item.catalyst_tags).toBeNull();
+  });
+
+  it('passes an explicit empty catalyst_tags array through unmodified', async () => {
+    const user = userEvent.setup();
+    render(<ImportWatchlistModal onClose={onClose} onSuccess={onSuccess} />);
+
+    const emptyTags: WatchlistExport = {
+      ...exportedWatchlist,
+      items: [{ ...exportedWatchlist.items[0], catalyst_tags: [] }],
+    };
+    const input = document.getElementById('file-upload') as HTMLInputElement;
+    await user.upload(input, makeExportFile(emptyTags));
+
+    await screen.findByText('Uranium & Nuclear');
+    await user.click(screen.getByRole('button', { name: /^Import$/i }));
+
+    await waitFor(() => expect(mockMutateAsync).toHaveBeenCalledTimes(1));
+    const item = mockMutateAsync.mock.calls[0][0].items[0];
+    // Same: the client sends [] as-is and lets the backend canonicalize it
+    // to NULL, matching the CRUD create/update paths.
+    expect(item.catalyst_tags).toEqual([]);
+  });
 });

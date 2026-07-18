@@ -19,8 +19,10 @@ as an out-of-scope escalation, not fixed here.
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.watchlist import WatchlistItem
 from app.schemas.watchlist import (
     MAX_CATALYST_TAGS,
     WatchlistImport,
@@ -131,6 +133,37 @@ class TestImportSetsBothFields:
         item = result.items[0]
         assert item.catalyst_tags == []  # response schema defaults None -> []
         assert item.track_calendar is True
+
+    async def test_import_empty_catalyst_tags_list_canonicalizes_to_null(
+        self, db: AsyncSession
+    ):
+        """CRUD create/update store ``[]``/``null`` catalyst_tags as DB NULL
+        (``data.catalyst_tags or None`` in add_item/update_item). Import must
+        match that canonicalization, not persist a literal empty JSONB array,
+        so the stored representation never drifts between the two write
+        paths for the exact same logical "no tags" state."""
+        await create_test_equity(db, symbol="IMP3")
+        service = WatchlistService(db)
+
+        result = await service.import_watchlist(
+            WatchlistImport(
+                name="Imported Empty Tags",
+                items=[WatchlistImportItem(symbol="IMP3", catalyst_tags=[])],
+            )
+        )
+        db.expire_all()
+
+        # Assert on the STORED representation directly (bypassing the
+        # response schema, which coerces None -> [] for display) - the raw
+        # column value must be NULL, matching the CRUD paths.
+        stored = await db.scalar(
+            select(WatchlistItem).where(WatchlistItem.watchlist_id == result.id)
+        )
+        assert stored.catalyst_tags is None
+
+        # And export must therefore emit None (not []) for this item too.
+        export = await service.export_watchlist(result.id)
+        assert export.items[0].catalyst_tags is None
 
 
 class TestExportImportRoundTrip:

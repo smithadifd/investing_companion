@@ -394,7 +394,7 @@ class WatchlistService:
                     target_price=item_data.target_price,
                     thesis=item_data.thesis,
                     entry_zones=_zones_to_json(item_data.entry_zones),
-                    catalyst_tags=item_data.catalyst_tags,
+                    catalyst_tags=item_data.catalyst_tags or None,
                     track_calendar=(
                         item_data.track_calendar
                         if item_data.track_calendar is not None

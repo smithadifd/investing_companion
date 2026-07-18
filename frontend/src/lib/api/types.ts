@@ -715,6 +715,11 @@ export interface AppSettings {
   theme: string;
   morning_notification_time: string;
   eod_notification_time: string;
+  // Tier-1 advisory agents (docs/issues/014) - default OFF; schema + rails
+  // only until each agent's follow-up sub-PR lands.
+  news_agent_enabled: boolean;
+  trade_journal_agent_enabled: boolean;
+  strategy_agent_enabled: boolean;
 }
 
 export interface AppSettingsUpdate {
@@ -726,6 +731,9 @@ export interface AppSettingsUpdate {
   theme?: string;
   morning_notification_time?: string;
   eod_notification_time?: string;
+  news_agent_enabled?: boolean;
+  trade_journal_agent_enabled?: boolean;
+  strategy_agent_enabled?: boolean;
 }
 
 // Schwab connection (opt-in real-time quotes)

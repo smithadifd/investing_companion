@@ -11,6 +11,7 @@ from app.tasks.alerts import (
 from app.tasks.price_history import sync_all_price_history
 from app.tasks.export import publish_context_pack
 from app.tasks.schwab import check_token_expiry
+from app.tasks.agent_strategy import strategy_brief_run
 from app.tasks.agent_news import news_catalyst_run
 
 __all__ = [
@@ -23,5 +24,6 @@ __all__ = [
     "sync_all_price_history",
     "publish_context_pack",
     "check_token_expiry",
+    "strategy_brief_run",
     "news_catalyst_run",
 ]

@@ -30,7 +30,30 @@ const exportedWatchlist: WatchlistExport = {
         { tier: 'Half starter', low: 40, high: 44 },
         { tier: 'Aggressive', low: null, high: 36 },
       ],
+      catalyst_tags: ['uranium restart', 'carry unwind'],
+      track_calendar: false,
       added_at: '2026-01-05T00:00:00Z',
+    },
+  ],
+};
+
+// Shaped like an export produced *before* catalyst_tags/track_calendar
+// existed (or PR #207-era backend): both keys are simply absent, exactly
+// like an old on-disk export file a user re-uploads today.
+const oldFormatExportedWatchlist: WatchlistExport = {
+  name: 'Uranium & Nuclear',
+  description: 'Restart thesis names',
+  exported_at: '2026-07-18T00:00:00Z',
+  items: [
+    {
+      symbol: 'CCJ',
+      name: 'Cameco Corporation',
+      notes: 'Watching for restart catalysts',
+      target_price: '45.50',
+      thesis: 'Utility restocking + SMR tailwind',
+      entry_zones: null,
+      added_at: '2026-01-05T00:00:00Z',
+      // catalyst_tags / track_calendar intentionally absent.
     },
   ],
 };
@@ -81,6 +104,32 @@ describe('ImportWatchlistModal round-trip', () => {
       { tier: 'Half starter', low: 40, high: 44 },
       { tier: 'Aggressive', low: null, high: 36 },
     ]);
+
+    // Regression: catalyst_tags + track_calendar must also survive the
+    // export -> import round-trip (previously dropped, same bug class as
+    // entry_zones above).
+    expect(item.catalyst_tags).toEqual(['uranium restart', 'carry unwind']);
+    expect(item.track_calendar).toBe(false);
+  });
+
+  it('leaves catalyst_tags/track_calendar absent for an old-format export missing both keys', async () => {
+    const user = userEvent.setup();
+    render(<ImportWatchlistModal onClose={onClose} onSuccess={onSuccess} />);
+
+    const input = document.getElementById('file-upload') as HTMLInputElement;
+    await user.upload(input, makeExportFile(oldFormatExportedWatchlist));
+
+    await screen.findByText('Uranium & Nuclear');
+    await user.click(screen.getByRole('button', { name: /^Import$/i }));
+
+    await waitFor(() => expect(mockMutateAsync).toHaveBeenCalledTimes(1));
+    const item = mockMutateAsync.mock.calls[0][0].items[0];
+
+    // The transform must not invent values for keys the old file never had -
+    // they stay undefined so the backend schema can apply its own defaults
+    // (catalyst_tags -> NULL, track_calendar -> True).
+    expect(item.catalyst_tags).toBeUndefined();
+    expect(item.track_calendar).toBeUndefined();
   });
 
   it('does not lose a null entry_zones value', async () => {

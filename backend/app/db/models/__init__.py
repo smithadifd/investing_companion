@@ -18,10 +18,13 @@ from app.db.models.equity import Equity
 from app.db.models.fundamentals import EquityFundamentals
 from app.db.models.handoff import HandoffLog
 from app.db.models.lesson import Lesson, ThesisOutcome
+from app.db.models.news_item import NewsItem
 from app.db.models.price_history import PriceHistory
 from app.db.models.ratio import Ratio
 from app.db.models.session import Session
+from app.db.models.strategy_signal import StrategySignal
 from app.db.models.trade import Trade, TradePair, TradeType
+from app.db.models.trade_journal_entry import TradeJournalEntry
 from app.db.models.trigger import Trigger, TriggerAlertLink, TriggerLifecycle
 from app.db.models.user import User
 from app.db.models.user_settings import UserSetting
@@ -42,11 +45,14 @@ __all__ = [
     "EquityFundamentals",
     "HandoffLog",
     "Lesson",
+    "NewsItem",
     "PriceHistory",
     "Ratio",
     "Session",
+    "StrategySignal",
     "ThesisOutcome",
     "Trade",
+    "TradeJournalEntry",
     "TradePair",
     "TradeType",
     "Trigger",

@@ -13,6 +13,7 @@ from app.tasks.export import publish_context_pack
 from app.tasks.schwab import check_token_expiry
 from app.tasks.agent_strategy import strategy_brief_run
 from app.tasks.agent_news import news_catalyst_run
+from app.tasks.agent_journal import trade_journal_run
 
 __all__ = [
     "celery_app",
@@ -26,4 +27,5 @@ __all__ = [
     "check_token_expiry",
     "strategy_brief_run",
     "news_catalyst_run",
+    "trade_journal_run",
 ]

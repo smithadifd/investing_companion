@@ -59,6 +59,14 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
+      # Dedicated secrets-at-rest key, decoupled from SECRET_KEY / JWT signing.
+      # Empty falls back to the legacy SECRET_KEY-derived key (v1); a set value
+      # writes new ciphertext as v2. See backend/app/services/settings.py.
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      # Reverse proxies whose X-Forwarded-For we trust for rate-limit identity.
+      # Empty = trust none (rate-limit by direct peer). Set to Caddy's address
+      # when behind it. Only the api serves HTTP, so only it consumes this.
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
       - ENVIRONMENT=production
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
@@ -102,6 +110,10 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
+      # The worker decrypts SCHWAB_TOKEN (token-expiry check + briefing quotes),
+      # so it needs the same dedicated key as the api or v2 ciphertext is
+      # unreadable here. See backend/app/services/settings.py.
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
       - ENVIRONMENT=production
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
       # Schwab token refresh happens in the worker too (briefing movers), so it
@@ -142,6 +154,9 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
+      # Beat only schedules (it never decrypts secrets); the key is harmless
+      # defense-in-depth, kept in sync with the worker.
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
       - ENVIRONMENT=production
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
     command: ["celery", "-A", "app.tasks.celery_app", "beat", "--loglevel=info"]

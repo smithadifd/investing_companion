@@ -1,5 +1,9 @@
 """Tests for briefing v2 formatter additions (needs-attention, trigger notes)."""
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from app.services.notifications import formatters as formatters_module
 from app.services.notifications.formatters import (
     AlertTrigger,
     EODData,
@@ -118,6 +122,105 @@ class TestMorningPulseMoversLabel:
         closed = format_morning_pulse(MorningData(movers_session="closed"))
         assert "No significant moves (>2%) at last close" in closed
         assert "PRE-MARKET" not in closed
+
+
+class TestMorningPulseCatalysts:
+    """News & Catalyst agent injection into the morning pulse (T1 sub-PR 2/4)."""
+
+    _FIXED_NOW = datetime(2026, 7, 18, 8, 0, 0, tzinfo=ZoneInfo("America/New_York"))
+
+    # Captured from origin/main's format_morning_pulse (pre-catalysts) for the
+    # exact MorningData built below, with _get_et_now frozen to _FIXED_NOW -
+    # a real byte-for-byte baseline, not a hand-computed guess.
+    _GOLDEN_NO_CATALYSTS = (
+        "☀️ Morning Pulse - Jul 18, 2026\n\n"
+        "⚡ NEEDS ATTENTION\n⚠️ example needs-attention line\n\n"
+        "FUTURES & PRE-MARKET\nES +0.42%\nVIX 14.2 (-0.3) | 10Y 4.31% (+2bp)\n\n"
+        "OVERNIGHT MOVES\n🟢 Gold +1.10% ($2,400)\n\n"
+        "TODAY'S CALENDAR\n🔴 CPI\n\n"
+        "WATCHLIST PRE-MARKET MOVERS\n⬆️ UUUU +5.10%\n\n"
+        "ACTIVE ALERTS: 12 | TRIGGERED OVERNIGHT: 2"
+    )
+
+    @staticmethod
+    def _base_kwargs() -> dict:
+        return dict(
+            futures={"ES=F": {"price": 5000.0, "change_percent": 0.42}},
+            vix={"price": 14.2, "change": -0.3},
+            ten_year={"price": 4.31, "change": 0.02},
+            overnight_moves=[
+                {"name": "Gold", "symbol": "GC=F", "change_percent": 1.1, "price": 2400.0}
+            ],
+            calendar_events=[
+                {"event_time": None, "title": "CPI", "importance": "high", "event_type": "", "symbol": None}
+            ],
+            premarket_movers=[{"symbol": "UUUU", "change_percent": 5.1}],
+            movers_session="pre",
+            active_alerts=12,
+            triggered_overnight=2,
+            needs_attention=["⚠️ example needs-attention line"],
+        )
+
+    def test_byte_identical_when_catalysts_and_unavailable_sections_absent(self, monkeypatch):
+        """Leaving the new fields at their defaults (None / []) must render
+        identically to the pre-existing formatter - the explicit test the
+        design contract calls for."""
+        monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
+
+        data = MorningData(**self._base_kwargs())  # catalysts/unavailable_sections default
+
+        message = format_morning_pulse(data)
+
+        assert message == self._GOLDEN_NO_CATALYSTS
+        assert "CATALYSTS" not in message
+        assert "Some data unavailable" not in message
+
+    def test_catalyst_appended_to_mover_line(self, monkeypatch):
+        monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
+
+        kwargs = self._base_kwargs()
+        kwargs["catalysts"] = {"UUUU": "DOE announced new uranium reserve program."}
+        message = format_morning_pulse(MorningData(**kwargs))
+
+        assert (
+            "⬆️ UUUU +5.10% — DOE announced new uranium reserve program." in message
+        )
+        # The mover already carries its catalyst inline - it must not also be
+        # repeated in the standalone CATALYSTS section.
+        assert "CATALYSTS" not in message
+
+    def test_catalysts_section_for_non_mover_watchlist_symbols(self, monkeypatch):
+        monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
+
+        kwargs = self._base_kwargs()
+        kwargs["catalysts"] = {"EQT": "New pipeline capacity approved."}
+        message = format_morning_pulse(MorningData(**kwargs))
+
+        assert "CATALYSTS" in message
+        assert "• EQT: New pipeline capacity approved." in message
+        # UUUU's mover line is unaffected (no catalyst assigned to it here) -
+        # isolate the movers section and confirm nothing got appended to it.
+        movers_section = message.split("WATCHLIST PRE-MARKET MOVERS\n", 1)[1].split("\n\n", 1)[0]
+        assert movers_section == "⬆️ UUUU +5.10%"
+
+    def test_catalysts_section_capped_at_three_lines(self, monkeypatch):
+        monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
+
+        kwargs = self._base_kwargs()
+        kwargs["catalysts"] = {f"SYM{i}": f"Catalyst {i}" for i in range(5)}
+        message = format_morning_pulse(MorningData(**kwargs))
+
+        catalysts_block = message.split("CATALYSTS\n", 1)[1].split("\n\n", 1)[0]
+        assert len(catalysts_block.strip().splitlines()) == 3
+
+    def test_unavailable_sections_feeds_the_footer(self, monkeypatch):
+        monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
+
+        kwargs = self._base_kwargs()
+        kwargs["unavailable_sections"] = ["catalysts"]
+        message = format_morning_pulse(MorningData(**kwargs))
+
+        assert "⚠️ Some data unavailable" in message
 
 
 class TestEODPostMarketMovers:

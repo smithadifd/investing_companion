@@ -114,6 +114,18 @@ else:
             "task": "agents.strategy_brief_run",
             "schedule": crontab(minute=30, hour=11, day_of_week="mon-fri"),
         },
+        # News & Catalyst advisory agent (T1 sub-PR 2/4, docs/issues/014):
+        # fetch + score watchlist news, feeding the morning pulse's catalyst
+        # lines. Twice on weekdays, ~pre-market and ~pre-close ET. Fixed UTC
+        # hours drift by an hour across DST rather than tracking ET exactly -
+        # accepted for a "roughly pre-market/pre-close" cadence, not corrected
+        # here. Quiet no-op when disabled/unkeyed/over budget (see
+        # agents.guards.check_agent_preconditions); the 30-day retention prune
+        # inside the task runs regardless.
+        "news-catalyst-agent": {
+            "task": "agents.news_catalyst_run",
+            "schedule": crontab(minute=0, hour="10,20", day_of_week="mon-fri"),
+        },
     }
 
 # Auto-discover tasks from these modules

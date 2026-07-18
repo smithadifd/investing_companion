@@ -153,6 +153,7 @@ def send_morning_pulse():
             build_needs_attention,
             format_needs_attention_lines,
         )
+        from app.services.catalysts import get_catalyst_lines
         from app.services.notifications.formatters import MorningData, format_morning_pulse
         from app.services.watchlist import WatchlistService
 
@@ -278,6 +279,20 @@ def send_morning_pulse():
             except Exception as e:
                 logger.warning(f"Failed to build needs-attention section: {e}")
 
+            # --- Catalysts: News & Catalyst agent context (T1 sub-PR 2/4) ---
+            # Advisory-only read of news_items scored by agents.news_catalyst_run
+            # (app/services/agents/news_catalyst.py). A failure here degrades to
+            # an absent catalysts field (pulse renders as if the agent never
+            # ran) rather than blocking the rest of the pulse.
+            catalysts: dict[str, str] = {}
+            unavailable_sections: list[str] = []
+            try:
+                catalyst_symbols = list(dict.fromkeys(watchlist_symbols))
+                catalysts = await get_catalyst_lines(session, catalyst_symbols)
+            except Exception as e:
+                logger.warning(f"Failed to build catalysts section: {e}")
+                unavailable_sections.append("catalysts")
+
             # --- Build and send ---
             data = MorningData(
                 futures=futures_data,
@@ -290,6 +305,8 @@ def send_morning_pulse():
                 active_alerts=active_count,
                 triggered_overnight=triggered_overnight,
                 needs_attention=needs_attention,
+                catalysts=catalysts,
+                unavailable_sections=unavailable_sections,
             )
             message = format_morning_pulse(data)
             success, error = await discord_service.send_plain_text(message)

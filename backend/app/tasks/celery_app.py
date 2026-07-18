@@ -100,6 +100,15 @@ else:
             "task": "schwab.check_token_expiry",
             "schedule": crontab(hour=13, minute=0),
         },
+        # Trade Journal & Pattern Analysis weekly review (docs/issues/014 #2).
+        # Sunday 22:00 UTC (~Sunday evening ET); DST shifts the exact ET
+        # wall-clock time by an hour across the year - accepted, not
+        # corrected here. The task itself is a quiet no-op when the agent is
+        # disabled, unkeyed, or over budget.
+        "trade-journal-weekly-review": {
+            "task": "agents.trade_journal_run",
+            "schedule": crontab(minute=0, hour=22, day_of_week="sun"),
+        },
     }
 
 # Auto-discover tasks from these modules

@@ -11,6 +11,7 @@ from app.tasks.alerts import (
 from app.tasks.price_history import sync_all_price_history
 from app.tasks.export import publish_context_pack
 from app.tasks.schwab import check_token_expiry
+from app.tasks.agent_journal import trade_journal_run
 
 __all__ = [
     "celery_app",
@@ -22,4 +23,5 @@ __all__ = [
     "sync_all_price_history",
     "publish_context_pack",
     "check_token_expiry",
+    "trade_journal_run",
 ]

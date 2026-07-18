@@ -700,9 +700,12 @@ These govern Phases 8+ and any future feature decisions:
 ### Deliverables
 
 #### Alert Correctness
-- [ ] Fix `percent_up`/`percent_down` ignoring `comparison_period` (#48 — closed but fix not
-      verified on prod; unblocks the 4 crisis-playbook SPY/HYG alerts)
-- [ ] Fix forex symbol resolution in ratios (#49 — map `USD/JPY` → yfinance `JPY=X` format)
+- [x] Fix `percent_up`/`percent_down` ignoring `comparison_period` (#48 — fixed: queries
+      price_history for a comparison_period-based lookback instead of last_checked_value;
+      unblocks the 4 crisis-playbook SPY/HYG alerts)
+- [x] Fix forex symbol resolution in ratios (#49 — `_get_historical_reference_value`'s ratio
+      branch now routes the Equity lookup through `normalize_symbol()`, matching a bare forex
+      leg like `JPY` to its Yahoo ticker form `JPY=X`)
 - [ ] New condition type: `PERCENT_FROM_HIGH` (#50 — drawdown from 52-week high; completes
       the crisis-playbook tier system)
 - [ ] New condition type: `TARGET_PRICE` hit (watchlist items already store `target_price`;

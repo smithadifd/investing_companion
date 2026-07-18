@@ -161,6 +161,11 @@ class AppSettings(BaseModel):
     theme: str = "dark"
     morning_notification_time: str = "08:00"
     eod_notification_time: str = "16:30"
+    # Tier-1 advisory agents (docs/issues/014) - default OFF. Schema + rails
+    # only in this sub-PR; each flag stays inert until its agent sub-PR lands.
+    news_agent_enabled: bool = False
+    trade_journal_agent_enabled: bool = False
+    strategy_agent_enabled: bool = False
 
 
 class AppSettingsUpdate(BaseModel):
@@ -174,6 +179,9 @@ class AppSettingsUpdate(BaseModel):
     theme: Optional[str] = None
     morning_notification_time: Optional[str] = None
     eod_notification_time: Optional[str] = None
+    news_agent_enabled: Optional[bool] = None
+    trade_journal_agent_enabled: Optional[bool] = None
+    strategy_agent_enabled: Optional[bool] = None
 
 
 class RegistrationStatus(BaseModel):

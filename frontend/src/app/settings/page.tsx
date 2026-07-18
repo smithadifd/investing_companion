@@ -24,6 +24,7 @@ import {
   Copy,
   Download,
   UploadCloud,
+  Cpu,
 } from 'lucide-react';
 import { DEMO_MODE } from '@/lib/demo';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -55,7 +56,7 @@ export default function SettingsPage() {
   const logoutAllMutation = useLogoutAll();
   const { theme, setTheme } = useTheme();
 
-  const [activeTab, setActiveTab] = useState<'api-keys' | 'notifications' | 'appearance' | 'account' | 'sessions' | 'advisor'>('api-keys');
+  const [activeTab, setActiveTab] = useState<'api-keys' | 'notifications' | 'agents' | 'appearance' | 'account' | 'sessions' | 'advisor'>('api-keys');
 
   // Advisor context pack state
   const contextPackMarkdown = useContextPackMarkdown();
@@ -235,6 +236,7 @@ export default function SettingsPage() {
   const tabs = [
     { id: 'api-keys', label: 'API Keys', icon: Key },
     { id: 'notifications', label: 'Notifications', icon: Bell },
+    { id: 'agents', label: 'Agents', icon: Cpu },
     { id: 'advisor', label: 'Advisor', icon: Bot },
     { id: 'appearance', label: 'Appearance', icon: Palette },
     { id: 'account', label: 'Account', icon: User },
@@ -579,6 +581,99 @@ export default function SettingsPage() {
                     )}
                     Save Schedule
                   </button>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'agents' && (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-1">
+                    Advisory Agents
+                  </h2>
+                  <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                    Advisory-only agents that use your Claude API key to enrich
+                    Discord briefings. Off by default. Each stays inert until
+                    its underlying agent ships — flipping a toggle here now
+                    has no effect yet.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-neutral-50 dark:bg-neutral-700/50 text-xs text-neutral-500 dark:text-neutral-400">
+                  <Key className="h-4 w-4 shrink-0" />
+                  Requires a Claude API key configured under API Keys. Usage
+                  counts against your daily AI token budget.
+                </div>
+
+                {/* News & Catalyst */}
+                <div className="flex items-start gap-3 py-2">
+                  <input
+                    type="checkbox"
+                    id="newsAgentEnabled"
+                    checked={appSettings?.news_agent_enabled ?? false}
+                    onChange={(e) =>
+                      updateSettings.mutate({ news_agent_enabled: e.target.checked })
+                    }
+                    disabled={updateSettings.isPending}
+                    className="mt-1 h-4 w-4 rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <label htmlFor="newsAgentEnabled" className="flex-1">
+                    <span className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                      News & Catalyst Aggregator
+                    </span>
+                    <span className="block text-xs text-neutral-500 dark:text-neutral-400">
+                      Injects news/catalyst context into the morning pulse and
+                      EOD wrap for your watchlist symbols.
+                    </span>
+                  </label>
+                </div>
+
+                {/* Trade Journal & Pattern Analysis */}
+                <div className="flex items-start gap-3 py-2">
+                  <input
+                    type="checkbox"
+                    id="tradeJournalAgentEnabled"
+                    checked={appSettings?.trade_journal_agent_enabled ?? false}
+                    onChange={(e) =>
+                      updateSettings.mutate({
+                        trade_journal_agent_enabled: e.target.checked,
+                      })
+                    }
+                    disabled={updateSettings.isPending}
+                    className="mt-1 h-4 w-4 rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <label htmlFor="tradeJournalAgentEnabled" className="flex-1">
+                    <span className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                      Trade Journal & Pattern Analysis
+                    </span>
+                    <span className="block text-xs text-neutral-500 dark:text-neutral-400">
+                      Analyzes closed trades for behavioral patterns and sends
+                      a periodic review summary via Discord.
+                    </span>
+                  </label>
+                </div>
+
+                {/* Daily Strategy */}
+                <div className="flex items-start gap-3 py-2">
+                  <input
+                    type="checkbox"
+                    id="strategyAgentEnabled"
+                    checked={appSettings?.strategy_agent_enabled ?? false}
+                    onChange={(e) =>
+                      updateSettings.mutate({ strategy_agent_enabled: e.target.checked })
+                    }
+                    disabled={updateSettings.isPending}
+                    className="mt-1 h-4 w-4 rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <label htmlFor="strategyAgentEnabled" className="flex-1">
+                    <span className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                      Daily Strategy Agent
+                    </span>
+                    <span className="block text-xs text-neutral-500 dark:text-neutral-400">
+                      Turns the morning pulse into an actionable game plan
+                      using your positions, watchlist, and calendar.
+                    </span>
+                  </label>
                 </div>
               </div>
             )}

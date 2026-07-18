@@ -60,6 +60,13 @@ class SettingsService:
     # the old implicit "oldest active user" resolution used by background tasks.
     OWNER_USER_ID = "OWNER_USER_ID"
 
+    # Tier-1 advisory agent toggles (docs/issues/014). Schema + rails only in
+    # this sub-PR - each flag stays OFF until its agent sub-PR lands, so the
+    # not-yet-built agents are inert even though the setting key exists.
+    NEWS_AGENT_ENABLED = "NEWS_AGENT_ENABLED"
+    TRADE_JOURNAL_AGENT_ENABLED = "TRADE_JOURNAL_AGENT_ENABLED"
+    STRATEGY_AGENT_ENABLED = "STRATEGY_AGENT_ENABLED"
+
     # Keys that should be encrypted. DISCORD_WEBHOOK_URL is a bearer credential
     # (anyone with the URL can post to the channel), so it is encrypted at rest
     # like the API keys. Existing plaintext rows stay readable (the per-row
@@ -351,6 +358,13 @@ class SettingsService:
             theme=settings_dict.get(self.THEME, "dark"),
             morning_notification_time=settings_dict.get(self.MORNING_NOTIFICATION_TIME, "08:00"),
             eod_notification_time=settings_dict.get(self.EOD_NOTIFICATION_TIME, "16:30"),
+            news_agent_enabled=self._parse_bool(settings_dict.get(self.NEWS_AGENT_ENABLED)),
+            trade_journal_agent_enabled=self._parse_bool(
+                settings_dict.get(self.TRADE_JOURNAL_AGENT_ENABLED)
+            ),
+            strategy_agent_enabled=self._parse_bool(
+                settings_dict.get(self.STRATEGY_AGENT_ENABLED)
+            ),
         )
 
     async def update_app_settings(
@@ -435,7 +449,48 @@ class SettingsService:
                 "End-of-day notification time (ET)",
             )
 
+        if updates.news_agent_enabled is not None:
+            await self.set_setting(
+                self.NEWS_AGENT_ENABLED,
+                self._format_bool(updates.news_agent_enabled),
+                user_id,
+                "News & Catalyst agent enabled (advisory-only, BYO Claude key)",
+            )
+
+        if updates.trade_journal_agent_enabled is not None:
+            await self.set_setting(
+                self.TRADE_JOURNAL_AGENT_ENABLED,
+                self._format_bool(updates.trade_journal_agent_enabled),
+                user_id,
+                "Trade Journal & Pattern Analysis agent enabled (advisory-only, BYO Claude key)",
+            )
+
+        if updates.strategy_agent_enabled is not None:
+            await self.set_setting(
+                self.STRATEGY_AGENT_ENABLED,
+                self._format_bool(updates.strategy_agent_enabled),
+                user_id,
+                "Daily Strategy agent enabled (advisory-only, BYO Claude key)",
+            )
+
         return await self.get_app_settings(user_id)
+
+    @staticmethod
+    def _parse_bool(value: Optional[str]) -> bool:
+        """Parse a stored setting string as a bool. Missing/unrecognized -> False.
+
+        Booleans are stored as the literal strings "true"/"false" (see
+        ``_format_bool``); anything else (including absence - the default-OFF
+        case for a not-yet-set agent toggle) is treated as False rather than
+        raising, since a malformed value must never accidentally enable an
+        agent.
+        """
+        return (value or "").strip().lower() == "true"
+
+    @staticmethod
+    def _format_bool(value: bool) -> str:
+        """Render a bool for storage as a ``UserSetting.value`` string."""
+        return "true" if value else "false"
 
     def _mask_key(self, key: Optional[str]) -> Optional[str]:
         """Mask an API key for display (show first/last 4 chars)."""

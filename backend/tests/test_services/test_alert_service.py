@@ -613,6 +613,36 @@ class TestHistoricalReferenceRatioForexLeg:
         reference = await service._get_historical_reference_value(alert)
         assert reference == Decimal("400") / Decimal("350")
 
+    async def test_bare_usd_leg_still_no_ops(self, db: AsyncSession):
+        """A bare ``USD`` leg deliberately does NOT resolve — pinned limitation.
+
+        ``normalize_symbol("USD")`` passes ``USD`` through unchanged (USD has no
+        price on its own), unlike a currency pair or a non-USD leg. So even with
+        the numerator fully resolvable, a ratio whose other leg is a bare
+        ``USD`` finds no Equity row and the historical reference no-ops
+        (returns None). This is the exact case the advisor-actions.md caveat
+        warns about: use a currency pair (USD/JPY) or an ETF proxy (UUP).
+        """
+        # Numerator is fully resolvable, so the only reason for a None result
+        # is the bare-USD denominator leg.
+        num_equity = await create_test_equity(db, symbol="SPY")
+        ref_time = datetime.now(timezone.utc) - timedelta(days=1)
+        await self._insert_price_history(db, num_equity.id, ref_time, 400.0)
+        # No Equity row is created for "USD" (and none could match: a "USD=X"
+        # row wouldn't either, since normalize_symbol("USD") == "USD").
+
+        alert = await self._make_ratio_alert(
+            db,
+            numerator_symbol="SPY",
+            denominator_symbol="USD",  # bare USD — deliberately unresolvable
+            threshold_value=5.0,
+            comparison_period="1d",
+        )
+        service = AlertService(db)
+
+        reference = await service._get_historical_reference_value(alert)
+        assert reference is None
+
 
 # ---------------------------------------------------------------------------
 # _check_cooldown — pure logic

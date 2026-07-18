@@ -1503,7 +1503,10 @@ class AlertService:
             # Yahoo's ticker form ("JPY=X") the same way get_quote/get_history
             # resolve it (issue #49) - an exact match on the raw ratio symbol
             # silently no-ops for forex legs, since they're never stored under
-            # their bare form.
+            # their bare form. A bare "USD" leg is the one exception:
+            # normalize_symbol passes it through unchanged (USD has no price on
+            # its own), so it still finds no equity and the reference no-ops -
+            # use a currency pair (USD/JPY) or an ETF proxy (UUP) instead.
             num_stmt = select(Equity).where(
                 Equity.symbol == normalize_symbol(ratio.numerator_symbol)
             )

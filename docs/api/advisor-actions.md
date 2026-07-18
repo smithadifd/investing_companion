@@ -1,6 +1,6 @@
 # Advisor Action Vocabulary
 
-**`advisor_actions_version`: 1.2** — MAJOR.MINOR (MINOR = additive action/field/enum; MAJOR =
+**`advisor_actions_version`: 1.3** — MAJOR.MINOR (MINOR = additive action/field/enum; MAJOR =
 rename/removal). The context pack emits this same value as `advisor_actions_version`, so an
 advisor can detect when *this* uploaded copy is behind: if the pack's version is higher than the
 one stamped here, ask for a re-upload before relying on the vocabulary (tolerate minor gaps).
@@ -72,7 +72,7 @@ Fields in **bold** are required.
 
 | Action | Fields |
 |--------|--------|
-| `ADD_ALERT` | **`equity_symbol`** *(or a ratio name)*, **`condition_type`**, **`threshold_value`**, `name`, `cooldown_minutes`, `notes`, `is_active` |
+| `ADD_ALERT` | **`equity_symbol`** *(or a ratio name)*, **`condition_type`**, **`threshold_value`**, `comparison_period`, `name`, `cooldown_minutes`, `notes`, `is_active` |
 | `MODIFY_ALERT` | target = alert **name**; any of the above fields to change |
 | `REMOVE_ALERT` | target = alert **name** |
 
@@ -82,8 +82,12 @@ Fields in **bold** are required.
 |-------|---------|
 | `above` / `below` | price (or a **ratio**, by passing the ratio as the target) vs `threshold_value` |
 | `crosses_above` / `crosses_below` | fires on the crossing, not while past it |
-| `percent_from_high` | drawdown from the period high (`comparison_period`, e.g. `52w`) |
+| `percent_up` / `percent_down` | percent change over `comparison_period` vs `threshold_value` (a percent, e.g. `5` = ±5%). **`comparison_period` is required** |
+| `percent_from_high` | drawdown from the period high (`comparison_period`; defaults to `1y`) |
 | `entry_zone` | fires per tier when price enters a watchlist item's entry zone — **no `threshold_value`**; target is the watchlist item. Re-arms only when price exits the entry side |
+
+`comparison_period` (required for `percent_up` / `percent_down`, optional for `percent_from_high`
+where it defaults to `1y`) is one of: `1d`, `1w`, `1m`, `3m`, `6m`, `1y`.
 
 ### Watchlist
 
@@ -104,6 +108,11 @@ Fields in **bold** are required.
 | Action | Fields |
 |--------|--------|
 | `ADD_RATIO` | **`name`**, **`numerator_symbol`**, **`denominator_symbol`**, `description`, `category` (`commodity` / `equity` / `macro` / `crypto`) |
+
+> Forex-leg ratios resolve for currency **pairs** and non-USD legs — `USD/JPY`, `EUR/USD`, or a
+> bare `JPY` all map to their Yahoo ticker (`USDJPY=X`, `EURUSD=X`, `JPY=X`). A bare **`USD`** leg
+> still won't resolve — `USD` has no price on its own — so use a currency pair (e.g. `USD/JPY`) or
+> an ETF proxy (`UUP` for the dollar) instead of a standalone `USD`.
 
 ### Calendar
 
@@ -207,3 +216,4 @@ write-vocabulary change (a new action that adds no pack field) bumps **this** ve
 | 1.0 | (baseline) | Initial write vocabulary: alerts (`ADD_ALERT` / `MODIFY_ALERT` / `REMOVE_ALERT`), watchlist (`ADD_TO_WATCHLIST` / `UPDATE_WATCHLIST_ITEM` / `CREATE_WATCHLIST`), `ADD_RATIO`, `ADD_CALENDAR_EVENT`, `LOG_TRADE`, `ADD_TRIGGER`, `ADD_LESSON` |
 | 1.1 | 2026-06-15 | Added `UPDATE_TRIGGER` — edit a standing order in place (`rule` / `action` / `tier` / `name` / linked alerts); `rule`/`action` edits are approval-gated. And `RETIRE_TRIGGER` — terminal close of a standing order (approval-gated, trigger-only; `POST /triggers/{id}/retire`). Both are pure write-vocab (no read-side pack field added), so pack `schema_version` stayed 1.5 |
 | 1.2 | 2026-06-16 | Added `UPDATE_CALENDAR_EVENT` — correct a calendar event in place (`title` / `event_date` / `event_type` / `description` / `importance`; `PUT /events/{id}`) — and `REMOVE_CALENDAR_EVENT` — delete one (`DELETE /events/{id}`). Both target by event title (+ `event_date` to disambiguate), are benign (no approval), and operate on user-created custom events only — auto-fetched system events come back `flagged`. Pure write-vocab (no read-side pack field added), so pack `schema_version` stayed 1.6 |
+| 1.3 | 2026-07-18 | Documented the `percent_up` / `percent_down` alert `condition_type` values (percent change over `comparison_period` vs a percent `threshold_value`) and added the `comparison_period` field to `ADD_ALERT`. The create endpoint, `AlertCreate` schema (enum + `comparison_period` validation), and evaluator have accepted these since #48/#51 was fixed; this catches the written contract up so an advisor can construct a valid percent alert. Additive (enum values + a field), so MINOR; pack `schema_version` unchanged (no read-side pack field added) |

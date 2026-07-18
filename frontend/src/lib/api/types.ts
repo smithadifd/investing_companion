@@ -196,6 +196,8 @@ export interface WatchlistExportItem {
   target_price: number | string | null;
   thesis: string | null;
   entry_zones: EntryZone[] | null;
+  catalyst_tags?: string[] | null;
+  track_calendar?: boolean;
   added_at: string;
 }
 
@@ -212,6 +214,8 @@ export interface WatchlistImportItem {
   target_price?: number;
   thesis?: string;
   entry_zones?: EntryZone[] | null;
+  catalyst_tags?: string[] | null;
+  track_calendar?: boolean;
 }
 
 export interface WatchlistImport {

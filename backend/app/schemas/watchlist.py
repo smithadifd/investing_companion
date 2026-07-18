@@ -28,6 +28,18 @@ def normalize_catalyst_tags(tags: Optional[List[str]]) -> Optional[List[str]]:
     return list(seen)
 
 
+def _validate_catalyst_tags_list(tags: Optional[List[str]]) -> Optional[List[str]]:
+    """Normalize/dedup, then enforce the max-count cap (checked post-dedup).
+
+    Shared by every schema that accepts catalyst_tags input (CRUD + import)
+    so the two never drift out of sync.
+    """
+    cleaned = normalize_catalyst_tags(tags)
+    if cleaned is not None and len(cleaned) > MAX_CATALYST_TAGS:
+        raise ValueError(f"At most {MAX_CATALYST_TAGS} catalyst tags per item")
+    return cleaned
+
+
 class EntryZone(BaseModel):
     """One tier of a tiered entry framework: a named price band.
 
@@ -101,10 +113,7 @@ class WatchlistItemBase(BaseModel):
     @classmethod
     def clean_catalyst_tags(cls, v: Optional[List[str]]) -> Optional[List[str]]:
         # Dedup first, then cap - a list that dedupes to <= MAX must not 422.
-        cleaned = normalize_catalyst_tags(v)
-        if cleaned is not None and len(cleaned) > MAX_CATALYST_TAGS:
-            raise ValueError(f"At most {MAX_CATALYST_TAGS} catalyst tags per item")
-        return cleaned
+        return _validate_catalyst_tags_list(v)
 
 
 class WatchlistItemCreate(WatchlistItemBase):
@@ -208,6 +217,8 @@ class WatchlistExportItem(BaseModel):
     target_price: Optional[Decimal] = None
     thesis: Optional[str] = None
     entry_zones: Optional[List[EntryZone]] = None
+    catalyst_tags: Optional[List[str]] = None
+    track_calendar: Optional[bool] = None
     added_at: datetime
 
 
@@ -228,6 +239,8 @@ class WatchlistImportItem(BaseModel):
     target_price: Optional[Decimal] = Field(None, ge=0)
     thesis: Optional[str] = None
     entry_zones: Optional[List[EntryZone]] = None
+    catalyst_tags: Optional[List[str]] = None
+    track_calendar: Optional[bool] = None
 
     @field_validator("entry_zones")
     @classmethod
@@ -235,6 +248,11 @@ class WatchlistImportItem(BaseModel):
         cls, v: Optional[List[EntryZone]]
     ) -> Optional[List[EntryZone]]:
         return _validate_zone_list(v)
+
+    @field_validator("catalyst_tags")
+    @classmethod
+    def validate_catalyst_tags(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        return _validate_catalyst_tags_list(v)
 
 
 class WatchlistImport(BaseModel):

@@ -51,12 +51,16 @@ export function ImportWatchlistModal({
             target_price?: number;
             thesis?: string;
             entry_zones?: EntryZone[] | null;
+            catalyst_tags?: string[] | null;
+            track_calendar?: boolean;
           }) => ({
             symbol: item.symbol,
             notes: item.notes,
             target_price: item.target_price,
             thesis: item.thesis,
             entry_zones: item.entry_zones,
+            catalyst_tags: item.catalyst_tags,
+            track_calendar: item.track_calendar,
           })
         ),
       };

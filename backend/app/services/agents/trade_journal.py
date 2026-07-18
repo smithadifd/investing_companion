@@ -194,9 +194,17 @@ def compute_metrics(pairs: list[TradePair]) -> dict:
 
 
 def _fallback_summary(window: JournalWindow, metrics: dict) -> str:
-    """Exact fallback template used when the LLM narrative is unavailable."""
+    """Exact fallback template used when the LLM narrative is unavailable.
+
+    The displayed end date is the window's INCLUSIVE last calendar day
+    (``window.end`` minus one day) for human readability - ``window.end``
+    itself stays the EXCLUSIVE next-Monday boundary everywhere else (the DB
+    row and the closed-trade query), which this display-only shift does not
+    touch.
+    """
+    display_end = window.end - timedelta(days=1)
     return (
-        f"Week {window.start:%Y-%m-%d} – {window.end:%Y-%m-%d}: "
+        f"Week {window.start:%Y-%m-%d} – {display_end:%Y-%m-%d}: "
         f"{metrics['pair_count']} closed pairs, realized P&L {metrics['realized_pnl']}, "
         f"win rate {metrics['win_rate']}. (LLM narrative unavailable.)"
     )

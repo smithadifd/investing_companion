@@ -78,6 +78,23 @@ def test_compute_review_window_dst_edge():
     assert (window.end - window.start) == timedelta(days=6, hours=23)
 
 
+def test_compute_review_window_dst_fallback_edge():
+    """A window whose Monday is EDT and whose end-Monday is EST (2026 fall-back, Nov 1)."""
+    # Sunday 2026-11-01 22:00 UTC: fall-back happens that day (2am EDT -> 1am
+    # EST), so "now" itself is already EST, but the window's start-Monday
+    # (10-26) predates it - the mirror image of the spring-forward edge above.
+    now = datetime(2026, 11, 1, 22, 0, tzinfo=timezone.utc)
+    window = compute_review_window(now)
+
+    # Mon 2026-10-26 00:00 EDT (UTC-4) -> 04:00 UTC
+    assert window.start == datetime(2026, 10, 26, 4, 0, tzinfo=timezone.utc)
+    # Mon 2026-11-02 00:00 EST (UTC-5, fall-back already in effect) -> 05:00 UTC
+    assert window.end == datetime(2026, 11, 2, 5, 0, tzinfo=timezone.utc)
+    # Fall-back "gains" an hour of real elapsed time for the same 7 local
+    # calendar days.
+    assert (window.end - window.start) == timedelta(days=7, hours=1)
+
+
 # ---------------------------------------------------------------------------
 # Deterministic metrics (pure function, no DB needed)
 # ---------------------------------------------------------------------------
@@ -132,6 +149,28 @@ def test_compute_metrics_no_losses_win_rate_and_loser_avg():
     metrics = compute_metrics(pairs)
     assert metrics["win_rate"] == 1.0
     assert metrics["avg_hold_days_losers"] is None
+
+
+# ---------------------------------------------------------------------------
+# Fallback summary: displayed end date is INCLUSIVE (window.end minus one
+# day), while window.end itself stays the EXCLUSIVE next-Monday boundary
+# used everywhere else (the DB row, the closed-trade query).
+# ---------------------------------------------------------------------------
+def test_fallback_summary_uses_inclusive_display_end_date():
+    window = JournalWindow(
+        start=datetime(2026, 7, 13, 4, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 7, 20, 4, 0, tzinfo=timezone.utc),
+    )
+    summary = tj._fallback_summary(window, compute_metrics([]))
+    assert "Week 2026-07-13 – 2026-07-19" in summary
+    assert "2026-07-20" not in summary
+
+
+def test_fallback_summary_inclusive_display_end_date_across_dst():
+    """The display-only end-date shift stays correct across a DST transition."""
+    window = compute_review_window(datetime(2026, 3, 8, 22, 0, tzinfo=timezone.utc))
+    summary = tj._fallback_summary(window, compute_metrics([]))
+    assert "Week 2026-03-02 – 2026-03-08" in summary
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +429,10 @@ async def test_execute_llm_failure_falls_back_and_skips_discord(db, monkeypatch)
     entry = await _entry(db, user.id)
     assert entry is not None
     assert "LLM narrative unavailable" in entry.summary
-    assert "Week 2026-07-13 – 2026-07-20" in entry.summary
+    # Inclusive display end date (window.end minus one day = Sunday 07-19);
+    # the exclusive window.end (07-20) is stored on the row (window_end below)
+    # but is not the date printed in the human-facing fallback text.
+    assert "Week 2026-07-13 – 2026-07-19" in entry.summary
     assert entry.metrics["pair_count"] == 1
     send.assert_not_awaited()
 

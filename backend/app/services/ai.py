@@ -86,21 +86,23 @@ class AIService:
         return settings.CLAUDE_API_KEY or None
 
     async def get_settings(self) -> AISettingsResponse:
-        """Get current AI settings."""
+        """Get current AI settings, scoped to this service's user.
+
+        Mirrors ``get_api_key``'s user-scoped read above: ``default_model`` and
+        ``custom_instructions`` are per-user, not process-global (R8 tenant
+        residual fix). See ``_get_setting_row`` for the legacy-row fallback
+        applied when this user has no row of their own yet.
+        """
         api_key = await self.get_api_key()
 
-        # Get default model
-        stmt = select(UserSetting).where(UserSetting.key == SETTING_DEFAULT_MODEL)
-        result = await self.db.execute(stmt)
-        model_setting = result.scalar_one_or_none()
+        model_setting = await self._get_setting_row(SETTING_DEFAULT_MODEL)
         default_model = (
             model_setting.value if model_setting else settings.AI_DEFAULT_MODEL
         )
 
-        # Get custom instructions
-        stmt = select(UserSetting).where(UserSetting.key == SETTING_CUSTOM_INSTRUCTIONS)
-        result = await self.db.execute(stmt)
-        instructions_setting = result.scalar_one_or_none()
+        instructions_setting = await self._get_setting_row(
+            SETTING_CUSTOM_INSTRUCTIONS
+        )
         custom_instructions = (
             instructions_setting.value if instructions_setting else None
         )
@@ -139,16 +141,53 @@ class AIService:
         await self.db.commit()
         return await self.get_settings()
 
+    async def _get_setting_row(self, key: str) -> Optional[UserSetting]:
+        """Look up a (non-secret) AI setting row for this user.
+
+        Legacy-row disposition (R8 reconciliation, tracked for a supervised §3
+        data pass): rows written before per-user scoping existed have
+        ``user_id IS NULL`` and are process-global. On read, fall back to that
+        legacy row *only* when this user has no user-scoped row of their own —
+        so a single-user install doesn't appear to lose its current
+        default_model/custom_instructions before the legacy rows are
+        reconciled. The fallback stops applying to a given user the moment
+        they (or anyone) writes a user-scoped row for that key, since
+        ``_upsert_setting`` always writes to the user-scoped row, never the
+        legacy one.
+        """
+        if self.user_id is not None:
+            stmt = select(UserSetting).where(
+                UserSetting.key == key, UserSetting.user_id == self.user_id
+            )
+            result = await self.db.execute(stmt)
+            owned = result.scalar_one_or_none()
+            if owned is not None:
+                return owned
+
+        stmt = select(UserSetting).where(
+            UserSetting.key == key, UserSetting.user_id.is_(None)
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def _upsert_setting(self, key: str, value: str) -> None:
-        """Insert or update a (non-secret) AI setting."""
-        stmt = select(UserSetting).where(UserSetting.key == key)
+        """Insert or update a (non-secret) AI setting, scoped to this user.
+
+        Always writes to this user's own ``(user_id, key)`` row — never the
+        legacy process-global row — so one user's write can never leak into
+        another user's read. See ``_get_setting_row`` for the read-side
+        legacy fallback this is deliberately asymmetric with.
+        """
+        stmt = select(UserSetting).where(
+            UserSetting.key == key, UserSetting.user_id == self.user_id
+        )
         result = await self.db.execute(stmt)
         setting = result.scalar_one_or_none()
 
         if setting:
             setting.value = value
         else:
-            setting = UserSetting(key=key, value=value)
+            setting = UserSetting(key=key, value=value, user_id=self.user_id)
             self.db.add(setting)
 
     def _resolve_model(

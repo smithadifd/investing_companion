@@ -11,11 +11,15 @@ create path stamps the owner.
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.alert import AlertHistory
 from app.db.models.ratio import Ratio
+from app.db.models.user_settings import UserSetting
+from app.schemas.ai import AISettingsUpdate
 from app.schemas.trigger import TriggerCreate
+from app.services.ai import AIService
 from app.services.alert import AlertService
 from app.services.auth import AuthService
 from app.services.context_pack import ContextPackService
@@ -292,3 +296,116 @@ class TestContextPackIsolation:
         assert "CPISO" in [x.symbol for x in pack_a.watchlist_targets]
         assert "A-cp-trigger" in [x.name for x in pack_a.triggers]
         assert trig_a.id  # created
+
+
+# ---------------------------------------------------------------------------
+# AI settings (default_model / custom_instructions) — the R8 residual (MC-3).
+# Before this fix, AIService.get_settings()/_upsert_setting() read/wrote these
+# two UserSetting rows keyed only by `key`, with no user_id filter, so they
+# were process-global: B's write clobbered A's read (and vice versa).
+# ---------------------------------------------------------------------------
+
+class TestAISettingsIsolation:
+    async def test_b_write_does_not_change_a_read(
+        self, client: AsyncClient, db: AsyncSession, two_users
+    ):
+        a, b = two_users
+        ha, hb = await _headers(db, a), await _headers(db, b)
+
+        resp_a = await client.put(
+            "/api/v1/ai/settings",
+            json={
+                "default_model": "claude-opus-4-8",
+                "custom_instructions": "A's instructions",
+            },
+            headers=ha,
+        )
+        assert resp_a.status_code == 200
+        assert resp_a.json()["data"]["default_model"] == "claude-opus-4-8"
+        assert resp_a.json()["data"]["custom_instructions"] == "A's instructions"
+
+        # B independently sets DIFFERENT values.
+        resp_b = await client.put(
+            "/api/v1/ai/settings",
+            json={
+                "default_model": "claude-haiku-4-5-20251001",
+                "custom_instructions": "B's instructions",
+            },
+            headers=hb,
+        )
+        assert resp_b.status_code == 200
+        assert resp_b.json()["data"]["default_model"] == "claude-haiku-4-5-20251001"
+        assert resp_b.json()["data"]["custom_instructions"] == "B's instructions"
+
+        # A's read is untouched by B's write — this assertion FAILS on main,
+        # where B's write overwrote the single global row A also read from.
+        read_a = await client.get("/api/v1/ai/settings", headers=ha)
+        assert read_a.json()["data"]["default_model"] == "claude-opus-4-8"
+        assert read_a.json()["data"]["custom_instructions"] == "A's instructions"
+
+    async def test_service_scope_is_independent_per_user(
+        self, db: AsyncSession, two_users
+    ):
+        a, b = two_users
+        await AIService(db, a.id).update_settings(
+            AISettingsUpdate(
+                default_model="claude-opus-4-8", custom_instructions="A only"
+            )
+        )
+
+        settings_b = await AIService(db, b.id).get_settings()
+        assert settings_b.custom_instructions is None
+        assert settings_b.default_model != "claude-opus-4-8"
+
+        settings_a = await AIService(db, a.id).get_settings()
+        assert settings_a.custom_instructions == "A only"
+        assert settings_a.default_model == "claude-opus-4-8"
+
+    async def test_legacy_global_row_is_read_fallback_until_user_writes(
+        self, db: AsyncSession, two_users
+    ):
+        """Legacy-row disposition: a pre-fix, un-scoped (user_id NULL) row is
+        used as a read fallback ONLY for a user who has no row of their own —
+        so a single-user install doesn't appear to lose its settings before
+        the supervised §3 data reconciliation runs. The moment a user writes
+        their own value, THEIR read stops falling back to the legacy row;
+        other users still see it until they write their own (or it's
+        reconciled)."""
+        a, b = two_users
+        db.add(
+            UserSetting(key="ai_default_model", value="claude-opus-4-8", user_id=None)
+        )
+        db.add(
+            UserSetting(
+                key="ai_custom_instructions",
+                value="legacy global instructions",
+                user_id=None,
+            )
+        )
+        await db.flush()
+
+        settings_a = await AIService(db, a.id).get_settings()
+        settings_b = await AIService(db, b.id).get_settings()
+        assert settings_a.default_model == "claude-opus-4-8"
+        assert settings_b.default_model == "claude-opus-4-8"
+        assert settings_a.custom_instructions == "legacy global instructions"
+        assert settings_b.custom_instructions == "legacy global instructions"
+
+        # A writes their own value: A's read now comes from A's OWN row...
+        await AIService(db, a.id).update_settings(
+            AISettingsUpdate(default_model="claude-haiku-4-5-20251001")
+        )
+        settings_a2 = await AIService(db, a.id).get_settings()
+        assert settings_a2.default_model == "claude-haiku-4-5-20251001"
+
+        # ...while B, who never wrote, still sees the (unreconciled) legacy row.
+        settings_b2 = await AIService(db, b.id).get_settings()
+        assert settings_b2.default_model == "claude-opus-4-8"
+
+        # The write never touched the legacy row itself.
+        legacy = await db.scalar(
+            select(UserSetting.value).where(
+                UserSetting.key == "ai_default_model", UserSetting.user_id.is_(None)
+            )
+        )
+        assert legacy == "claude-opus-4-8"

@@ -356,6 +356,8 @@ class WatchlistService:
                 target_price=item.target_price,
                 thesis=item.thesis,
                 entry_zones=parse_zones(item.entry_zones) or None,
+                catalyst_tags=item.catalyst_tags,
+                track_calendar=item.track_calendar,
                 added_at=item.added_at,
             )
             for item in watchlist.items
@@ -392,6 +394,12 @@ class WatchlistService:
                     target_price=item_data.target_price,
                     thesis=item_data.thesis,
                     entry_zones=_zones_to_json(item_data.entry_zones),
+                    catalyst_tags=item_data.catalyst_tags or None,
+                    track_calendar=(
+                        item_data.track_calendar
+                        if item_data.track_calendar is not None
+                        else True
+                    ),
                 )
                 self.db.add(item)
 

@@ -100,6 +100,32 @@ else:
             "task": "schwab.check_token_expiry",
             "schedule": crontab(hour=13, minute=0),
         },
+        # Daily Strategy Brief agent (docs/issues/014): its own independent
+        # crontab, deliberately NOT wired into check-notification-schedule's
+        # per-user dynamic ET time above - that scheduler drives the morning
+        # pulse only. Fixed at 11:30 UTC so the brief lands before the pulse's
+        # 08:00 ET default. DST drift (not adjusted): 11:30 UTC is 06:30 ET in
+        # winter (EST, UTC-5) and 07:30 ET in summer (EDT, UTC-4) - both still
+        # comfortably ahead of 08:00 ET. Market holidays (not adjusted): the
+        # agent still runs on a closed trading day; its context sources
+        # degrade gracefully (empty quotes/events) rather than erroring, so
+        # this is a low-value but harmless no-op-ish brief, not a crash.
+        "strategy-brief-daily": {
+            "task": "agents.strategy_brief_run",
+            "schedule": crontab(minute=30, hour=11, day_of_week="mon-fri"),
+        },
+        # News & Catalyst advisory agent (T1 sub-PR 2/4, docs/issues/014):
+        # fetch + score watchlist news, feeding the morning pulse's catalyst
+        # lines. Twice on weekdays, ~pre-market and ~pre-close ET. Fixed UTC
+        # hours drift by an hour across DST rather than tracking ET exactly -
+        # accepted for a "roughly pre-market/pre-close" cadence, not corrected
+        # here. Quiet no-op when disabled/unkeyed/over budget (see
+        # agents.guards.check_agent_preconditions); the 30-day retention prune
+        # inside the task runs regardless.
+        "news-catalyst-agent": {
+            "task": "agents.news_catalyst_run",
+            "schedule": crontab(minute=0, hour="10,20", day_of_week="mon-fri"),
+        },
         # Trade Journal & Pattern Analysis weekly review (docs/issues/014 #2).
         # Monday 05:30 UTC (~00:30 ET EST / 01:30 ET EDT) - shortly AFTER the
         # ET week actually ends (Monday 00:00 ET), so compute_review_window()

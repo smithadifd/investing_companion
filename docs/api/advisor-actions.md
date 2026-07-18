@@ -85,10 +85,6 @@ Fields in **bold** are required.
 | `percent_from_high` | drawdown from the period high (`comparison_period`, e.g. `52w`) |
 | `entry_zone` | fires per tier when price enters a watchlist item's entry zone — **no `threshold_value`**; target is the watchlist item. Re-arms only when price exits the entry side |
 
-> **Do not use `percent_up` / `percent_down`** until bug #48 is fixed — `comparison_period` is
-> ignored, so the alert is wrong. For "down X% today" intent, prefer `percent_from_high` or a
-> `below` level.
-
 ### Watchlist
 
 | Action | Fields |
@@ -108,9 +104,6 @@ Fields in **bold** are required.
 | Action | Fields |
 |--------|--------|
 | `ADD_RATIO` | **`name`**, **`numerator_symbol`**, **`denominator_symbol`**, `description`, `category` (`commodity` / `equity` / `macro` / `crypto`) |
-
-> Forex symbols (`USD`, `JPY`, …) don't resolve yet (bug #49). Use ETF proxies — `FXY` for yen,
-> `UUP` for the dollar — instead of raw currency pairs.
 
 ### Calendar
 
@@ -198,7 +191,7 @@ Emit one when a closed position taught something worth weighing on the next simi
 The executor posts a receipt (`applied` / `skipped` / `flagged` per action) that folds into the
 next context pack's `recent_handoffs`. The advisor reads that to learn what actually happened —
 no need to ask. If actions come back `skipped`/`flagged` repeatedly, the cause is usually a missed
-approval mark, an `unsupported_features` collision, or a known bug (#48 / #49) above.
+approval mark or an `unsupported_features` collision.
 
 ## Write-vocabulary changelog
 

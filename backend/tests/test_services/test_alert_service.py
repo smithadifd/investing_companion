@@ -1,5 +1,6 @@
 """Tests for alert condition evaluation logic in AlertService."""
 
+import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
@@ -7,10 +8,11 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.alert import AlertDelivery
+from app.db.models.alert import Alert, AlertDelivery
+from app.db.models.ratio import Ratio
 from app.schemas.equity import QuoteResponse
 from app.services.alert import AlertService
-from tests.factories import create_test_alert, create_test_equity
+from tests.factories import create_test_alert, create_test_equity, create_test_user
 
 
 async def _delivery_count(db: AsyncSession, alert_id: int) -> int:
@@ -494,6 +496,122 @@ class TestEvaluateConditionPercentFromHigh:
         triggered, desc = await service._evaluate_condition(alert, Decimal("88"))
         assert triggered is False
         assert "No price history" in desc
+
+
+# ---------------------------------------------------------------------------
+# _get_historical_reference_value — ratio branch forex-leg residual (#49)
+# ---------------------------------------------------------------------------
+
+class TestHistoricalReferenceRatioForexLeg:
+    """Regression test for the ratio-branch forex-leg residual (issue #49).
+
+    Before the fix, ``_get_historical_reference_value``'s ratio branch matched
+    ``Equity.symbol`` against the ratio's raw leg symbol with a plain ``==``.
+    A forex leg stored on the ratio as a bare currency code ("JPY") never
+    matches an Equity row keyed under Yahoo's normalized ticker form
+    ("JPY=X") - the same form every other symbol lookup in this codebase
+    (``yahoo.get_quote``/``get_history``) resolves through ``normalize_symbol``
+    - so the percent-change reference silently no-oped for any ratio with a
+    forex leg.
+    """
+
+    async def _insert_price_history(
+        self, db: AsyncSession, equity_id: int, timestamp: datetime, close: float
+    ):
+        from app.db.models.price_history import PriceHistory
+        ph = PriceHistory(
+            equity_id=equity_id,
+            timestamp=timestamp,
+            open=close, high=close, low=close, close=close,
+        )
+        db.add(ph)
+        await db.flush()
+
+    async def _make_ratio_alert(
+        self,
+        db: AsyncSession,
+        *,
+        numerator_symbol: str,
+        denominator_symbol: str,
+        threshold_value: float,
+        comparison_period: str,
+    ) -> Alert:
+        user = await create_test_user(
+            db, email=f"ratio-fx-{uuid.uuid4().hex[:8]}@example.com"
+        )
+        ratio = Ratio(
+            name=f"{numerator_symbol}/{denominator_symbol}",
+            numerator_symbol=numerator_symbol,
+            denominator_symbol=denominator_symbol,
+            category="custom",
+        )
+        db.add(ratio)
+        await db.flush()
+
+        alert = Alert(
+            user_id=user.id,
+            name="Forex ratio percent alert",
+            ratio_id=ratio.id,
+            condition_type="percent_up",
+            threshold_value=threshold_value,
+            comparison_period=comparison_period,
+        )
+        db.add(alert)
+        await db.flush()
+        return alert
+
+    async def test_forex_leg_resolves_via_normalize_symbol(self, db: AsyncSession):
+        """FAILS before the fix (returns None), PASSES after.
+
+        The numerator is a plain equity (SPY); the denominator is a bare
+        forex code ("JPY") whose Equity row is stored under Yahoo's
+        normalized ticker ("JPY=X") - exactly how every other symbol lookup
+        in this codebase stores/resolves forex.
+        """
+        num_equity = await create_test_equity(db, symbol="SPY")
+        den_equity = await create_test_equity(db, symbol="JPY=X")
+
+        ref_time = datetime.now(timezone.utc) - timedelta(days=1)
+        await self._insert_price_history(db, num_equity.id, ref_time, 400.0)
+        await self._insert_price_history(db, den_equity.id, ref_time, 100.0)
+
+        alert = await self._make_ratio_alert(
+            db,
+            numerator_symbol="SPY",
+            denominator_symbol="JPY",  # bare forex code, not "JPY=X"
+            threshold_value=5.0,
+            comparison_period="1d",
+        )
+        service = AlertService(db)
+
+        reference = await service._get_historical_reference_value(alert)
+
+        # Reference ratio = 400 / 100 = 4.0. Before the fix this returned
+        # None because Equity.symbol == "JPY" never matched the stored
+        # "JPY=X" row.
+        assert reference == Decimal("4")
+
+    async def test_non_forex_ratio_still_resolves(self, db: AsyncSession):
+        """Sanity check: normalize_symbol is a passthrough for equities, so a
+        plain equity/equity ratio (no forex leg) keeps working unchanged."""
+        num_equity = await create_test_equity(db, symbol="SPY")
+        den_equity = await create_test_equity(db, symbol="QQQ")
+
+        ref_time = datetime.now(timezone.utc) - timedelta(days=1)
+        await self._insert_price_history(db, num_equity.id, ref_time, 400.0)
+        await self._insert_price_history(db, den_equity.id, ref_time, 350.0)
+
+        alert = await self._make_ratio_alert(
+            db,
+            numerator_symbol="SPY",
+            denominator_symbol="QQQ",
+            threshold_value=5.0,
+            comparison_period="1d",
+        )
+        service = AlertService(db)
+
+        reference = await service._get_historical_reference_value(alert)
+        assert reference == Decimal("400") / Decimal("350")
 
 
 # ---------------------------------------------------------------------------

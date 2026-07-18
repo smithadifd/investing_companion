@@ -11,7 +11,7 @@ import uuid
 from datetime import date as date_
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Date, ForeignKey, Index, Text, UniqueConstraint
+from sqlalchemy import Date, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,11 +27,13 @@ class StrategySignal(Base, TimestampMixin):
     __tablename__ = "strategy_signals"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # No standalone index=True: the (user_id, signal_date) unique constraint
+    # below is a composite B-tree with user_id as its leading column, so
+    # user_id-only lookups are already served by its leftmost prefix.
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
 
     # The trading day this brief covers (not a timestamp - one brief per day).
@@ -45,8 +47,9 @@ class StrategySignal(Base, TimestampMixin):
     payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
-        Index("idx_strategy_signals_user_date", "user_id", "signal_date"),
-        # One brief per user per trading day; a re-run regenerates in place.
+        # One brief per user per trading day; a re-run regenerates in place. Its
+        # backing B-tree (user_id, signal_date) also serves the per-user and
+        # per-user+date read paths, so no extra index is needed.
         UniqueConstraint("user_id", "signal_date", name="uq_strategy_signal_user_date"),
     )
 

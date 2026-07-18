@@ -61,13 +61,10 @@ def upgrade() -> None:
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
+        # This unique constraint's backing B-tree (user_id, window_start,
+        # window_end) already serves the per-user and per-user+window read
+        # paths via its leftmost prefix, so no separate index is created.
         sa.UniqueConstraint('user_id', 'window_start', 'window_end', name='uq_trade_journal_user_window'),
-    )
-    op.create_index('ix_trade_journal_entries_user_id', 'trade_journal_entries', ['user_id'])
-    op.create_index(
-        'idx_trade_journal_user_window',
-        'trade_journal_entries',
-        ['user_id', 'window_start', 'window_end'],
     )
 
     op.create_table(
@@ -81,19 +78,16 @@ def upgrade() -> None:
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
+        # This unique constraint's backing B-tree (user_id, signal_date) already
+        # serves the per-user and per-user+date read paths via its leftmost
+        # prefix, so no separate index is created.
         sa.UniqueConstraint('user_id', 'signal_date', name='uq_strategy_signal_user_date'),
     )
-    op.create_index('ix_strategy_signals_user_id', 'strategy_signals', ['user_id'])
-    op.create_index('idx_strategy_signals_user_date', 'strategy_signals', ['user_id', 'signal_date'])
 
 
 def downgrade() -> None:
-    op.drop_index('idx_strategy_signals_user_date', table_name='strategy_signals')
-    op.drop_index('ix_strategy_signals_user_id', table_name='strategy_signals')
     op.drop_table('strategy_signals')
 
-    op.drop_index('idx_trade_journal_user_window', table_name='trade_journal_entries')
-    op.drop_index('ix_trade_journal_entries_user_id', table_name='trade_journal_entries')
     op.drop_table('trade_journal_entries')
 
     op.drop_index('idx_news_items_url', table_name='news_items')

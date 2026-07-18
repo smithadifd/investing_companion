@@ -12,7 +12,7 @@ import uuid
 from typing import TYPE_CHECKING, Optional
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -28,11 +28,13 @@ class TradeJournalEntry(Base, TimestampMixin):
     __tablename__ = "trade_journal_entries"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # No standalone index=True: the (user_id, window_start, window_end) unique
+    # constraint below is a composite B-tree with user_id as its leading column,
+    # so user_id-only lookups are already served by its leftmost prefix.
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
 
     window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -47,9 +49,10 @@ class TradeJournalEntry(Base, TimestampMixin):
     metrics: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
-        Index("idx_trade_journal_user_window", "user_id", "window_start", "window_end"),
         # One review per user per exact window - the agent upserts rather than
-        # accumulating duplicate rows for a re-run over the same period.
+        # accumulating duplicate rows for a re-run over the same period. Its
+        # backing B-tree (user_id, window_start, window_end) also serves the
+        # per-user and per-user+window read paths, so no extra index is needed.
         UniqueConstraint(
             "user_id", "window_start", "window_end", name="uq_trade_journal_user_window"
         ),

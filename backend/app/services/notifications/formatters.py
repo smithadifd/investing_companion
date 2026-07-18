@@ -93,11 +93,25 @@ class MorningData:
     triggered_overnight: int = 0
     # Pre-formatted "what needs a decision today" lines - shown first
     needs_attention: list[str] = field(default_factory=list)
+    # News & Catalyst agent (T1 sub-PR 2/4): symbol -> catalyst line (<=80
+    # chars), e.g. "DOE announced new uranium reserve program." None/empty
+    # (the default) must render byte-identical to before this field existed -
+    # see tests/test_services/test_briefing_formatters.py's catalyst-absent case.
+    catalysts: Optional[dict[str, str]] = None
+    # Section names that failed to assemble this run, from OUTSIDE the
+    # formatter (e.g. the catalysts DB query in alerts.py's assembly step).
+    # Seeds the same "Some data unavailable" footer the formatter's own
+    # per-section try/except blocks feed - one source of truth for the
+    # warning, regardless of where the failure happened.
+    unavailable_sections: list[str] = field(default_factory=list)
 
 
 def format_morning_pulse(data: MorningData) -> str:
     """Format the morning pulse notification as plain text."""
-    warnings: list[str] = []
+    # Seeded from assembly-side failures (e.g. the catalysts query) so they
+    # feed the same footer as this function's own per-section try/excepts.
+    # Default is [] - identical to the pre-existing `warnings: list[str] = []`.
+    warnings: list[str] = list(data.unavailable_sections)
     sections: list[str] = []
 
     now_et = _get_et_now()
@@ -251,6 +265,7 @@ def format_morning_pulse(data: MorningData) -> str:
         logger.warning(f"Error formatting calendar: {e}")
 
     # -- Watchlist Pre-Market Movers --
+    shown_mover_symbols: set[str] = set()
     try:
         if data.movers_session == "pre":
             header = "WATCHLIST PRE-MARKET MOVERS"
@@ -263,14 +278,40 @@ def format_morning_pulse(data: MorningData) -> str:
         if data.premarket_movers:
             lines = [header]
             for m in data.premarket_movers[:5]:
+                shown_mover_symbols.add(m["symbol"])
                 arrow = "⬆️" if m["change_percent"] > 0 else "⬇️"
-                lines.append(f"{arrow} {m['symbol']} {_fmt_pct(m['change_percent'])}")
+                line = f"{arrow} {m['symbol']} {_fmt_pct(m['change_percent'])}"
+                catalyst = (data.catalysts or {}).get(m["symbol"])
+                if catalyst:
+                    line += f" — {catalyst}"
+                lines.append(line)
             sections.append("\n".join(lines))
         else:
             sections.append(f"{header}\n{empty_line}")
     except Exception as e:
         warnings.append("pre-market movers")
         logger.warning(f"Error formatting pre-market movers: {e}")
+
+    # -- Catalysts (News & Catalyst agent, non-mover watchlist news) --
+    # Movers already got their catalyst inline above; this surfaces
+    # high-relevance news for watchlist names that *didn't* move, so it
+    # never repeats a symbol already shown. Absent/empty data.catalysts
+    # (the default) adds no section - required for byte-identical output.
+    try:
+        if data.catalysts:
+            extra = [
+                (symbol, line)
+                for symbol, line in data.catalysts.items()
+                if symbol not in shown_mover_symbols
+            ]
+            if extra:
+                lines = ["CATALYSTS"]
+                for symbol, line in extra[:3]:
+                    lines.append(f"• {symbol}: {line}")
+                sections.append("\n".join(lines))
+    except Exception as e:
+        warnings.append("catalysts")
+        logger.warning(f"Error formatting catalysts: {e}")
 
     # -- Alert Status --
     sections.append(

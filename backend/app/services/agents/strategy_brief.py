@@ -40,7 +40,13 @@ from app.schemas.watchlist import EntryZone
 from app.services.agents.base import AdvisoryAgent
 from app.services.agents.guards import AgentFlag
 from app.services.ai import AIService
-from app.services.ai_budget import AITokenBudget, token_budget as _default_token_budget
+from app.services.ai_budget import (
+    AITokenBudget,
+    BudgetExceededError,
+    ReservationToken,
+    estimate_request_tokens,
+    token_budget as _default_token_budget,
+)
 from app.services.context_pack import ContextPackService
 from app.services.data_providers import get_extended_quote_provider
 from app.services.economic_event import EconomicEventService
@@ -599,6 +605,30 @@ async def _compose_brief(
     model = _resolve_model(default_model)
     prompt = _build_prompt(context)
 
+    # Atomically reserve the per-call ceiling (input estimate + output
+    # ceiling - settlement charges input + output actuals, so reserving
+    # bare max_tokens would systematically under-reserve); fails closed on
+    # an exhausted budget, fails open (untracked token) on a Redis outage.
+    # This is the sole enforcement boundary - see app/services/ai_budget.py.
+    #
+    # guard() (AdvisoryAgent.guard -> check_agent_preconditions) already ran
+    # a non-mutating advisory check earlier in this task, but that check is
+    # deliberately not paired with this reserve() call (see ai_budget.py's
+    # module docstring) - the budget can legitimately tip over between the
+    # two. That is expected and correct, so treat it exactly like any other
+    # "can't compose a brief right now" condition: log and return None,
+    # rather than letting it propagate as an unhandled Celery task error for
+    # what is a normal, designed-for race.
+    reserve_estimate = estimate_request_tokens(SYSTEM_PROMPT, prompt) + LLM_MAX_TOKENS
+    try:
+        reservation: ReservationToken = await budget.reserve(user_id, reserve_estimate)
+    except BudgetExceededError:
+        logger.info(
+            "strategy_brief: daily AI token budget exhausted at reserve time "
+            "(guard's earlier advisory check can race this); skipping"
+        )
+        return None
+
     try:
         client = anthropic.Anthropic(api_key=api_key)
         try:
@@ -612,11 +642,15 @@ async def _compose_brief(
             client.close()
     except Exception as exc:
         logger.warning("strategy_brief: LLM call failed: %s", exc)
+        # Nothing was billed - release rather than leave the reservation's
+        # estimate charged against today's budget until the day rolls over.
+        await budget.release(user_id, reservation)
         return None
 
-    tokens = _usage_tokens(message)
-    if tokens:
-        await budget.record(user_id, tokens)
+    # Settle BEFORE any further response parsing: tokens are already billed
+    # by Anthropic the moment messages.create() returns, before any parsing
+    # of the response content below.
+    await budget.settle(user_id, reservation, _usage_tokens(message))
 
     text = _extract_text(message)
     if text is None:

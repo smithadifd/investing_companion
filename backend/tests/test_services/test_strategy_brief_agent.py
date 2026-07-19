@@ -29,6 +29,7 @@ from sqlalchemy import select
 from app.db.models.strategy_signal import StrategySignal
 from app.schemas.watchlist import EntryZone
 from app.services.agents import strategy_brief as sb
+from app.services.ai_budget import estimate_request_tokens
 from tests.factories import create_test_user
 
 # ---------------------------------------------------------------------------
@@ -38,13 +39,23 @@ class FakeBudget:
     """Injectable budget double (mirrors test_ai.py's FakeBudget)."""
 
     def __init__(self) -> None:
-        self.recorded: list[tuple] = []
+        self.reserved: list[tuple] = []
+        self.settled: list[tuple] = []
 
     async def check(self, user_id):  # pragma: no cover - not exercised here
         pass
 
-    async def record(self, user_id, tokens):
-        self.recorded.append((user_id, tokens))
+    async def reserve(self, user_id, tokens):
+        from app.services.ai_budget import ReservationToken
+
+        self.reserved.append((user_id, tokens))
+        return ReservationToken(id="fake", who=str(user_id), day="2026-01-01", reserved=tokens)
+
+    async def settle(self, user_id, reservation, actual):
+        self.settled.append((user_id, actual))
+
+    async def release(self, user_id, reservation):
+        await self.settle(user_id, reservation, 0)
 
 
 class FakeDiscordService:
@@ -512,17 +523,60 @@ async def test_compose_brief_records_tokens_on_success(monkeypatch):
         text = await sb._compose_brief(MagicMock(), uid, "sk-test", _empty_context(), budget=budget)
 
     assert text == "**Daily Strategy Brief**\n- Sit tight."
-    assert budget.recorded == [(uid, 150)]
+    # Reserve = conservative input estimate over the REAL prompt strings +
+    # the output ceiling (never bare max_tokens - the systematic
+    # input-omission bias codex flagged).
+    expected_reserve = (
+        estimate_request_tokens(sb.SYSTEM_PROMPT, sb._build_prompt(_empty_context()))
+        + sb.LLM_MAX_TOKENS
+    )
+    assert budget.reserved == [(uid, expected_reserve)]
+    assert budget.settled == [(uid, 150)]
 
 
 async def test_compose_brief_returns_none_on_llm_exception(monkeypatch):
     monkeypatch.setattr(
         sb.AIService, "get_settings", AsyncMock(return_value=MagicMock(default_model=None))
     )
+    budget = FakeBudget()
     with patch("anthropic.Anthropic", side_effect=RuntimeError("network down")):
-        result = await sb._compose_brief(MagicMock(), uuid.uuid4(), "sk-test", _empty_context())
+        result = await sb._compose_brief(
+            MagicMock(), uuid.uuid4(), "sk-test", _empty_context(), budget=budget
+        )
 
     assert result is None
+    # Nothing was billed - the reservation is released, not settled >0.
+    assert budget.settled == [(budget.reserved[0][0], 0)]
+
+
+async def test_compose_brief_returns_none_when_reserve_raises_budget_exceeded(monkeypatch):
+    """guard()'s advisory check() (run earlier, non-mutating) can pass and
+    then reserve() - the real, atomic enforcement boundary - still raise
+    moments later; that race is documented as expected in ai_budget.py's
+    module docstring. _compose_brief must degrade the same way it does for
+    any other "can't compose a brief right now" condition (log + return
+    None) rather than let BudgetExceededError propagate uncaught out of
+    execute() into the Celery task as an unhandled error."""
+    from app.services.ai_budget import BudgetExceededError
+
+    monkeypatch.setattr(
+        sb.AIService, "get_settings", AsyncMock(return_value=MagicMock(default_model=None))
+    )
+
+    class ExceededBudget(FakeBudget):
+        async def reserve(self, user_id, tokens):
+            raise BudgetExceededError(used=999, limit=100)
+
+    budget = ExceededBudget()
+
+    with patch("anthropic.Anthropic") as ctor:
+        result = await sb._compose_brief(
+            MagicMock(), uuid.uuid4(), "sk-test", _empty_context(), budget=budget
+        )
+        ctor.assert_not_called()  # blocked before any API/token spend
+
+    assert result is None
+    assert budget.settled == []  # no reservation was ever minted to settle/release
 
 
 async def test_compose_brief_returns_none_on_empty_response(monkeypatch):
@@ -530,9 +584,12 @@ async def test_compose_brief_returns_none_on_empty_response(monkeypatch):
         sb.AIService, "get_settings", AsyncMock(return_value=MagicMock(default_model=None))
     )
     client = _fake_anthropic(text="   ")
+    budget = FakeBudget()
 
     with patch("anthropic.Anthropic", return_value=client):
-        result = await sb._compose_brief(MagicMock(), uuid.uuid4(), "sk-test", _empty_context())
+        result = await sb._compose_brief(
+            MagicMock(), uuid.uuid4(), "sk-test", _empty_context(), budget=budget
+        )
 
     assert result is None
 
@@ -768,7 +825,9 @@ async def test_compose_brief_returns_none_on_non_text_first_block(monkeypatch):
     client.messages.create.return_value = message
 
     with patch("anthropic.Anthropic", return_value=client):
-        result = await sb._compose_brief(MagicMock(), uuid.uuid4(), "sk-test", _empty_context())
+        result = await sb._compose_brief(
+            MagicMock(), uuid.uuid4(), "sk-test", _empty_context(), budget=FakeBudget()
+        )
 
     assert result is None
 
@@ -791,7 +850,7 @@ async def test_compose_brief_still_records_tokens_on_unexpected_shape(monkeypatc
         result = await sb._compose_brief(MagicMock(), uid, "sk-test", _empty_context(), budget=budget)
 
     assert result is None
-    assert budget.recorded == [(uid, 100)]
+    assert budget.settled == [(uid, 100)]
 
 
 # ---------------------------------------------------------------------------
@@ -807,7 +866,9 @@ async def test_compose_brief_enforces_1800_char_ceiling_in_code(monkeypatch):
     client = _fake_anthropic(text=long_text)
 
     with patch("anthropic.Anthropic", return_value=client):
-        result = await sb._compose_brief(MagicMock(), uuid.uuid4(), "sk-test", _empty_context())
+        result = await sb._compose_brief(
+            MagicMock(), uuid.uuid4(), "sk-test", _empty_context(), budget=FakeBudget()
+        )
 
     assert len(result) == sb.LLM_MAX_OUTPUT_CHARS
     assert result.endswith("...")
@@ -820,7 +881,9 @@ async def test_compose_brief_under_ceiling_untouched(monkeypatch):
     client = _fake_anthropic(text="**Daily Strategy Brief**\n- Sit tight.")
 
     with patch("anthropic.Anthropic", return_value=client):
-        result = await sb._compose_brief(MagicMock(), uuid.uuid4(), "sk-test", _empty_context())
+        result = await sb._compose_brief(
+            MagicMock(), uuid.uuid4(), "sk-test", _empty_context(), budget=FakeBudget()
+        )
 
     assert result == "**Daily Strategy Brief**\n- Sit tight."
 
@@ -835,7 +898,9 @@ async def test_compose_brief_closes_client_on_success(monkeypatch):
     client = _fake_anthropic()
 
     with patch("anthropic.Anthropic", return_value=client):
-        await sb._compose_brief(MagicMock(), uuid.uuid4(), "sk-test", _empty_context())
+        await sb._compose_brief(
+            MagicMock(), uuid.uuid4(), "sk-test", _empty_context(), budget=FakeBudget()
+        )
 
     client.close.assert_called_once()
 
@@ -846,12 +911,18 @@ async def test_compose_brief_closes_client_even_when_create_raises(monkeypatch):
     )
     client = MagicMock()
     client.messages.create.side_effect = RuntimeError("network down")
+    budget = FakeBudget()
 
     with patch("anthropic.Anthropic", return_value=client):
-        result = await sb._compose_brief(MagicMock(), uuid.uuid4(), "sk-test", _empty_context())
+        result = await sb._compose_brief(
+            MagicMock(), uuid.uuid4(), "sk-test", _empty_context(), budget=budget
+        )
 
     assert result is None
     client.close.assert_called_once()
+    # Release path: client.close() (inner finally) still ran before the
+    # outer except releases the reservation.
+    assert budget.settled == [(budget.reserved[0][0], 0)]
 
 
 # ---------------------------------------------------------------------------

@@ -372,12 +372,18 @@ async def test_score_success_sets_relevance_and_summary_and_records_budget(db, m
     )
     client = _fake_anthropic_client(response_text, in_tok=50, out_tok=80)
 
-    recorded: list[tuple] = []
+    settled: list[tuple] = []
 
-    async def fake_record(user_id, tokens):
-        recorded.append((user_id, tokens))
+    async def fake_reserve(user_id, tokens):
+        from app.services.ai_budget import ReservationToken
 
-    monkeypatch.setattr(news_token_budget, "record", fake_record)
+        return ReservationToken(id="fake", who=str(user_id), day="2026-01-01", reserved=tokens)
+
+    async def fake_settle(user_id, reservation, actual):
+        settled.append((user_id, actual))
+
+    monkeypatch.setattr(news_token_budget, "reserve", fake_reserve)
+    monkeypatch.setattr(news_token_budget, "settle", fake_settle)
 
     with patch("anthropic.Anthropic", return_value=client):
         agent = NewsCatalystAgent()
@@ -386,7 +392,7 @@ async def test_score_success_sets_relevance_and_summary_and_records_budget(db, m
     assert items[0].relevance == pytest.approx(0.92)
     assert items[0].summary == "DOE announced new uranium reserve program."
     assert items[1].relevance == pytest.approx(0.1)
-    assert recorded == [(uid, 130)]
+    assert settled == [(uid, 130)]
 
 
 async def test_score_no_api_key_leaves_items_unscored(db, monkeypatch):
@@ -413,6 +419,35 @@ async def test_score_llm_call_failure_leaves_items_unscored(db, monkeypatch):
     assert items[0].relevance is None
     await db.refresh(items[0])
     assert items[0].relevance is None  # persisted, still unscored
+
+
+async def test_score_reserve_budget_exceeded_leaves_items_unscored(db, monkeypatch):
+    """guard()'s advisory check() (run earlier in execute(), non-mutating)
+    can pass and then reserve() - the real, atomic enforcement boundary -
+    still raise moments later; that race is documented as expected in
+    ai_budget.py's module docstring. _score() must degrade the same way it
+    does for any other "can't score right now" condition (log + leave the
+    batch unscored for the next run's re-query) rather than let
+    BudgetExceededError propagate uncaught out of execute() into the Celery
+    task as an unhandled error."""
+    from app.services.ai_budget import BudgetExceededError
+
+    items = await _make_items(db, 1)
+    _mock_ai_service(monkeypatch)
+
+    async def fake_reserve(user_id, tokens):
+        raise BudgetExceededError(used=999, limit=100)
+
+    monkeypatch.setattr(news_token_budget, "reserve", fake_reserve)
+
+    with patch("anthropic.Anthropic") as ctor:
+        agent = NewsCatalystAgent()
+        await agent._score(db, uuid.uuid4(), items)
+        ctor.assert_not_called()  # blocked before any API/token spend
+
+    assert items[0].relevance is None
+    await db.refresh(items[0])
+    assert items[0].relevance is None  # persisted, still unscored - retried next run
 
 
 async def test_score_malformed_response_leaves_items_unscored(db, monkeypatch):

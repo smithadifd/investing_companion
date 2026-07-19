@@ -103,6 +103,27 @@ class DiscordNotificationService:
             await self._client.aclose()
             self._client = None
 
+    async def _post_webhook(self, webhook_url: str, payload: dict) -> httpx.Response:
+        """POST a payload to the Discord webhook, hardened against mention pings.
+
+        Single choke point for all outbound webhook POSTs. Injects
+        ``allowed_mentions: {"parse": []}`` into every payload, which tells
+        Discord to resolve zero mentions from the message content/embeds into
+        actual pings - regardless of what mention-shaped text (``@everyone``,
+        ``@here``, ``<@id>``, ``<@&role>``) made it through. This is
+        defense-in-depth *underneath* the per-agent text-sanitization layers
+        (catalysts.py, strategy_brief.py, trade_journal.py) - it does not
+        replace them, it backstops them: even if a sanitizer regression or a
+        new untrusted-text path forgot to neutralize mention syntax, Discord
+        itself is told never to act on it.
+
+        Any ``allowed_mentions`` key already present in ``payload`` is
+        overridden - this helper is the single source of truth for the field.
+        """
+        hardened_payload = {**payload, "allowed_mentions": {"parse": []}}
+        client = await self._get_client()
+        return await client.post(webhook_url, json=hardened_payload)
+
     def _format_price(self, value: Decimal | float) -> str:
         """Format a price value for display."""
         val = float(value)
@@ -241,8 +262,7 @@ class DiscordNotificationService:
                 "embeds": [embed],
             }
 
-            client = await self._get_client()
-            response = await client.post(webhook_url, json=payload)
+            response = await self._post_webhook(webhook_url, payload)
 
             if response.status_code == 204:
                 logger.info(f"Discord notification sent for alert: {alert_name}")
@@ -293,8 +313,7 @@ class DiscordNotificationService:
                 "embeds": [embed],
             }
 
-            client = await self._get_client()
-            response = await client.post(webhook_url, json=payload)
+            response = await self._post_webhook(webhook_url, payload)
 
             if response.status_code == 204:
                 logger.info("Discord test notification sent successfully")
@@ -327,8 +346,7 @@ class DiscordNotificationService:
         try:
             payload = {"content": message}
 
-            client = await self._get_client()
-            response = await client.post(webhook_url, json=payload)
+            response = await self._post_webhook(webhook_url, payload)
 
             if response.status_code == 204:
                 logger.info("Discord plain-text message sent")
@@ -428,8 +446,7 @@ class DiscordNotificationService:
 
             payload = {"embeds": [embed]}
 
-            client = await self._get_client()
-            response = await client.post(webhook_url, json=payload)
+            response = await self._post_webhook(webhook_url, payload)
 
             if response.status_code == 204:
                 logger.info(f"Discord movers summary sent: {len(big_gainers)} gainers, {len(big_losers)} losers")
@@ -528,8 +545,7 @@ class DiscordNotificationService:
 
             payload = {"embeds": [embed]}
 
-            client = await self._get_client()
-            response = await client.post(webhook_url, json=payload)
+            response = await self._post_webhook(webhook_url, payload)
 
             if response.status_code == 204:
                 logger.info(f"Discord upcoming events sent: {len(events)} events")
@@ -638,8 +654,7 @@ class DiscordNotificationService:
 
             payload = {"embeds": [embed]}
 
-            client = await self._get_client()
-            response = await client.post(webhook_url, json=payload)
+            response = await self._post_webhook(webhook_url, payload)
 
             if response.status_code == 204:
                 logger.info("Discord end-of-day summary sent")

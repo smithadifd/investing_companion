@@ -24,7 +24,7 @@ from app.schemas.ai import (
     WatchlistContext,
     WatchlistHolding,
 )
-from app.services.ai_budget import token_budget
+from app.services.ai_budget import ReservationToken, token_budget
 from app.services.cache import cache_service
 from app.services.equity import EquityService
 from app.services.ratio import RatioService
@@ -521,19 +521,33 @@ Please provide analysis across this watchlist addressing the user's question."""
             cached["cached"] = True
             return AIAnalysisResponse(**cached)
 
-        # Fail closed if the per-day token budget is exhausted.
-        await self._budget.check(self.user_id)
+        # Atomically reserve the per-call ceiling against the per-day token
+        # budget; fails closed (BudgetExceededError) if this would exceed
+        # it. This — not a check-then-record pair — is the sole enforcement
+        # boundary: see app/services/ai_budget.py's module docstring.
+        reservation: ReservationToken = await self._budget.reserve(self.user_id, MAX_TOKENS)
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+            message = client.messages.create(
+                model=model.value,
+                max_tokens=MAX_TOKENS,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+        except Exception:
+            # Nothing was billed - release the reservation rather than
+            # leaving it charged against today's budget until it self-heals.
+            await self._budget.release(self.user_id, reservation)
+            raise
 
-        client = anthropic.Anthropic(api_key=api_key)
-        message = client.messages.create(
-            model=model.value,
-            max_tokens=MAX_TOKENS,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-
+        # Settle BEFORE any further response parsing: tokens are already
+        # billed by Anthropic the moment messages.create() returns,
+        # regardless of whether the response body parses cleanly below (this
+        # also tightens a pre-existing gap here — the response was parsed
+        # before the budget was recorded, unlike the agents' equivalent call
+        # sites, which already settle-before-parse).
+        await self._budget.settle(self.user_id, reservation, _usage_tokens(message))
         response_text = message.content[0].text if message.content else ""
-        await self._budget.record(self.user_id, _usage_tokens(message))
 
         response = AIAnalysisResponse(
             analysis_type=request.analysis_type,
@@ -576,23 +590,37 @@ Please provide analysis across this watchlist addressing the user's question."""
             yield cached["response"]
             return
 
-        # Fail closed if the per-day token budget is exhausted.
-        await self._budget.check(self.user_id)
-
+        # Atomically reserve the per-call ceiling; see analyze()'s equivalent
+        # comment and app/services/ai_budget.py's module docstring.
+        reservation: ReservationToken = await self._budget.reserve(self.user_id, MAX_TOKENS)
         client = anthropic.Anthropic(api_key=api_key)
         chunks: list[str] = []
-        with client.messages.stream(
-            model=model.value,
-            max_tokens=MAX_TOKENS,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        ) as stream:
-            for text in stream.text_stream:
-                chunks.append(text)
-                yield text
-            final_message = stream.get_final_message()
-
-        await self._budget.record(self.user_id, _usage_tokens(final_message))
+        final_message = None
+        try:
+            with client.messages.stream(
+                model=model.value,
+                max_tokens=MAX_TOKENS,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            ) as stream:
+                for text in stream.text_stream:
+                    chunks.append(text)
+                    yield text
+                final_message = stream.get_final_message()
+        finally:
+            # Always settle exactly once, however the try block exits. A
+            # completed stream settles with the confirmed usage figure;
+            # anything else (an LLM failure, or the caller
+            # disconnecting/cancelling mid-stream — this finally still runs
+            # when the generator is torn down via GeneratorExit) releases
+            # the reservation instead. There is no reliable partial-usage
+            # figure available from the SDK once a stream is abandoned
+            # mid-flight, so this errs toward the user (not charged for an
+            # unconfirmed amount) rather than guessing at a partial count.
+            if final_message is not None:
+                await self._budget.settle(self.user_id, reservation, _usage_tokens(final_message))
+            else:
+                await self._budget.release(self.user_id, reservation)
 
         response = AIAnalysisResponse(
             analysis_type=request.analysis_type,

@@ -80,7 +80,7 @@ from app.schemas.ai import AIModel
 from app.services.agents.base import AdvisoryAgent
 from app.services.agents.guards import AgentFlag
 from app.services.ai import AIService
-from app.services.ai_budget import token_budget
+from app.services.ai_budget import ReservationToken, token_budget
 from app.services.notifications.discord import discord_service
 
 logger = logging.getLogger(__name__)
@@ -525,18 +525,33 @@ class TradeJournalAgent(AdvisoryAgent):
     async def _call_llm(api_key: str, model: AIModel, prompt: str, user_id: uuid.UUID) -> str:
         import anthropic
 
+        # Atomically reserve the per-call ceiling; fails closed on an
+        # exhausted budget, fails open (untracked token) on a Redis outage.
+        # This is the sole enforcement boundary - see app/services/ai_budget.py.
+        reservation: ReservationToken = await token_budget.reserve(user_id, MAX_TOKENS)
+
         client = anthropic.Anthropic(api_key=api_key)
-        message = client.messages.create(
-            model=model.value,
-            max_tokens=MAX_TOKENS,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        # Record billed usage IMMEDIATELY after messages.create() returns,
+        try:
+            message = client.messages.create(
+                model=model.value,
+                max_tokens=MAX_TOKENS,
+                system=_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except Exception:
+            # Nothing was billed - release rather than leave the reservation
+            # charged against today's budget until it self-heals. Re-raised
+            # unchanged; the caller (_compose_summary) falls back to the
+            # fixed-template summary on any LLM failure.
+            await token_budget.release(user_id, reservation)
+            raise
+
+        # Settle billed usage IMMEDIATELY after messages.create() returns,
         # before any response-content parsing: the tokens are already billed
         # by Anthropic at this point regardless of whether the response body
         # parses cleanly, so a malformed/unexpected content shape below must
-        # not also cost the budget counter its record (codex-flagged).
-        await token_budget.record(user_id, _usage_tokens(message))
+        # not also cost the budget counter its settlement (codex-flagged;
+        # preserved from the prior record()-based implementation).
+        await token_budget.settle(user_id, reservation, _usage_tokens(message))
         text = message.content[0].text if message.content else ""
         return text.strip()

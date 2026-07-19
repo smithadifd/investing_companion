@@ -40,7 +40,11 @@ from app.schemas.watchlist import EntryZone
 from app.services.agents.base import AdvisoryAgent
 from app.services.agents.guards import AgentFlag
 from app.services.ai import AIService
-from app.services.ai_budget import AITokenBudget, token_budget as _default_token_budget
+from app.services.ai_budget import (
+    AITokenBudget,
+    ReservationToken,
+    token_budget as _default_token_budget,
+)
 from app.services.context_pack import ContextPackService
 from app.services.data_providers import get_extended_quote_provider
 from app.services.economic_event import EconomicEventService
@@ -599,6 +603,11 @@ async def _compose_brief(
     model = _resolve_model(default_model)
     prompt = _build_prompt(context)
 
+    # Atomically reserve the per-call ceiling; fails closed on an exhausted
+    # budget, fails open (untracked token) on a Redis outage. This is the
+    # sole enforcement boundary - see app/services/ai_budget.py.
+    reservation: ReservationToken = await budget.reserve(user_id, LLM_MAX_TOKENS)
+
     try:
         client = anthropic.Anthropic(api_key=api_key)
         try:
@@ -612,11 +621,15 @@ async def _compose_brief(
             client.close()
     except Exception as exc:
         logger.warning("strategy_brief: LLM call failed: %s", exc)
+        # Nothing was billed - release rather than leave the reservation
+        # charged against today's budget until it self-heals.
+        await budget.release(user_id, reservation)
         return None
 
-    tokens = _usage_tokens(message)
-    if tokens:
-        await budget.record(user_id, tokens)
+    # Settle BEFORE any further response parsing: tokens are already billed
+    # by Anthropic the moment messages.create() returns, before any parsing
+    # of the response content below.
+    await budget.settle(user_id, reservation, _usage_tokens(message))
 
     text = _extract_text(message)
     if text is None:

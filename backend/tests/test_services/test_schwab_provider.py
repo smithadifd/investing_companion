@@ -10,10 +10,13 @@ import pytest
 
 from app.services.cache import cache_service
 from app.services.data_providers.schwab import (
+    SchwabAPIError,
+    SchwabAuthError,
     SchwabProvider,
     _current_extended_session,
     _parse_schwab_quote,
     parse_wrapped_token,
+    redact_account_fields,
     token_age_days,
     token_is_expired,
 )
@@ -166,6 +169,17 @@ class _StubResponse:
 
     def json(self) -> dict:
         return self._payload
+
+
+class _MalformedJsonResponse:
+    """A response with a 200 status whose .json() raises - AsyncMock can't
+    model this cleanly since it would also make .json() itself async."""
+
+    def __init__(self, status_code: int = 200):
+        self.status_code = status_code
+
+    def json(self):
+        raise ValueError("not json")
 
 
 @pytest.fixture
@@ -351,3 +365,352 @@ class TestSchwabProviderClose:
     async def test_aclose_without_client_is_noop(self):
         provider = _provider(AsyncMock())
         await provider.aclose()  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# redact_account_fields
+# ---------------------------------------------------------------------------
+class TestRedactAccountFields:
+    def test_strips_account_number_from_dict(self):
+        payload = {"accountNumber": "12345678", "type": "MARGIN"}
+        assert redact_account_fields(payload) == {"type": "MARGIN"}
+
+    def test_strips_account_id_from_dict(self):
+        payload = {"accountId": "12345678", "positions": []}
+        assert redact_account_fields(payload) == {"positions": []}
+
+    def test_recurses_into_nested_dicts_and_lists(self):
+        payload = {
+            "securitiesAccount": {
+                "accountNumber": "99999999",
+                "positions": [
+                    {"symbol": "AAA", "accountNumber": "99999999"},
+                    {"symbol": "BBB"},
+                ],
+            }
+        }
+        redacted = redact_account_fields(payload)
+        assert "accountNumber" not in redacted["securitiesAccount"]
+        assert redacted["securitiesAccount"]["positions"] == [
+            {"symbol": "AAA"},
+            {"symbol": "BBB"},
+        ]
+
+    def test_leaves_other_fields_and_scalars_untouched(self):
+        assert redact_account_fields("plain string") == "plain string"
+        assert redact_account_fields(42) == 42
+        assert redact_account_fields(None) is None
+        assert redact_account_fields([1, 2, 3]) == [1, 2, 3]
+
+
+# ---------------------------------------------------------------------------
+# Synthetic Schwab accounts/transactions fixtures (100% invented values -
+# no real brokerage data; shape verified against Schwabdev's published
+# example responses, since Schwab's own API reference requires a developer
+# login and could not be fetched).
+# ---------------------------------------------------------------------------
+def _position_fixture(**overrides) -> dict:
+    position = {
+        "shortQuantity": 0.0,
+        "averagePrice": 150.25,
+        "currentDayProfitLoss": 12.5,
+        "currentDayProfitLossPercentage": 0.5,
+        "longQuantity": 10.0,
+        "settledLongQuantity": 10.0,
+        "settledShortQuantity": 0.0,
+        "instrument": {
+            "assetType": "EQUITY",
+            "cusip": "999999999",
+            "symbol": "SYNT",
+            "netChange": 1.1,
+        },
+        "marketValue": 1550.0,
+        "maintenanceRequirement": 0.0,
+        "averageLongPrice": 150.25,
+        "taxLotAverageLongPrice": 150.25,
+        "longOpenProfitLoss": 47.5,
+        "previousSessionLongQuantity": 10.0,
+        "currentDayCost": 0.0,
+    }
+    position.update(overrides)
+    return position
+
+
+def _account_details_fixture(positions, account_number="XXXX0001") -> dict:
+    return {
+        "securitiesAccount": {
+            "type": "MARGIN",
+            "accountNumber": account_number,
+            "roundTrips": 0,
+            "isDayTrader": False,
+            "isClosingOnlyRestricted": False,
+            "positions": positions,
+        },
+        "aggregatedBalance": {"currentLiquidationValue": 0.0, "liquidationValue": 0.0},
+    }
+
+
+def _transaction_fixture(**overrides) -> dict:
+    transaction = {
+        "activityId": 1000000001,
+        "time": "2026-06-01T14:32:00+0000",
+        "accountNumber": "XXXX0001",
+        "type": "TRADE",
+        "status": "VALID",
+        "subAccount": "MARGIN",
+        "tradeDate": "2026-06-01T14:32:00+0000",
+        "positionId": 5555555,
+        "orderId": 6666666666666,
+        "netAmount": -1502.30,
+        "transferItems": [
+            {
+                "instrument": {
+                    "assetType": "CURRENCY",
+                    "status": "ACTIVE",
+                    "symbol": "CURRENCY_USD",
+                    "description": "USD currency",
+                    "instrumentId": 1,
+                    "closingPrice": 0.0,
+                },
+                "amount": -1502.30,
+                "cost": 1502.30,
+                "feeType": "COMMISSION",
+            },
+            {
+                "instrument": {
+                    "assetType": "EQUITY",
+                    "status": "ACTIVE",
+                    "symbol": "SYNT",
+                    "instrumentId": 88888888,
+                    "closingPrice": 150.23,
+                },
+                "amount": 10.0,
+                "cost": 1502.30,
+                "price": 150.23,
+                "positionEffect": "OPENING",
+            },
+        ],
+    }
+    transaction.update(overrides)
+    return transaction
+
+
+# ---------------------------------------------------------------------------
+# get_account_hashes
+# ---------------------------------------------------------------------------
+class TestGetAccountHashes:
+    async def test_happy_path_returns_hashes_only(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        provider._client.get_account_numbers.return_value = _StubResponse(
+            200,
+            [
+                {"accountNumber": "XXXX0001", "hashValue": "HASH_A"},
+                {"accountNumber": "XXXX0002", "hashValue": "HASH_B"},
+            ],
+        )
+
+        hashes = await provider.get_account_hashes()
+        assert hashes == ["HASH_A", "HASH_B"]
+
+    async def test_auth_error_on_401(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        provider._client.get_account_numbers.return_value = _StubResponse(401, {})
+
+        with pytest.raises(SchwabAuthError):
+            await provider.get_account_hashes()
+
+    async def test_api_error_on_non_200(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        provider._client.get_account_numbers.return_value = _StubResponse(500, {})
+
+        with pytest.raises(SchwabAPIError):
+            await provider.get_account_hashes()
+
+    async def test_api_error_on_unexpected_shape(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        provider._client.get_account_numbers.return_value = _StubResponse(200, {})
+
+        with pytest.raises(SchwabAPIError):
+            await provider.get_account_hashes()
+
+    async def test_api_error_on_missing_hash_value(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        provider._client.get_account_numbers.return_value = _StubResponse(
+            200, [{"accountNumber": "XXXX0001"}]
+        )
+
+        with pytest.raises(SchwabAPIError):
+            await provider.get_account_hashes()
+
+    async def test_api_error_on_client_exception(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        provider._client.get_account_numbers.side_effect = RuntimeError("network down")
+
+        with pytest.raises(SchwabAPIError):
+            await provider.get_account_hashes()
+
+
+# ---------------------------------------------------------------------------
+# get_positions
+# ---------------------------------------------------------------------------
+class TestGetPositions:
+    async def test_happy_path_returns_position_list(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        positions = [_position_fixture(), _position_fixture(instrument={
+            "assetType": "EQUITY", "cusip": "888888888", "symbol": "OTHR",
+        })]
+        provider._client.get_account.return_value = _StubResponse(
+            200, _account_details_fixture(positions)
+        )
+
+        result = await provider.get_positions("HASH_A")
+        assert len(result) == 2
+        assert result[0]["instrument"]["symbol"] == "SYNT"
+
+    async def test_account_number_never_reaches_caller(self, no_cache):
+        """Defensive: even if a position dict were contaminated with an
+        accountNumber (not how Schwab's real response is shaped, but
+        defense-in-depth), it must never survive get_positions."""
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        contaminated = _position_fixture(accountNumber="XXXX0001")
+        provider._client.get_account.return_value = _StubResponse(
+            200, _account_details_fixture([contaminated])
+        )
+
+        result = await provider.get_positions("HASH_A")
+        assert "accountNumber" not in result[0]
+
+    async def test_no_positions_field_returns_empty_list(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        provider._client.get_account.return_value = _StubResponse(
+            200, {"securitiesAccount": {"type": "MARGIN", "accountNumber": "X"}}
+        )
+
+        assert await provider.get_positions("HASH_A") == []
+
+    async def test_auth_error_on_403(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        provider._client.get_account.return_value = _StubResponse(403, {})
+
+        with pytest.raises(SchwabAuthError):
+            await provider.get_positions("HASH_A")
+
+    async def test_api_error_on_non_200(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        provider._client.get_account.return_value = _StubResponse(500, {})
+
+        with pytest.raises(SchwabAPIError):
+            await provider.get_positions("HASH_A")
+
+    async def test_api_error_on_malformed_json(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        provider._client.get_account.return_value = _MalformedJsonResponse()
+
+        with pytest.raises(SchwabAPIError):
+            await provider.get_positions("HASH_A")
+
+    async def test_api_error_when_positions_field_not_a_list(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        provider._client.get_account.return_value = _StubResponse(
+            200,
+            {
+                "securitiesAccount": {
+                    "type": "MARGIN",
+                    "accountNumber": "X",
+                    "positions": "not-a-list",
+                }
+            },
+        )
+
+        with pytest.raises(SchwabAPIError):
+            await provider.get_positions("HASH_A")
+
+    async def test_api_error_on_client_exception(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        provider._client.get_account.side_effect = RuntimeError("boom")
+
+        with pytest.raises(SchwabAPIError):
+            await provider.get_positions("HASH_A")
+
+
+# ---------------------------------------------------------------------------
+# get_transactions
+# ---------------------------------------------------------------------------
+class TestGetTransactionsRaw:
+    async def test_happy_path_strips_account_number(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        provider._client.get_transactions.return_value = _StubResponse(
+            200, [_transaction_fixture(), _transaction_fixture(activityId=2)]
+        )
+
+        result = await provider.get_transactions(
+            "HASH_A", datetime(2026, 6, 1), datetime(2026, 6, 30)
+        )
+        assert len(result) == 2
+        for txn in result:
+            assert "accountNumber" not in txn
+
+    async def test_auth_error_on_401(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        provider._client.get_transactions.return_value = _StubResponse(401, [])
+
+        with pytest.raises(SchwabAuthError):
+            await provider.get_transactions(
+                "HASH_A", datetime(2026, 6, 1), datetime(2026, 6, 30)
+            )
+
+    async def test_api_error_on_non_200(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        provider._client.get_transactions.return_value = _StubResponse(500, [])
+
+        with pytest.raises(SchwabAPIError):
+            await provider.get_transactions(
+                "HASH_A", datetime(2026, 6, 1), datetime(2026, 6, 30)
+            )
+
+    async def test_api_error_on_unexpected_shape(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        provider._client.get_transactions.return_value = _StubResponse(200, {})
+
+        with pytest.raises(SchwabAPIError):
+            await provider.get_transactions(
+                "HASH_A", datetime(2026, 6, 1), datetime(2026, 6, 30)
+            )
+
+    async def test_api_error_on_malformed_json(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        provider._client.get_transactions.return_value = _MalformedJsonResponse()
+
+        with pytest.raises(SchwabAPIError):
+            await provider.get_transactions(
+                "HASH_A", datetime(2026, 6, 1), datetime(2026, 6, 30)
+            )
+
+    async def test_api_error_on_client_exception(self, no_cache):
+        provider = _provider(AsyncMock())
+        provider._client = AsyncMock()
+        provider._client.get_transactions.side_effect = RuntimeError("boom")
+
+        with pytest.raises(SchwabAPIError):
+            await provider.get_transactions(
+                "HASH_A", datetime(2026, 6, 1), datetime(2026, 6, 30)
+            )

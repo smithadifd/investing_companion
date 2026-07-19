@@ -8,6 +8,13 @@ from app.db.models.alert import (
     AlertDeliveryStatus,
     AlertHistory,
 )
+from app.db.models.broker_import import (
+    BrokerImportRun,
+    ImportedPosition,
+    ImportedTransaction,
+    ImportKind,
+    ImportStatus,
+)
 from app.db.models.economic_event import (
     EconomicEvent,
     EventImportance,
@@ -37,6 +44,7 @@ __all__ = [
     "AlertDelivery",
     "AlertDeliveryStatus",
     "AlertHistory",
+    "BrokerImportRun",
     "EconomicEvent",
     "EventImportance",
     "EventSource",
@@ -44,6 +52,10 @@ __all__ = [
     "Equity",
     "EquityFundamentals",
     "HandoffLog",
+    "ImportedPosition",
+    "ImportedTransaction",
+    "ImportKind",
+    "ImportStatus",
     "Lesson",
     "NewsItem",
     "PriceHistory",

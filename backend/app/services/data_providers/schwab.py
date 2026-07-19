@@ -52,6 +52,47 @@ _REGULAR_END = dt_time(16, 0)
 _POST_END = dt_time(20, 0)
 
 
+class SchwabAuthError(Exception):
+    """Schwab rejected a request as unauthenticated/unauthorized (expired or
+    revoked token). Distinct from ``SchwabAPIError`` so ingestion callers can
+    route this straight to an Andrew re-auth prompt instead of retrying."""
+
+
+class SchwabAPIError(Exception):
+    """An accounts/positions/transactions call failed in a way that is not
+    an auth problem: HTTP error, malformed payload, network error, or an
+    unexpected response shape. Unlike ``get_extended_quote``, imported
+    holdings/transactions have no safe same-shape fallback - callers must
+    fail closed (never silently drop rows or partially import)."""
+
+
+def redact_account_fields(payload):
+    """Recursively strip Schwab's plaintext ``accountNumber``/``accountId``
+    from a parsed JSON payload (dict, list, or scalar - returns as-is for
+    scalars).
+
+    Schwab's accounts and transactions endpoints return the real account
+    number in the response BODY even when the request used the opaque
+    account hash (the hash only replaces the number in the URL - see
+    Schwabdev's documented example responses, since Schwab's own API
+    reference is not publicly readable without a developer account). That
+    plaintext number must never reach our DB, logs, exceptions, or fixtures.
+    This is the one place that boundary is enforced: every
+    ``SchwabProvider`` method that returns accounts/positions/transactions
+    data applies this immediately after parsing the response, before the
+    payload is returned to any caller.
+    """
+    if isinstance(payload, dict):
+        return {
+            key: redact_account_fields(value)
+            for key, value in payload.items()
+            if key not in ("accountNumber", "accountId")
+        }
+    if isinstance(payload, list):
+        return [redact_account_fields(item) for item in payload]
+    return payload
+
+
 def is_schwab_configured() -> bool:
     """True when the server has Schwab app credentials + callback URL set."""
     return bool(
@@ -334,3 +375,164 @@ class SchwabProvider:
             logger.warning(f"Cache write error for Schwab quote {symbol}: {e}")
 
         return quote
+
+    # -- accounts: positions / transactions (T2 sub-PR 1/3) -------------------
+    #
+    # Unlike get_extended_quote above, these have no safe same-shape
+    # fallback (there is no "Yahoo for your brokerage holdings") - every
+    # failure path here raises SchwabAuthError/SchwabAPIError instead of
+    # degrading silently. Never cache these: positions/transactions must
+    # always reflect the pull that just happened, not a stale quote-style
+    # TTL (see EXTENDED_QUOTE_CACHE_TTL above, which deliberately does not
+    # apply here).
+    #
+    # Pinned to schwab-py>=1.5.1's async client (schwab.client.asynchronous):
+    #   client.get_account_numbers() -> Response, body: list[{accountNumber,
+    #       hashValue}] (schwab.client.base.BaseClient.get_account_numbers)
+    #   client.get_account(account_hash, fields=[Client.Account.Fields.POSITIONS])
+    #       -> Response, body: {"securitiesAccount": {..., "positions": [...]}}
+    #       (BaseClient.get_account / BaseClient.Account.Fields)
+    #   client.get_transactions(account_hash, start_date=, end_date=,
+    #       transaction_types=) -> Response, body: list[transaction dict]
+    #       (BaseClient.get_transactions / BaseClient.Transactions.TransactionType)
+    # Response objects are httpx-flavored (``.status_code`` / ``.json()``),
+    # matching the get_quote convention used above.
+
+    async def get_account_hashes(self) -> list[str]:
+        """Schwab's opaque per-account hash for every account linked to this
+        token. The real account numbers in the response are discarded
+        immediately - only hashes are ever returned."""
+        try:
+            client = self._get_client()
+            response = await client.get_account_numbers()
+        except Exception as e:
+            raise SchwabAPIError(
+                f"Schwab get_account_numbers failed: {type(e).__name__}"
+            ) from None
+        finally:
+            await self._persist_refreshed_token()
+
+        if response.status_code in (401, 403):
+            raise SchwabAuthError(
+                "Schwab rejected get_account_numbers (token expired or revoked)"
+            )
+        if response.status_code != 200:
+            raise SchwabAPIError(
+                f"Schwab get_account_numbers returned HTTP {response.status_code}"
+            )
+
+        try:
+            payload = response.json()
+        except Exception:
+            raise SchwabAPIError(
+                "Schwab get_account_numbers returned malformed JSON"
+            ) from None
+
+        if not isinstance(payload, list):
+            raise SchwabAPIError(
+                "Schwab get_account_numbers returned an unexpected shape"
+            )
+
+        hashes: list[str] = []
+        for entry in payload:
+            hash_value = entry.get("hashValue") if isinstance(entry, dict) else None
+            if not hash_value:
+                raise SchwabAPIError(
+                    "Schwab get_account_numbers entry missing hashValue"
+                )
+            hashes.append(hash_value)
+        return hashes
+
+    async def get_positions(self, account_hash: str) -> list[dict]:
+        """Current positions for one account (Schwab's ``positions`` field),
+        with the plaintext account number stripped from the response before
+        it is returned."""
+        try:
+            client = self._get_client()
+            response = await client.get_account(
+                account_hash, fields=[client.Account.Fields.POSITIONS]
+            )
+        except Exception as e:
+            raise SchwabAPIError(
+                f"Schwab get_account failed: {type(e).__name__}"
+            ) from None
+        finally:
+            await self._persist_refreshed_token()
+
+        if response.status_code in (401, 403):
+            raise SchwabAuthError(
+                "Schwab rejected get_account (token expired or revoked)"
+            )
+        if response.status_code != 200:
+            raise SchwabAPIError(
+                f"Schwab get_account returned HTTP {response.status_code}"
+            )
+
+        try:
+            payload = response.json()
+        except Exception:
+            raise SchwabAPIError("Schwab get_account returned malformed JSON") from None
+
+        payload = redact_account_fields(payload)
+        securities_account = (payload or {}).get("securitiesAccount") or {}
+        positions = securities_account.get("positions")
+        if positions is None:
+            return []
+        if not isinstance(positions, list):
+            raise SchwabAPIError("Schwab get_account 'positions' field was not a list")
+        return positions
+
+    async def get_transactions(
+        self,
+        account_hash: str,
+        start_date: datetime,
+        end_date: datetime,
+        transaction_types: Optional[list] = None,
+    ) -> list[dict]:
+        """Raw transactions for one account in the given date range, with
+        the plaintext account number stripped from every entry. Schwab's own
+        boundary-inclusivity semantics for start_date/end_date aren't
+        documented publicly; treat the range as approximate at the edges.
+
+        Schwab caps a single call's window at 60 days (schwab-py's own
+        default lookback when ``start_date`` is omitted) and exposes no
+        cursor/next-page token - a caller needing a wider range must chunk
+        into repeated calls (see ``app.services.schwab_ingestion``, which
+        does that chunking; this method always makes exactly one call).
+        """
+        try:
+            client = self._get_client()
+            response = await client.get_transactions(
+                account_hash,
+                start_date=start_date,
+                end_date=end_date,
+                transaction_types=transaction_types,
+            )
+        except Exception as e:
+            raise SchwabAPIError(
+                f"Schwab get_transactions failed: {type(e).__name__}"
+            ) from None
+        finally:
+            await self._persist_refreshed_token()
+
+        if response.status_code in (401, 403):
+            raise SchwabAuthError(
+                "Schwab rejected get_transactions (token expired or revoked)"
+            )
+        if response.status_code != 200:
+            raise SchwabAPIError(
+                f"Schwab get_transactions returned HTTP {response.status_code}"
+            )
+
+        try:
+            payload = response.json()
+        except Exception:
+            raise SchwabAPIError(
+                "Schwab get_transactions returned malformed JSON"
+            ) from None
+
+        if not isinstance(payload, list):
+            raise SchwabAPIError(
+                "Schwab get_transactions returned an unexpected shape"
+            )
+        return redact_account_fields(payload)

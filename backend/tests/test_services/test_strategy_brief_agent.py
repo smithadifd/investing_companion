@@ -29,6 +29,7 @@ from sqlalchemy import select
 from app.db.models.strategy_signal import StrategySignal
 from app.schemas.watchlist import EntryZone
 from app.services.agents import strategy_brief as sb
+from app.services.ai_budget import estimate_request_tokens
 from tests.factories import create_test_user
 
 # ---------------------------------------------------------------------------
@@ -522,7 +523,14 @@ async def test_compose_brief_records_tokens_on_success(monkeypatch):
         text = await sb._compose_brief(MagicMock(), uid, "sk-test", _empty_context(), budget=budget)
 
     assert text == "**Daily Strategy Brief**\n- Sit tight."
-    assert budget.reserved == [(uid, sb.LLM_MAX_TOKENS)]
+    # Reserve = conservative input estimate over the REAL prompt strings +
+    # the output ceiling (never bare max_tokens - the systematic
+    # input-omission bias codex flagged).
+    expected_reserve = (
+        estimate_request_tokens(sb.SYSTEM_PROMPT, sb._build_prompt(_empty_context()))
+        + sb.LLM_MAX_TOKENS
+    )
+    assert budget.reserved == [(uid, expected_reserve)]
     assert budget.settled == [(uid, 150)]
 
 

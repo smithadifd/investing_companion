@@ -27,6 +27,7 @@ from app.services.ai_budget import (
     BudgetExceededError,
     ReservationMismatchError,
     ReservationToken,
+    estimate_request_tokens,
 )
 
 
@@ -413,3 +414,167 @@ def test_reservation_token_repr_omits_id_and_who():
     rendered = repr(token)
     assert "super-secret-id" not in rendered
     assert "user-42" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# estimate_request_tokens - the shared input-estimate helper (codex M3)
+# ---------------------------------------------------------------------------
+def test_estimate_request_tokens_rule_is_total_chars_div_3():
+    assert estimate_request_tokens("a" * 300) == 100
+    # Multiple parts are summed before dividing.
+    assert estimate_request_tokens("a" * 100, "b" * 200) == 100
+    # Floor division.
+    assert estimate_request_tokens("abcd") == 1
+    assert estimate_request_tokens("ab") == 0
+
+
+def test_estimate_request_tokens_skips_empty_and_none_parts():
+    assert estimate_request_tokens(None, "", "a" * 30, None) == 10
+    assert estimate_request_tokens() == 0
+    assert estimate_request_tokens(None, None) == 0
+
+
+def test_estimate_request_tokens_overestimates_typical_english():
+    """The divisor (3) must sit BELOW the ~4 chars/token English average so
+    the estimate errs high (a conservative reservation), never low."""
+    text = "The quick brown fox jumps over the lazy dog. " * 20
+    # ~4 chars/token would say len//4; the helper must estimate at least that.
+    assert estimate_request_tokens(text) > len(text) // 4
+
+
+# ---------------------------------------------------------------------------
+# Reservations cover input + output (codex M3): a call whose input estimate
+# + max_tokens exceeds the remaining budget is REJECTED where bare
+# max_tokens alone would have passed.
+# ---------------------------------------------------------------------------
+async def test_analyze_rejected_when_input_estimate_pushes_over_remaining(
+    real_redis, monkeypatch
+):
+    """End-to-end through the real AIService.analyze() against real Redis:
+    the remaining budget fits MAX_TOKENS alone, but not the conservative
+    input estimate on top - the call must be rejected up front (no LLM call,
+    no token spend). Under the pre-fix behavior (reserve = bare max_tokens)
+    this call would have been accepted and then settled above the ceiling."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.schemas.ai import AIAnalysisRequest, AISettingsResponse, AnalysisType
+    from app.services.ai import MAX_TOKENS, AIService
+
+    budget = _budget(real_redis)
+    uid = uuid.uuid4()
+
+    # Long prompt -> a real, non-trivial input estimate.
+    user_prompt = "analyze this watchlist " * 200
+    system_stub = "sys"
+    input_estimate = estimate_request_tokens(system_stub, user_prompt)
+    assert input_estimate > 0
+
+    # Remaining budget: fits MAX_TOKENS alone with room to spare, but NOT
+    # input_estimate + MAX_TOKENS.
+    limit = MAX_TOKENS + input_estimate // 2
+    monkeypatch.setattr(settings, "AI_DAILY_TOKEN_BUDGET", limit)
+
+    # Empirically prove "max_tokens alone would have passed": a bare
+    # MAX_TOKENS reservation succeeds against this remaining budget...
+    probe = await budget.reserve(uid, MAX_TOKENS)
+    await budget.release(uid, probe)
+    assert await budget.used(uid) == 0
+
+    # ...but the real analyze() call - which must reserve input estimate +
+    # MAX_TOKENS - is rejected before any API/token spend.
+    class _FakeCache:
+        @staticmethod
+        def ai_response_key(signature):
+            return f"ai:resp:{signature}"
+
+        async def get(self, key):
+            return None
+
+        async def set(self, key, value, ttl=900):
+            pass
+
+    svc = AIService(MagicMock(), user_id=uid, cache=_FakeCache(), budget=budget)
+    svc.get_api_key = AsyncMock(return_value="sk-test")
+    svc.get_settings = AsyncMock(
+        return_value=AISettingsResponse(
+            has_api_key=True, default_model="claude-sonnet-5", custom_instructions=None
+        )
+    )
+    svc._build_system_prompt = MagicMock(return_value=system_stub)
+    svc._build_prompt_and_context = AsyncMock(return_value=(user_prompt, None))
+    req = AIAnalysisRequest(analysis_type=AnalysisType.GENERAL, prompt="x")
+
+    with patch("anthropic.Anthropic") as ctor:
+        with pytest.raises(BudgetExceededError):
+            await svc.analyze(req)
+        ctor.assert_not_called()  # rejected before any API/token spend
+
+    # The failed reserve mutated nothing.
+    assert await budget.used(uid) == 0
+
+
+# ---------------------------------------------------------------------------
+# Cluster hash-tag key scheme (codex H1): all keys for one user-day share one
+# literal {who:day} hash tag so the multi-key Lua scripts co-slot on a
+# clustered Redis (no CROSSSLOT -> no silent persistent fail-open).
+# ---------------------------------------------------------------------------
+def test_all_key_shapes_share_one_hash_tag_per_user_day():
+    who, day, rid = "user-1", "2026-07-18", "resv-1"
+    keys = [
+        AITokenBudget._day_key(who, day),
+        AITokenBudget._reservation_key(who, day, rid),
+        AITokenBudget._settled_key(who, day, rid),
+    ]
+    tag = f"{{{who}:{day}}}"
+    for key in keys:
+        assert tag in key, key
+        # Exactly one {...} group, and it is the shared tag - Redis hashes
+        # only the FIRST brace group, so a stray earlier/extra brace pair
+        # would silently change the slot.
+        assert key.count("{") == 1 and key.count("}") == 1, key
+
+
+async def test_scripting_error_fails_open_but_logs_at_error_level(
+    real_redis, caplog, monkeypatch
+):
+    """A non-connection Redis failure (e.g. the server rejecting a Lua
+    script - what CROSSSLOT would look like on a cluster) still fails open,
+    but at ERROR level, not the routine WARNING used for a Redis outage - a
+    persistently rejected script silently disabling all enforcement must be
+    loud (codex H1, second half)."""
+    budget = _budget(real_redis)
+    uid = uuid.uuid4()
+
+    from redis import exceptions as redis_exceptions
+
+    class _RejectingScript:
+        async def __call__(self, keys, args):
+            raise redis_exceptions.ResponseError(
+                "CROSSSLOT Keys in request don't hash to the same slot"
+            )
+
+    async def broken_scripts(client):
+        return _RejectingScript(), _RejectingScript()
+
+    monkeypatch.setattr(budget, "_scripts", broken_scripts)
+
+    with caplog.at_level("ERROR"):
+        reservation = await budget.reserve(uid, 10)
+
+    assert reservation.tracked is False  # failed open, request allowed
+    assert any(rec.levelname == "ERROR" for rec in caplog.records)
+
+
+async def test_connection_error_fails_open_at_warning_level(monkeypatch, caplog):
+    """The designed-for outage case stays a WARNING (contrast with the
+    scripting-error test above)."""
+    monkeypatch.setattr(settings, "REDIS_URL", "redis://127.0.0.1:1/0")
+    budget = AITokenBudget()
+    uid = uuid.uuid4()
+
+    with caplog.at_level("WARNING"):
+        reservation = await budget.reserve(uid, 10)
+
+    assert reservation.tracked is False
+    assert any(rec.levelname == "WARNING" for rec in caplog.records)
+    assert not any(rec.levelname == "ERROR" for rec in caplog.records)

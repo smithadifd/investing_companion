@@ -12,9 +12,15 @@ Design contract:
   logged and treated as a no-op (request allowed; see the ``tracked`` flag
   on :class:`ReservationToken`).
 
-Usage is tracked per user per UTC day under ``ai:tokens:{user}:{YYYY-MM-DD}``
+Usage is tracked per user per UTC day under ``ai:tokens:{<user>:<YYYY-MM-DD>}``
 and expires automatically, so no cleanup task is needed for the counter
-itself.
+itself. The literal braces are a Redis Cluster hash tag: every key for one
+user-day (day counter, reservation records, settled markers) embeds the same
+``{<user>:<day>}`` tag, so they all hash to the same slot and the multi-key
+Lua scripts below stay valid on a clustered Redis (without the tag they
+would die with CROSSSLOT — and, worse, die *persistently* into the
+fail-open handler, silently disabling enforcement). Prod is a single
+instance today; the tag costs nothing there and removes the foot-gun.
 
 Atomic reserve-then-settle
 ---------------------------
@@ -43,25 +49,49 @@ the three Tier-1 advisory agents) may spend against the budget now is:
    :meth:`reserve` writes to, it is automatically "reserve-aware": an
    in-flight (unsettled) reservation already counts against ``used()``.
 
-Reservation lifetime and self-healing
---------------------------------------
+Reservation lifetime — precisely
+---------------------------------
 Each reservation also gets its own short-lived Redis record
-(``ai:tokens:resv:{user}:{day}:{id}``, TTL :data:`_RESERVATION_TTL_SECONDS`)
-that :meth:`settle` consults to compute the exact delta. This exists so a
-hard-killed worker (reserved tokens, then crashed before calling
-``settle``) doesn't leave an *unbounded* pile of reservation bookkeeping
-keys in Redis forever — the record self-expires. A **late** ``settle()``
-call (the record has already expired, but the worker eventually got back to
-it) still works: unable to compute an exact delta without the original
-``reserved`` figure, it falls back to a direct ``INCRBY actual`` against the
-day counter and reports the fallback via a WARNING log. This double-counts
-relative to the original estimate in that narrow case (already-reserved
-tokens plus the late actual) — an accepted, documented tradeoff. This
-mechanism is **best-effort accounting, not a financial ledger**: Redis is
-configured ``allkeys-lru`` in this deployment, so under memory pressure any
-of these keys (including the day counter itself) can be evicted early,
-silently resetting a user's counted usage for the day. That is judged
-acceptable for a cost *guard*, not something this module tries to prevent.
+(``ai:tokens:resv:{<user>:<day>}:<id>``, TTL
+:data:`_RESERVATION_TTL_SECONDS`) that :meth:`settle` consults to compute
+the exact delta. Be precise about what that TTL does and does NOT do:
+
+* It expires only the reservation **metadata** (the bookkeeping record), so
+  a hard-killed worker (reserved, then crashed before ``settle``) doesn't
+  leave an unbounded pile of bookkeeping keys in Redis forever.
+* It does **not** reclaim the reserved tokens themselves. The reserve
+  estimate was already ``INCRBY``ed into the day counter at reserve time,
+  and with no ``settle()`` ever arriving, that charge simply **stays on the
+  day counter until the UTC day rolls over** (a new day is a fresh key; the
+  old key expires via its own TTL). The exposure is bounded by the daily
+  reset, not by the 15-minute metadata TTL. An active reclaim sweep (e.g.
+  scanning for expired-metadata reservations and refunding their estimates)
+  is a possible follow-up, deliberately out of scope here.
+
+A **late** ``settle()`` (the metadata record has already expired, but the
+worker eventually got back to it) still works: unable to compute an exact
+delta without the original ``reserved`` figure, it falls back to a direct
+``INCRBY actual`` against the day counter and reports the fallback via a
+WARNING log. This double-counts relative to the original estimate in that
+narrow case (the still-charged reserve estimate plus the late actual) — an
+accepted, documented tradeoff. This mechanism is **best-effort accounting,
+not a financial ledger**: Redis is configured ``allkeys-lru`` in this
+deployment, so under memory pressure any of these keys (including the day
+counter itself) can be evicted early, silently resetting a user's counted
+usage for the day. That is judged acceptable for a cost *guard*, not
+something this module tries to prevent.
+
+Reserve estimates include an input-token component
+---------------------------------------------------
+A reservation covers *both* sides of the bill: callers reserve
+``estimate_request_tokens(<prompt parts>) + max_tokens``, not bare
+``max_tokens``. Settlement charges input + output actuals, so reserving
+only the output ceiling would systematically under-reserve by the input
+size, and concurrently accepted calls could all settle above the ceiling.
+The estimate is deliberately coarse-but-conservative (see
+:func:`estimate_request_tokens`) — the ceiling is approximate by design
+(estimate-based), but the systematic input-omission bias is gone;
+:meth:`settle` still reconciles to the exact billed figure both directions.
 
 Never log a :class:`ReservationToken` in full, or a raw per-user Redis key —
 its ``__repr__`` deliberately omits the user identifier and reservation id.
@@ -76,6 +106,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import redis.asyncio as redis
+from redis import exceptions as redis_exceptions
 
 from app.core.config import settings
 
@@ -85,18 +116,72 @@ logger = logging.getLogger(__name__)
 # settlements.
 _KEY_TTL_SECONDS = 172_800  # 2 days
 
-# A reservation must be settled within this window or its own bookkeeping
-# record self-expires (see the "self-healing" note above). Picked well above
+# A reservation must be settled within this window or its bookkeeping
+# METADATA record self-expires (see "Reservation lifetime — precisely"
+# above: the reserved tokens themselves stay charged to the day counter
+# until the daily rollover; only the metadata expires). Picked well above
 # the longest realistic single LLM call (agents set explicit max_tokens in
 # the low thousands; even a slow completion finishes in well under a
 # minute), so a live, well-behaved call is never at risk of racing its own
-# reservation's TTL.
+# reservation's metadata TTL.
 _RESERVATION_TTL_SECONDS = 900  # 15 minutes
 
 # Bounds how long a duplicate settle() attempt is reliably caught server-side.
 # A double-settle more than this long after the first is treated as an
 # expired-fallback settle instead (best-effort, see module docstring).
 _SETTLED_MARKER_TTL_SECONDS = 900  # 15 minutes
+
+# Conservative chars-per-token divisor for request-side (input) estimates.
+# Typical English tokenizes around ~4 chars/token; dividing by 3 deliberately
+# OVER-estimates the input token count so reservations err on the high side
+# (settle() reconciles down to the exact billed figure afterward). Chosen per
+# the adjudicated review guidance (total chars // 3); not a tokenizer.
+_ESTIMATE_CHARS_PER_TOKEN = 3
+
+
+def estimate_request_tokens(*texts: Optional[str]) -> int:
+    """Conservative input-token estimate for the given prompt strings.
+
+    ``sum(len(text)) // 3`` across all non-empty parts (system prompt, user
+    prompt, ...). Deliberately coarse and deliberately high (typical English
+    runs ~4 chars/token, so //3 overshoots): every reserve() call site adds
+    this to its ``max_tokens`` so the reservation covers BOTH sides of the
+    eventual input+output bill, instead of systematically under-reserving by
+    the input size. Not a tokenizer — the budget ceiling is documented as
+    approximate (estimate-based); settle() reconciles to the exact billed
+    usage in both directions.
+    """
+    total_chars = sum(len(text) for text in texts if text)
+    return total_chars // _ESTIMATE_CHARS_PER_TOKEN
+
+
+def _log_redis_failure(operation: str, exc: Exception) -> None:
+    """Log a fail-open Redis failure at a severity matching its class.
+
+    Connection-shaped failures (Redis down/unreachable/timed out) are the
+    designed-for, self-resolving fail-open case — WARNING, matching the
+    module's historical posture. Anything else (chiefly a ``ResponseError``:
+    the server *rejecting* a Lua script — CROSSSLOT on a cluster, a script
+    bug, a bad reply shape) would fail EVERY subsequent call the same way,
+    persistently disabling enforcement while reading like routine noise, so
+    it logs at ERROR to be loud. Both classes still fail open — the budget
+    is a cost guard, not a security control.
+    """
+    if isinstance(
+        exc,
+        (redis_exceptions.ConnectionError, redis_exceptions.TimeoutError, OSError),
+    ):
+        logger.warning(
+            "AI token budget %s failed, allowing request (fail open): %s", operation, exc
+        )
+    else:
+        logger.error(
+            "AI token budget %s failed with a non-connection error (likely persistent, "
+            "e.g. a rejected Lua script); enforcement is being skipped (fail open) "
+            "and this will repeat until fixed: %s",
+            operation,
+            exc,
+        )
 
 
 class BudgetExceededError(Exception):
@@ -287,17 +372,24 @@ class AITokenBudget:
     def _key(cls, user_id: Optional[uuid.UUID]) -> str:
         return cls._day_key(cls._who(user_id), cls._today())
 
+    # All three key shapes embed the SAME literal-brace ``{<who>:<day>}``
+    # segment — a Redis Cluster hash tag. Only the tagged substring is hashed
+    # for slot assignment, so one user-day's day counter, reservation records,
+    # and settled markers all co-slot, keeping the multi-key Lua scripts valid
+    # on a clustered Redis (no CROSSSLOT). See the module docstring; changing
+    # any of these shapes resets day-counter continuity once at deploy.
+
     @staticmethod
     def _day_key(who: str, day: str) -> str:
-        return f"ai:tokens:{who}:{day}"
+        return f"ai:tokens:{{{who}:{day}}}"
 
     @staticmethod
     def _reservation_key(who: str, day: str, reservation_id: str) -> str:
-        return f"ai:tokens:resv:{who}:{day}:{reservation_id}"
+        return f"ai:tokens:resv:{{{who}:{day}}}:{reservation_id}"
 
     @staticmethod
     def _settled_key(who: str, day: str, reservation_id: str) -> str:
-        return f"ai:tokens:resv:settled:{who}:{day}:{reservation_id}"
+        return f"ai:tokens:resv:settled:{{{who}:{day}}}:{reservation_id}"
 
     async def used(self, user_id: Optional[uuid.UUID]) -> int:
         """Tokens consumed (settled + any outstanding reservation) today.
@@ -313,7 +405,7 @@ class AITokenBudget:
             raw = await client.get(self._key(user_id))
             return int(raw) if raw else 0
         except Exception as exc:  # noqa: BLE001 - infra failure must not block
-            logger.warning("AI token budget read failed, allowing request: %s", exc)
+            _log_redis_failure("read", exc)
             return 0
 
     async def check(self, user_id: Optional[uuid.UUID]) -> None:
@@ -349,8 +441,11 @@ class AITokenBudget:
         False``) rather than blocking the caller — matching the module's
         existing infra-failure posture.
 
-        ``tokens`` should be the caller's per-call reserve estimate (e.g.
-        the ``max_tokens`` passed to the LLM call) — an upper bound, not a
+        ``tokens`` should be the caller's per-call reserve estimate:
+        ``estimate_request_tokens(<prompt parts>) + max_tokens`` — covering
+        BOTH the input and output sides of the eventual bill (settlement
+        charges input + output actuals, so reserving bare ``max_tokens``
+        would systematically under-reserve). An upper-bound estimate, not a
         guess at actual usage; :meth:`settle` reconciles down (or up) to the
         real figure afterward.
         """
@@ -381,7 +476,7 @@ class AITokenBudget:
                 args=[tokens, limit, _KEY_TTL_SECONDS, _RESERVATION_TTL_SECONDS],
             )
         except Exception as exc:  # noqa: BLE001 - infra failure must not block
-            logger.warning("AI token budget reserve failed, allowing request (fail open): %s", exc)
+            _log_redis_failure("reserve", exc)
             return ReservationToken(
                 id=reservation_id, who=who, day=day, reserved=0, tracked=False
             )
@@ -402,9 +497,12 @@ class AITokenBudget:
         Always call this exactly once per reservation obtained from
         :meth:`reserve` — including on failure paths (settle with
         ``actual=0`` to fully release a reservation whose call never billed
-        anything; see :meth:`release`). Skipping it leaves the reservation
-        counted against the day's budget until its own TTL self-heals
-        (:data:`_RESERVATION_TTL_SECONDS`).
+        anything; see :meth:`release`). Skipping it leaves the reserve
+        estimate charged against the day's budget until the UTC day rolls
+        over — the reservation's metadata record expires after
+        :data:`_RESERVATION_TTL_SECONDS`, but that expiry does NOT refund
+        the charge (see "Reservation lifetime — precisely" in the module
+        docstring).
 
         * ``actual`` must be ``>= 0`` (raises :class:`ValueError`) —
           ``actual`` is a token count, never a delta.
@@ -457,7 +555,7 @@ class AITokenBudget:
                 args=[actual, _SETTLED_MARKER_TTL_SECONDS, _KEY_TTL_SECONDS],
             )
         except Exception as exc:  # noqa: BLE001 - never fail the request on settle
-            logger.warning("AI token budget settle failed (fail open): %s", exc)
+            _log_redis_failure("settle", exc)
             return
 
         status = result[0]
@@ -468,7 +566,8 @@ class AITokenBudget:
         elif status == 2:
             logger.warning(
                 "AI token budget: reservation record had already expired "
-                "(unsettled past the %ss self-heal window); recorded %d tokens "
+                "(unsettled past the %ss metadata TTL; the original reserve "
+                "estimate stays charged until day-end); recorded %d tokens "
                 "best-effort against today's counter",
                 _RESERVATION_TTL_SECONDS,
                 actual,

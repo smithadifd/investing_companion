@@ -24,7 +24,7 @@ from app.schemas.ai import (
     WatchlistContext,
     WatchlistHolding,
 )
-from app.services.ai_budget import ReservationToken, token_budget
+from app.services.ai_budget import ReservationToken, estimate_request_tokens, token_budget
 from app.services.cache import cache_service
 from app.services.equity import EquityService
 from app.services.ratio import RatioService
@@ -524,8 +524,15 @@ Please provide analysis across this watchlist addressing the user's question."""
         # Atomically reserve the per-call ceiling against the per-day token
         # budget; fails closed (BudgetExceededError) if this would exceed
         # it. This — not a check-then-record pair — is the sole enforcement
-        # boundary: see app/services/ai_budget.py's module docstring.
-        reservation: ReservationToken = await self._budget.reserve(self.user_id, MAX_TOKENS)
+        # boundary: see app/services/ai_budget.py's module docstring. The
+        # reservation covers both sides of the eventual bill: a conservative
+        # input estimate from the actual request text PLUS the output
+        # ceiling (settlement charges input + output actuals, so reserving
+        # bare max_tokens would systematically under-reserve).
+        reserve_estimate = estimate_request_tokens(system_prompt, user_prompt) + MAX_TOKENS
+        reservation: ReservationToken = await self._budget.reserve(
+            self.user_id, reserve_estimate
+        )
         try:
             client = anthropic.Anthropic(api_key=api_key)
             message = client.messages.create(
@@ -536,7 +543,8 @@ Please provide analysis across this watchlist addressing the user's question."""
             )
         except Exception:
             # Nothing was billed - release the reservation rather than
-            # leaving it charged against today's budget until it self-heals.
+            # leaving its estimate charged against today's budget until the
+            # day rolls over.
             await self._budget.release(self.user_id, reservation)
             raise
 
@@ -591,8 +599,12 @@ Please provide analysis across this watchlist addressing the user's question."""
             return
 
         # Atomically reserve the per-call ceiling; see analyze()'s equivalent
-        # comment and app/services/ai_budget.py's module docstring.
-        reservation: ReservationToken = await self._budget.reserve(self.user_id, MAX_TOKENS)
+        # comment and app/services/ai_budget.py's module docstring. Input
+        # estimate + output ceiling, matching analyze().
+        reserve_estimate = estimate_request_tokens(system_prompt, user_prompt) + MAX_TOKENS
+        reservation: ReservationToken = await self._budget.reserve(
+            self.user_id, reserve_estimate
+        )
         client = anthropic.Anthropic(api_key=api_key)
         chunks: list[str] = []
         final_message = None

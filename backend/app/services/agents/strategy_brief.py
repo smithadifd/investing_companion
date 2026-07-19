@@ -44,6 +44,7 @@ from app.services.ai_budget import (
     AITokenBudget,
     BudgetExceededError,
     ReservationToken,
+    estimate_request_tokens,
     token_budget as _default_token_budget,
 )
 from app.services.context_pack import ContextPackService
@@ -604,9 +605,11 @@ async def _compose_brief(
     model = _resolve_model(default_model)
     prompt = _build_prompt(context)
 
-    # Atomically reserve the per-call ceiling; fails closed on an exhausted
-    # budget, fails open (untracked token) on a Redis outage. This is the
-    # sole enforcement boundary - see app/services/ai_budget.py.
+    # Atomically reserve the per-call ceiling (input estimate + output
+    # ceiling - settlement charges input + output actuals, so reserving
+    # bare max_tokens would systematically under-reserve); fails closed on
+    # an exhausted budget, fails open (untracked token) on a Redis outage.
+    # This is the sole enforcement boundary - see app/services/ai_budget.py.
     #
     # guard() (AdvisoryAgent.guard -> check_agent_preconditions) already ran
     # a non-mutating advisory check earlier in this task, but that check is
@@ -616,8 +619,9 @@ async def _compose_brief(
     # "can't compose a brief right now" condition: log and return None,
     # rather than letting it propagate as an unhandled Celery task error for
     # what is a normal, designed-for race.
+    reserve_estimate = estimate_request_tokens(SYSTEM_PROMPT, prompt) + LLM_MAX_TOKENS
     try:
-        reservation: ReservationToken = await budget.reserve(user_id, LLM_MAX_TOKENS)
+        reservation: ReservationToken = await budget.reserve(user_id, reserve_estimate)
     except BudgetExceededError:
         logger.info(
             "strategy_brief: daily AI token budget exhausted at reserve time "
@@ -638,8 +642,8 @@ async def _compose_brief(
             client.close()
     except Exception as exc:
         logger.warning("strategy_brief: LLM call failed: %s", exc)
-        # Nothing was billed - release rather than leave the reservation
-        # charged against today's budget until it self-heals.
+        # Nothing was billed - release rather than leave the reservation's
+        # estimate charged against today's budget until the day rolls over.
         await budget.release(user_id, reservation)
         return None
 

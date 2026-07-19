@@ -25,7 +25,12 @@ from app.schemas.ai import (
     WatchlistHolding,
 )
 from app.services.ai import MAX_TOKENS, AIService, _usage_tokens
-from app.services.ai_budget import AITokenBudget, BudgetExceededError, ReservationToken
+from app.services.ai_budget import (
+    AITokenBudget,
+    BudgetExceededError,
+    ReservationToken,
+    estimate_request_tokens,
+)
 from app.services.settings import SettingsService
 
 
@@ -127,6 +132,13 @@ def _make_service(cache, budget):
     )
     svc._build_prompt_and_context = AsyncMock(return_value=("PROMPT", "CTX"))
     return svc
+
+
+def _expected_reserve(svc) -> int:
+    """The reserve amount analyze()/analyze_stream() should request for a
+    _make_service()-shaped call: conservative input estimate over the real
+    system prompt + the mocked "PROMPT" user prompt, plus the output ceiling."""
+    return estimate_request_tokens(svc._build_system_prompt(None), "PROMPT") + MAX_TOKENS
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +274,7 @@ async def test_response_cache_hits_on_repeat():
     assert second.cached is True
     assert second.response == "ANALYSIS RESULT"
     # Budget touched exactly once (cache hit both skips reserve() AND settle()).
-    assert budget.reserved == [(svc.user_id, MAX_TOKENS)]
+    assert budget.reserved == [(svc.user_id, _expected_reserve(svc))]
     assert budget.settled == [(svc.user_id, 30)]
 
 
@@ -294,7 +306,7 @@ async def test_analyze_stream_settles_actual_usage_on_success():
         chunks = [c async for c in svc.analyze_stream(req)]
 
     assert chunks == ["Hello", " world"]
-    assert budget.reserved == [(svc.user_id, MAX_TOKENS)]
+    assert budget.reserved == [(svc.user_id, _expected_reserve(svc))]
     assert budget.settled == [(svc.user_id, 40)]  # 15 + 25, the confirmed final usage
 
 
@@ -329,7 +341,7 @@ async def test_analyze_stream_releases_reservation_when_cancelled_mid_stream():
         assert first == "a"
         await gen.aclose()
 
-    assert budget.reserved == [(svc.user_id, MAX_TOKENS)]
+    assert budget.reserved == [(svc.user_id, _expected_reserve(svc))]
     assert budget.settled == [(svc.user_id, 0)]  # released, not charged
 
 
@@ -349,7 +361,7 @@ async def test_analyze_stream_releases_reservation_on_llm_exception():
             async for _ in svc.analyze_stream(req):
                 pass
 
-    assert budget.reserved == [(svc.user_id, MAX_TOKENS)]
+    assert budget.reserved == [(svc.user_id, _expected_reserve(svc))]
     assert budget.settled == [(svc.user_id, 0)]  # released, not charged
 
 

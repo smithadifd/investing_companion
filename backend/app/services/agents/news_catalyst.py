@@ -68,7 +68,12 @@ from app.db.models.news_item import NewsItem
 from app.schemas.ai import AIModel
 from app.services.agents.base import AdvisoryAgent
 from app.services.ai import AIService
-from app.services.ai_budget import BudgetExceededError, ReservationToken, token_budget
+from app.services.ai_budget import (
+    BudgetExceededError,
+    ReservationToken,
+    estimate_request_tokens,
+    token_budget,
+)
 from app.services.data_providers.finnhub import FinnhubNewsProvider
 from app.services.watchlist import WatchlistService
 
@@ -518,9 +523,12 @@ class NewsCatalystAgent(AdvisoryAgent):
         model = _resolve_scoring_model(ai_settings.default_model)
         prompt = self._build_scoring_prompt(batch)
 
-        # Atomically reserve the per-call ceiling; fails closed on an
-        # exhausted budget, fails open (untracked token) on a Redis outage.
-        # This is the sole enforcement boundary - see app/services/ai_budget.py.
+        # Atomically reserve the per-call ceiling (input estimate + output
+        # ceiling - settlement charges input + output actuals, so reserving
+        # bare max_tokens would systematically under-reserve); fails closed
+        # on an exhausted budget, fails open (untracked token) on a Redis
+        # outage. This is the sole enforcement boundary - see
+        # app/services/ai_budget.py.
         #
         # guard()'s earlier advisory check (check_agent_preconditions) is
         # deliberately not paired with this reserve() call (see
@@ -530,8 +538,9 @@ class NewsCatalystAgent(AdvisoryAgent):
         # this batch unscored (it's picked up again next run - see
         # execute()'s re-query comment) rather than letting it propagate as
         # an unhandled Celery task error for a normal, designed-for race.
+        reserve_estimate = estimate_request_tokens(_SCORING_SYSTEM_PROMPT, prompt) + LLM_MAX_TOKENS
         try:
-            reservation: ReservationToken = await token_budget.reserve(user_id, LLM_MAX_TOKENS)
+            reservation: ReservationToken = await token_budget.reserve(user_id, reserve_estimate)
         except BudgetExceededError:
             logger.info(
                 "news_catalyst: daily AI token budget exhausted at reserve time "
@@ -550,8 +559,8 @@ class NewsCatalystAgent(AdvisoryAgent):
             )
         except Exception as exc:  # noqa: BLE001 - any LLM failure degrades quietly
             logger.warning("news_catalyst: LLM scoring call failed, leaving items unscored: %s", exc)
-            # Nothing was billed - release rather than leave the reservation
-            # charged against today's budget until it self-heals.
+            # Nothing was billed - release rather than leave the estimate
+            # charged against today's budget until the day rolls over.
             await token_budget.release(user_id, reservation)
             return
 

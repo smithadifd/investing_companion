@@ -348,8 +348,15 @@ async def _build_eod_catalysts(session, watchlist_symbols: list[str]):
     catalyst_symbols = list(dict.fromkeys(watchlist_symbols))
     try:
         catalysts = await get_catalyst_lines(session, catalyst_symbols)
-    except Exception as e:
-        logger.warning(f"Failed to build EOD catalysts section: {e}")
+    except Exception:
+        # Broad on purpose - the wrap must still send even if this advisory
+        # read blows up (same breadth as the morning task's catalyst step).
+        # But unlike morning's quiet warning, log the FULL traceback at
+        # ERROR level: a programming defect (TypeError/AttributeError) in
+        # this path must be loud in the logs instead of masquerading as
+        # ordinary catalyst unavailability, while the section still
+        # degrades gracefully via unavailable_sections.
+        logger.exception("Failed to build EOD catalysts section")
         unavailable_sections.append("catalysts")
     return catalysts, unavailable_sections
 

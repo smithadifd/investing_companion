@@ -520,11 +520,16 @@ def format_eod_wrap(data: EODData) -> str:
     shown_mover_symbols: set[str] = set()
 
     def _mover_line(arrow: str, m: dict) -> str:
-        """One mover line; catalyst suffix at the symbol's first occurrence."""
+        """One mover line; catalyst suffix at the symbol's first occurrence.
+
+        Blank/whitespace-only catalyst text is treated as absent (defensive:
+        get_catalyst_lines strips its output, but the formatter must not
+        trust that) - never a dangling " — " suffix.
+        """
         line = f"{arrow} {m['symbol']} {_fmt_pct(m['change_percent'])}"
         if m["symbol"] not in shown_mover_symbols:
             catalyst = (data.catalysts or {}).get(m["symbol"])
-            if catalyst:
+            if catalyst and catalyst.strip():
                 line += f" — {catalyst}"
         shown_mover_symbols.add(m["symbol"])
         return line
@@ -571,10 +576,12 @@ def format_eod_wrap(data: EODData) -> str:
     catalysts_section = ""
     try:
         if data.catalysts:
+            # Same blank-guard as the mover suffix: an empty/whitespace-only
+            # catalyst line must not render a bare "• SYM: " entry.
             extra = [
                 (symbol, line)
                 for symbol, line in data.catalysts.items()
-                if symbol not in shown_mover_symbols
+                if symbol not in shown_mover_symbols and line and line.strip()
             ]
             if extra:
                 lines = ["CATALYSTS"]

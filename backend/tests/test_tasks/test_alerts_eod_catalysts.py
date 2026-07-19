@@ -12,6 +12,7 @@ tests/test_services/test_briefing_formatters.py::TestEODWrapCatalysts;
 tests/test_services/test_catalysts.py.
 """
 
+import logging
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
@@ -57,6 +58,33 @@ async def test_query_failure_is_caught_and_marks_catalysts_unavailable(monkeypat
 
     assert catalysts == {}
     assert unavailable == ["catalysts"]
+
+
+async def test_programming_defect_logs_traceback_but_wrap_still_degrades(
+    monkeypatch, caplog
+):
+    """The broad catch is deliberate (the wrap must still send), but a code
+    defect (TypeError, not an infra failure) must be LOUD: logged via
+    logger.exception - full traceback at ERROR level - never a quiet
+    warning that reads as ordinary catalyst unavailability. The section
+    still degrades gracefully (empty catalysts + unavailable_sections)."""
+    monkeypatch.setattr(
+        "app.services.catalysts.get_catalyst_lines",
+        AsyncMock(side_effect=TypeError("'NoneType' object is not iterable")),
+    )
+
+    with caplog.at_level(logging.ERROR, logger="app.tasks.alerts"):
+        catalysts, unavailable = await _build_eod_catalysts(MagicMock(), ["UUUU"])
+
+    assert catalysts == {}
+    assert unavailable == ["catalysts"]
+    own_records = [r for r in caplog.records if r.name == "app.tasks.alerts"]
+    assert any(
+        r.levelno == logging.ERROR
+        and r.exc_info is not None
+        and r.exc_info[0] is TypeError
+        for r in own_records
+    ), "expected an ERROR record carrying the TypeError traceback (logger.exception)"
 
 
 async def test_successful_empty_result_does_not_mark_unavailable(monkeypatch):

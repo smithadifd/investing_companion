@@ -436,6 +436,24 @@ class TestEODWrapCatalysts:
         assert "CATALYSTS" not in message
         assert "Some data unavailable" not in message
 
+    def test_blank_catalyst_text_never_renders(self, monkeypatch):
+        """Empty/whitespace-only catalyst text is treated as absent on BOTH
+        paths - no dangling mover suffix (UUUU is a big mover here) and no
+        bare '• SYM: ' standalone entry (EQT is a non-mover) - so the output
+        is byte-identical to having no catalysts at all. Defensive:
+        get_catalyst_lines strips its output, but the formatter must not
+        trust that."""
+        monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
+
+        kwargs = self._base_kwargs()
+        kwargs["catalysts"] = {"UUUU": "   ", "EQT": ""}
+        message = format_eod_wrap(EODData(**kwargs))
+
+        assert message == self._GOLDEN_NO_CATALYSTS
+        assert "CATALYSTS" not in message
+        assert "• EQT:" not in message
+        assert "— " not in message.split("BIG MOVERS", 1)[1].split("\n\n", 1)[0]
+
     def test_truncation_drops_catalysts_before_mover_sections(self, monkeypatch):
         """When dropping TOMORROW alone isn't enough (catalyst text is
         long), CATALYSTS drops next - core price/mover data survives before

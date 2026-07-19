@@ -405,6 +405,15 @@ class WatchlistService:
 
         await self.db.commit()
 
+        # watchlist.items was already loaded (empty, via selectin) by the
+        # db.refresh() above, before any items existed. With
+        # expire_on_commit=False the commit above doesn't invalidate that
+        # cached collection, and get_watchlist() below resolves the same
+        # identity-mapped instance - so without this, it would rebuild the
+        # response from the stale, empty items list. Expire just the
+        # relationship so get_watchlist()'s selectinload re-fetches it.
+        self.db.expire(watchlist, ["items"])
+
         return await self.get_watchlist(watchlist.id, include_quotes=False)
 
     async def _unset_default_watchlist(self) -> None:

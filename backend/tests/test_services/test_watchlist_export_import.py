@@ -240,3 +240,33 @@ class TestImportSchemaCatalystTagsValidation:
     def test_absent_catalyst_tags_stays_none(self):
         item = WatchlistImportItem(symbol="AAA")
         assert item.catalyst_tags is None
+
+
+class TestImportReturnValueReflectsItemsImmediately:
+    """import_watchlist()'s own return value must include the items it just
+    wrote - a caller (e.g. the API endpoint) that trusts the immediate
+    response shouldn't have to re-fetch the watchlist to see them.
+
+    Regression test for the identity-map staleness bug: ``db.refresh(watchlist)``
+    at import time eagerly (and correctly, at that moment) loads the empty
+    ``items`` relationship before any items exist; with ``expire_on_commit=False``,
+    the later ``commit()`` doesn't invalidate that cached empty collection, so
+    the ``get_watchlist()`` call at the end of ``import_watchlist()`` returns
+    the same stale, empty ``items`` list even though the items were written.
+    """
+
+    async def test_import_watchlist_return_includes_written_items(
+        self, db: AsyncSession
+    ):
+        await create_test_equity(db, symbol="IMPRT1")
+        service = WatchlistService(db)
+
+        result = await service.import_watchlist(
+            WatchlistImport(
+                name="Immediate Return Check",
+                items=[WatchlistImportItem(symbol="IMPRT1")],
+            )
+        )
+
+        assert len(result.items) == 1
+        assert result.items[0].equity.symbol == "IMPRT1"

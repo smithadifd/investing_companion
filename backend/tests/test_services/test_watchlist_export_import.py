@@ -3,18 +3,6 @@
 Mirrors the entry_zones round-trip fix (PR #207) for the two fields that
 were still silently dropped by WatchlistExportItem/WatchlistImportItem and
 their export_watchlist/import_watchlist service methods.
-
-Note on the read-back pattern: ``import_watchlist()``'s own immediate return
-value cannot be trusted for asserting on ``items`` in a test session - a
-pre-existing identity-map staleness issue (unrelated to this fix, present in
-the original code before any of these changes) means the ``Watchlist.items``
-collection gets cached as empty by the ``db.refresh(watchlist)`` call earlier
-in the same method, and a later `get_watchlist()` in the *same* session
-returns that same stale, empty collection rather than re-querying. Calling
-``db.expire_all()`` before reading back (as done here) forces a fresh load
-and is exactly what a second request against a fresh DB session would see.
-See the PR description / builder report for the full writeup - it's flagged
-as an out-of-scope escalation, not fixed here.
 """
 
 import pytest
@@ -34,17 +22,6 @@ from tests.factories import (
     create_test_watchlist,
     create_test_watchlist_item,
 )
-
-
-async def _import_and_reload(db: AsyncSession, service: WatchlistService, data: WatchlistImport):
-    """Import, then force a fresh read-back within the same session.
-
-    See module docstring: import_watchlist()'s own return can't be trusted
-    for `.items` in-session due to a pre-existing, unrelated staleness bug.
-    """
-    result = await service.import_watchlist(data)
-    db.expire_all()
-    return await service.get_watchlist(result.id, include_quotes=False)
 
 
 class TestExportIncludesBothFields:
@@ -92,9 +69,7 @@ class TestImportSetsBothFields:
         await create_test_equity(db, symbol="IMP1")
         service = WatchlistService(db)
 
-        result = await _import_and_reload(
-            db,
-            service,
+        result = await service.import_watchlist(
             WatchlistImport(
                 name="Imported",
                 items=[
@@ -121,9 +96,7 @@ class TestImportSetsBothFields:
         await create_test_equity(db, symbol="IMP2")
         service = WatchlistService(db)
 
-        result = await _import_and_reload(
-            db,
-            service,
+        result = await service.import_watchlist(
             WatchlistImport(
                 name="Imported Old Format",
                 items=[WatchlistImportItem(symbol="IMP2")],
@@ -198,8 +171,8 @@ class TestExportImportRoundTrip:
             )
             for item in exported.items
         ]
-        imported = await _import_and_reload(
-            db, service, WatchlistImport(name="Round Trip", items=import_items)
+        imported = await service.import_watchlist(
+            WatchlistImport(name="Round Trip", items=import_items)
         )
 
         item = imported.items[0]

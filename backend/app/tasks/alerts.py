@@ -321,6 +321,46 @@ def send_morning_pulse():
         raise
 
 
+async def _build_eod_catalysts(session, watchlist_symbols: list[str]):
+    """Dedup ``watchlist_symbols`` and fetch catalyst lines for the EOD wrap.
+
+    Mirrors ``send_morning_pulse``'s catalyst step (T1 sub-PR 2/4): the same
+    advisory-only read of ``news_items`` scored by the News & Catalyst agent
+    (``app/services/agents/news_catalyst.py``), so a slow news day - or an
+    agent that has never run - degrades to an absent ``catalysts`` field
+    (wrap renders as if the agent never ran) rather than blocking the rest
+    of the wrap. A query failure is caught here and reported via
+    ``unavailable_sections`` instead of raising, same contract as the
+    morning task's inline try/except.
+
+    Extracted to a standalone function (mirrors ``_run_for_owner`` in
+    ``app/tasks/agent_strategy.py``) so the dedup + query args + failure
+    degradation are directly unit-testable without invoking the rest of
+    ``send_eod_wrap``'s closure (Yahoo/Discord/watchlist calls).
+    """
+    from app.services.catalysts import get_catalyst_lines
+
+    catalysts: dict[str, str] = {}
+    unavailable_sections: list[str] = []
+    # EOD's watchlist_symbols is built per-watchlist-item and can contain a
+    # symbol more than once (same ticker in multiple watchlists) - dedup
+    # before the query, same as morning's `catalyst_symbols`.
+    catalyst_symbols = list(dict.fromkeys(watchlist_symbols))
+    try:
+        catalysts = await get_catalyst_lines(session, catalyst_symbols)
+    except Exception:
+        # Broad on purpose - the wrap must still send even if this advisory
+        # read blows up (same breadth as the morning task's catalyst step).
+        # But unlike morning's quiet warning, log the FULL traceback at
+        # ERROR level: a programming defect (TypeError/AttributeError) in
+        # this path must be loud in the logs instead of masquerading as
+        # ordinary catalyst unavailability, while the section still
+        # degrades gracefully via unavailable_sections.
+        logger.exception("Failed to build EOD catalysts section")
+        unavailable_sections.append("catalysts")
+    return catalysts, unavailable_sections
+
+
 @celery_app.task(name="alerts.send_eod_wrap")
 def send_eod_wrap():
     """Send end-of-day wrap with market close, themes, positions, movers, alerts, tomorrow."""
@@ -523,6 +563,12 @@ def send_eod_wrap():
                 if (e.importance and e.importance.value in ("medium", "high"))
             ]
 
+            # --- Catalysts: News & Catalyst agent context (T1 sub-PR 2/4's
+            # morning-pulse injection, mirrored for the EOD wrap in U11) ---
+            catalysts, unavailable_sections = await _build_eod_catalysts(
+                session, watchlist_symbols
+            )
+
             # --- Build and send ---
             data = EODData(
                 market=market_data,
@@ -535,6 +581,8 @@ def send_eod_wrap():
                 approaching=approaching,
                 playbook_status=playbook_status,
                 tomorrow_events=tomorrow_events,
+                catalysts=catalysts,
+                unavailable_sections=unavailable_sections,
             )
             message = format_eod_wrap(data)
             success, error = await discord_service.send_plain_text(message)

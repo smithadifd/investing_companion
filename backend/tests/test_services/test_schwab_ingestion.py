@@ -6,20 +6,34 @@ fields, transaction leg selection, date parsing, pagination windowing),
 upsert idempotence (a re-pull never duplicates; a correction overwrites by
 ID), fail-closed behavior (any failure rolls back the whole pull and leaves
 the previous snapshot/rows untouched, recording a separate failed-run row
-with a sanitized reason), and the "current positions" query. All Schwab
-responses used here are synthetic fixtures - no live Schwab call is ever
-made, and no test uses real brokerage data.
+with a sanitized reason), the 60-day history-boundary clamp (a stale cursor
+never bricks the pull; the truncated gap is recorded loudly), the service's
+session-ownership boundary (a failing pull can never flush or commit a
+caller session's unrelated pending state), and the "current positions"
+query. All Schwab responses used here are synthetic fixtures - no live
+Schwab call is ever made, and no test uses real brokerage data.
+
+The pull functions own their sessions (module docstring, SESSION OWNERSHIP),
+so pull tests run through the ``ingest_env`` fixture: a session factory
+bound to the test engine plus a REAL, committed user (the conftest ``db``
+fixture's savepoint world is invisible to the service's own connections),
+with cascade cleanup afterward.
 """
 
 import json
 import time
+import uuid as uuid_module
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+import pytest_asyncio
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+import app.services.schwab_ingestion as schwab_ingestion
+from app.db.models.account import Account
 from app.db.models.broker_import import (
     BrokerImportRun,
     ImportedPosition,
@@ -27,8 +41,10 @@ from app.db.models.broker_import import (
     ImportKind,
     ImportStatus,
 )
+from app.db.models.user import User
 from app.services.data_providers.schwab import SchwabAPIError, SchwabAuthError
 from app.services.schwab_ingestion import (
+    TRANSACTION_HISTORY_LIMIT_DAYS,
     SchwabNotConnectedError,
     _date_windows,
     _normalize_position,
@@ -41,8 +57,21 @@ from app.services.schwab_ingestion import (
     pull_positions,
     pull_transactions,
 )
+from tests.factories import create_test_user
 
 ACCOUNT_HASH = "HASH_TEST_0001"
+
+# The effective clamp horizon (limit minus the one-day safety margin).
+_CLAMP_DAYS = TRANSACTION_HISTORY_LIMIT_DAYS - 1
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _schwab_ts(dt: datetime) -> str:
+    """Render a datetime in Schwab's ``+0000``-suffixed timestamp format."""
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+0000")
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +189,7 @@ class _FakeProvider:
         self._positions = positions if positions is not None else []
         self._transaction_pages = list(transaction_pages or [])
         self._raise_on_call = raise_on_call
+        self._raise_on_call_at = 1
         self.transaction_calls: list[tuple] = []
         self.closed = False
 
@@ -168,10 +198,13 @@ class _FakeProvider:
             raise SchwabAPIError("synthetic failure")
         return self._positions
 
-    async def get_transactions(self, account_hash, start_date, end_date, transaction_types=None):
+    async def get_transactions(
+        self, account_hash, start_date, end_date, transaction_types=None
+    ):
         self.transaction_calls.append((account_hash, start_date, end_date))
-        if self._raise_on_call == "transactions" and len(self.transaction_calls) >= (
-            self._raise_on_call_at if isinstance(self._raise_on_call_at, int) else 1
+        if (
+            self._raise_on_call == "transactions"
+            and len(self.transaction_calls) >= self._raise_on_call_at
         ):
             raise SchwabAPIError("synthetic failure")
         if not self._transaction_pages:
@@ -180,6 +213,30 @@ class _FakeProvider:
 
     async def aclose(self):
         self.closed = True
+
+
+@pytest_asyncio.fixture
+async def ingest_env(engine):
+    """Session factory + a REAL committed user for service-owned-session
+    pull tests, with cascade cleanup.
+
+    The conftest ``db`` fixture lives inside a never-committed outer
+    transaction, so its rows are invisible to the ingestion service's own
+    connections; pull tests instead commit a throwaway user for real and
+    delete it (cascading every ingestion row) afterward.
+    """
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    email = f"ingest-{uuid_module.uuid4().hex[:10]}@example.com"
+    async with factory() as setup_db:
+        user = await create_test_user(setup_db, email=email)
+        await setup_db.commit()
+        user_id = user.id
+    yield factory, user_id
+    async with factory() as cleanup_db:
+        # users.id cascades broker_import_runs, imported_positions, and
+        # imported_transactions (all ondelete=CASCADE on user_id).
+        await cleanup_db.execute(delete(User).where(User.id == user_id))
+        await cleanup_db.commit()
 
 
 @pytest.fixture
@@ -197,6 +254,17 @@ def patch_provider(monkeypatch):
         return fake_provider
 
     return _patch
+
+
+async def _read_current_positions(factory, user_id, account_hash):
+    async with factory() as read_db:
+        return await get_current_positions(read_db, user_id, account_hash)
+
+
+async def _read_all(factory, model, user_id):
+    async with factory() as read_db:
+        result = await read_db.execute(select(model).where(model.user_id == user_id))
+        return list(result.scalars().all())
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +296,9 @@ class TestGetConnectedProvider:
         service = SettingsService(db)
         await service.set_setting(
             SettingsService.SCHWAB_TOKEN,
-            json.dumps({"creation_timestamp": int(time.time()) - 8 * 86400, "token": {}}),
+            json.dumps(
+                {"creation_timestamp": int(time.time()) - 8 * 86400, "token": {}}
+            ),
             test_user.id,
         )
 
@@ -249,7 +319,9 @@ class TestGetConnectedProvider:
 # ---------------------------------------------------------------------------
 class TestNormalizePosition:
     def test_long_position_signed_quantity_positive(self):
-        result = _normalize_position(_position_fixture(longQuantity=10.0, shortQuantity=0.0))
+        result = _normalize_position(
+            _position_fixture(longQuantity=10.0, shortQuantity=0.0)
+        )
         assert result["quantity"] == Decimal("10")
         assert result["long_quantity"] == Decimal("10")
         assert result["short_quantity"] == Decimal("0")
@@ -274,9 +346,7 @@ class TestNormalizePosition:
         assert result["asset_type"] == "FUTURE"
 
     def test_missing_asset_type_defaults_to_unknown(self):
-        result = _normalize_position(
-            _position_fixture(instrument={"symbol": "NOTYPE"})
-        )
+        result = _normalize_position(_position_fixture(instrument={"symbol": "NOTYPE"}))
         assert result["asset_type"] == "UNKNOWN"
 
     def test_quantities_are_decimal_not_float(self):
@@ -302,7 +372,10 @@ class TestPrimaryTransferItem:
     def test_none_when_no_leg_has_position_effect(self):
         # e.g. an ACH/cash transaction: only currency/fee-style legs.
         items = [
-            {"instrument": {"assetType": "CURRENCY", "symbol": "CURRENCY_USD"}, "amount": 500.0}
+            {
+                "instrument": {"assetType": "CURRENCY", "symbol": "CURRENCY_USD"},
+                "amount": 500.0,
+            }
         ]
         assert _primary_transfer_item(items) is None
 
@@ -323,7 +396,9 @@ class TestNormalizeTransaction:
         assert result["position_effect"] == "OPENING"
         assert result["net_amount"] == Decimal("-1502.3")
         assert result["order_id"] == "6666666666666"
-        assert result["occurred_at"] == datetime(2026, 6, 1, 14, 32, tzinfo=timezone.utc)
+        assert result["occurred_at"] == datetime(
+            2026, 6, 1, 14, 32, tzinfo=timezone.utc
+        )
 
     def test_missing_activity_id_raises(self):
         bad = _transaction_fixture()
@@ -383,7 +458,7 @@ class TestNormalizeTransaction:
 
 
 # ---------------------------------------------------------------------------
-# _date_windows (pagination/chunking)
+# _date_windows (chunked traversal)
 # ---------------------------------------------------------------------------
 class TestDateWindows:
     def test_empty_range_yields_nothing(self):
@@ -423,7 +498,9 @@ class TestDateWindows:
 # ---------------------------------------------------------------------------
 class TestSafeErrorReason:
     def test_first_party_schwab_api_error_keeps_message(self):
-        reason = _safe_error_reason(SchwabAPIError("Schwab get_account returned HTTP 500"))
+        reason = _safe_error_reason(
+            SchwabAPIError("Schwab get_account returned HTTP 500")
+        )
         assert "SchwabAPIError" in reason
         assert "HTTP 500" in reason
 
@@ -448,32 +525,42 @@ class TestSafeErrorReason:
 
 
 # ---------------------------------------------------------------------------
-# pull_positions
+# pull_positions (service-owned sessions via ingest_env)
 # ---------------------------------------------------------------------------
 class TestPullPositions:
-    async def test_happy_path_creates_run_and_positions(self, db, test_user, patch_provider):
+    async def test_happy_path_creates_run_and_positions(
+        self, ingest_env, patch_provider
+    ):
+        factory, user_id = ingest_env
         fake = patch_provider(
-            _FakeProvider(positions=[_position_fixture(), _position_fixture(
-                instrument={"assetType": "EQUITY", "cusip": "1", "symbol": "OTHR"}
-            )])
+            _FakeProvider(
+                positions=[
+                    _position_fixture(),
+                    _position_fixture(
+                        instrument={
+                            "assetType": "EQUITY",
+                            "cusip": "1",
+                            "symbol": "OTHR",
+                        }
+                    ),
+                ]
+            )
         )
-        run = await pull_positions(db, test_user.id, ACCOUNT_HASH)
+        run = await pull_positions(user_id, ACCOUNT_HASH, session_factory=factory)
 
         assert run.status == ImportStatus.COMPLETE
         assert run.kind == ImportKind.POSITIONS
         assert run.item_count == 2
         assert fake.closed is True
 
-        rows = (
-            await db.execute(
-                select(ImportedPosition).where(ImportedPosition.import_run_id == run.id)
-            )
-        ).scalars().all()
+        rows = await _read_all(factory, ImportedPosition, user_id)
         assert len(rows) == 2
-        symbols = {r.symbol for r in rows}
-        assert symbols == {"SYNT", "OTHR"}
+        assert {r.symbol for r in rows} == {"SYNT", "OTHR"}
 
-    async def test_short_position_persists_negative_quantity(self, db, test_user, patch_provider):
+    async def test_short_position_persists_negative_quantity(
+        self, ingest_env, patch_provider
+    ):
+        factory, user_id = ingest_env
         patch_provider(
             _FakeProvider(
                 positions=[
@@ -481,105 +568,143 @@ class TestPullPositions:
                 ]
             )
         )
-        run = await pull_positions(db, test_user.id, ACCOUNT_HASH)
-        rows = (
-            await db.execute(
-                select(ImportedPosition).where(ImportedPosition.import_run_id == run.id)
-            )
-        ).scalars().all()
+        await pull_positions(user_id, ACCOUNT_HASH, session_factory=factory)
+        rows = await _read_all(factory, ImportedPosition, user_id)
         assert rows[0].quantity == Decimal("-5")
 
-    async def test_repull_creates_new_run_not_upsert(self, db, test_user, patch_provider):
+    async def test_repull_creates_new_run_not_upsert(self, ingest_env, patch_provider):
+        factory, user_id = ingest_env
         patch_provider(_FakeProvider(positions=[_position_fixture()]))
-        run1 = await pull_positions(db, test_user.id, ACCOUNT_HASH)
+        run1 = await pull_positions(user_id, ACCOUNT_HASH, session_factory=factory)
 
         patch_provider(_FakeProvider(positions=[_position_fixture(marketValue=9999.0)]))
-        run2 = await pull_positions(db, test_user.id, ACCOUNT_HASH)
+        run2 = await pull_positions(user_id, ACCOUNT_HASH, session_factory=factory)
 
         assert run1.id != run2.id
-        all_runs = (
-            await db.execute(
-                select(BrokerImportRun).where(
-                    BrokerImportRun.user_id == test_user.id,
-                    BrokerImportRun.kind == ImportKind.POSITIONS,
-                )
-            )
-        ).scalars().all()
+        all_runs = await _read_all(factory, BrokerImportRun, user_id)
         assert len(all_runs) == 2
 
-        current = await get_current_positions(db, test_user.id, ACCOUNT_HASH)
+        current = await _read_current_positions(factory, user_id, ACCOUNT_HASH)
         assert len(current) == 1
         assert current[0].market_value == Decimal("9999.00")
 
-    async def test_failure_writes_failed_run_and_no_positions(self, db, test_user, patch_provider):
+    async def test_failure_writes_failed_run_and_no_positions(
+        self, ingest_env, patch_provider
+    ):
+        factory, user_id = ingest_env
         patch_provider(_FakeProvider(raise_on_call="positions"))
 
         with pytest.raises(SchwabAPIError):
-            await pull_positions(db, test_user.id, ACCOUNT_HASH)
+            await pull_positions(user_id, ACCOUNT_HASH, session_factory=factory)
 
-        runs = (
-            await db.execute(
-                select(BrokerImportRun).where(BrokerImportRun.user_id == test_user.id)
-            )
-        ).scalars().all()
+        runs = await _read_all(factory, BrokerImportRun, user_id)
         assert len(runs) == 1
         assert runs[0].status == ImportStatus.FAILED
         assert runs[0].error_message is not None
         assert "SchwabAPIError" in runs[0].error_message
 
-        positions = (
-            await db.execute(
-                select(ImportedPosition).where(ImportedPosition.user_id == test_user.id)
-            )
-        ).scalars().all()
+        positions = await _read_all(factory, ImportedPosition, user_id)
         assert positions == []
 
     async def test_failure_after_success_leaves_previous_snapshot_untouched(
-        self, db, test_user, patch_provider
+        self, ingest_env, patch_provider
     ):
+        factory, user_id = ingest_env
         patch_provider(_FakeProvider(positions=[_position_fixture()]))
-        good_run = await pull_positions(db, test_user.id, ACCOUNT_HASH)
+        good_run = await pull_positions(user_id, ACCOUNT_HASH, session_factory=factory)
 
         patch_provider(_FakeProvider(raise_on_call="positions"))
         with pytest.raises(SchwabAPIError):
-            await pull_positions(db, test_user.id, ACCOUNT_HASH)
+            await pull_positions(user_id, ACCOUNT_HASH, session_factory=factory)
 
         # The prior complete run and its positions are still exactly there.
-        current = await get_current_positions(db, test_user.id, ACCOUNT_HASH)
+        current = await _read_current_positions(factory, user_id, ACCOUNT_HASH)
         assert len(current) == 1
-        latest_complete = await get_latest_complete_run(db, test_user.id, ACCOUNT_HASH)
+        async with factory() as read_db:
+            latest_complete = await get_latest_complete_run(
+                read_db, user_id, ACCOUNT_HASH
+            )
         assert latest_complete.id == good_run.id
+
+
+# ---------------------------------------------------------------------------
+# Session-ownership boundary
+# ---------------------------------------------------------------------------
+class TestSessionOwnership:
+    async def test_failing_pull_never_flushes_or_commits_caller_state(
+        self, db, test_user, ingest_env, patch_provider
+    ):
+        """A failing pull must not touch ANY caller session: unrelated
+        pending state on a session the caller holds is neither flushed nor
+        committed by the pull's rollback/commit cycle (the service owns its
+        own sessions; the caller's is never handed to it)."""
+        factory, user_id = ingest_env
+
+        # Unrelated pending state on a "caller" session - added, never
+        # flushed. If ingestion shared this session, its commit (success or
+        # failed-run bookkeeping) would flush + commit this row.
+        stray = Account(user_id=test_user.id, name="stray-unrelated-account")
+        db.add(stray)
+        assert stray in db.new
+
+        patch_provider(_FakeProvider(raise_on_call="positions"))
+        with pytest.raises(SchwabAPIError):
+            await pull_positions(user_id, ACCOUNT_HASH, session_factory=factory)
+
+        # Still pending on the caller session - never flushed...
+        assert stray in db.new
+        # ...and never committed to the database.
+        async with factory() as read_db:
+            committed = (
+                await read_db.execute(
+                    select(Account).where(Account.name == "stray-unrelated-account")
+                )
+            ).scalars().all()
+        assert committed == []
+
+        # The failed-run bookkeeping still happened, on the service's own
+        # sessions.
+        runs = await _read_all(factory, BrokerImportRun, user_id)
+        assert len(runs) == 1
+        assert runs[0].status == ImportStatus.FAILED
 
 
 # ---------------------------------------------------------------------------
 # get_latest_complete_run / get_current_positions
 # ---------------------------------------------------------------------------
 class TestCurrentPositionsQuery:
-    async def test_no_runs_returns_empty(self, db, test_user):
-        assert await get_latest_complete_run(db, test_user.id, ACCOUNT_HASH) is None
-        assert await get_current_positions(db, test_user.id, ACCOUNT_HASH) == []
+    async def test_no_runs_returns_empty(self, ingest_env):
+        factory, user_id = ingest_env
+        async with factory() as read_db:
+            assert await get_latest_complete_run(read_db, user_id, ACCOUNT_HASH) is None
+            assert await get_current_positions(read_db, user_id, ACCOUNT_HASH) == []
 
-    async def test_only_failed_runs_returns_empty(self, db, test_user, patch_provider):
+    async def test_only_failed_runs_returns_empty(self, ingest_env, patch_provider):
+        factory, user_id = ingest_env
         patch_provider(_FakeProvider(raise_on_call="positions"))
         with pytest.raises(SchwabAPIError):
-            await pull_positions(db, test_user.id, ACCOUNT_HASH)
+            await pull_positions(user_id, ACCOUNT_HASH, session_factory=factory)
 
-        assert await get_latest_complete_run(db, test_user.id, ACCOUNT_HASH) is None
-        assert await get_current_positions(db, test_user.id, ACCOUNT_HASH) == []
+        async with factory() as read_db:
+            assert await get_latest_complete_run(read_db, user_id, ACCOUNT_HASH) is None
+            assert await get_current_positions(read_db, user_id, ACCOUNT_HASH) == []
 
-    async def test_different_accounts_are_isolated(self, db, test_user, patch_provider):
+    async def test_different_accounts_are_isolated(self, ingest_env, patch_provider):
+        factory, user_id = ingest_env
         patch_provider(_FakeProvider(positions=[_position_fixture()]))
-        await pull_positions(db, test_user.id, "HASH_ONE")
+        await pull_positions(user_id, "HASH_ONE", session_factory=factory)
 
-        assert await get_current_positions(db, test_user.id, "HASH_TWO") == []
-        assert len(await get_current_positions(db, test_user.id, "HASH_ONE")) == 1
+        assert await _read_current_positions(factory, user_id, "HASH_TWO") == []
+        assert len(await _read_current_positions(factory, user_id, "HASH_ONE")) == 1
 
 
 # ---------------------------------------------------------------------------
-# pull_transactions
+# pull_transactions (service-owned sessions via ingest_env)
 # ---------------------------------------------------------------------------
 class TestPullTransactions:
-    async def test_happy_path_inserts_transactions(self, db, test_user, patch_provider):
+    async def test_happy_path_inserts_transactions(self, ingest_env, patch_provider):
+        factory, user_id = ingest_env
+        now = _utcnow()
         patch_provider(
             _FakeProvider(
                 transaction_pages=[
@@ -588,114 +713,211 @@ class TestPullTransactions:
             )
         )
         run = await pull_transactions(
-            db,
-            test_user.id,
+            user_id,
             ACCOUNT_HASH,
-            start_date=datetime(2026, 6, 1, tzinfo=timezone.utc),
-            end_date=datetime(2026, 6, 30, tzinfo=timezone.utc),
+            start_date=now - timedelta(days=40),
+            end_date=now - timedelta(days=10),
+            session_factory=factory,
         )
 
         assert run.status == ImportStatus.COMPLETE
         assert run.item_count == 2
+        assert run.notes is None  # window within the horizon: no gap note
 
-        rows = (
-            await db.execute(
-                select(ImportedTransaction).where(ImportedTransaction.user_id == test_user.id)
-            )
-        ).scalars().all()
+        rows = await _read_all(factory, ImportedTransaction, user_id)
         assert len(rows) == 2
         assert {r.external_transaction_id for r in rows} == {"1000000001", "2"}
         for row in rows:
-            assert row.raw.get("accountNumber") is None or "accountNumber" not in row.raw
+            assert "accountNumber" not in row.raw
 
-    async def test_repull_same_window_does_not_duplicate(self, db, test_user, patch_provider):
+    async def test_repull_same_window_does_not_duplicate(
+        self, ingest_env, patch_provider
+    ):
+        factory, user_id = ingest_env
+        now = _utcnow()
         window = dict(
-            start_date=datetime(2026, 6, 1, tzinfo=timezone.utc),
-            end_date=datetime(2026, 6, 30, tzinfo=timezone.utc),
+            start_date=now - timedelta(days=40),
+            end_date=now - timedelta(days=10),
         )
         patch_provider(_FakeProvider(transaction_pages=[[_transaction_fixture()]]))
-        await pull_transactions(db, test_user.id, ACCOUNT_HASH, **window)
+        await pull_transactions(
+            user_id, ACCOUNT_HASH, session_factory=factory, **window
+        )
 
         patch_provider(_FakeProvider(transaction_pages=[[_transaction_fixture()]]))
-        await pull_transactions(db, test_user.id, ACCOUNT_HASH, **window)
+        await pull_transactions(
+            user_id, ACCOUNT_HASH, session_factory=factory, **window
+        )
 
-        rows = (
-            await db.execute(
-                select(ImportedTransaction).where(ImportedTransaction.user_id == test_user.id)
-            )
-        ).scalars().all()
+        rows = await _read_all(factory, ImportedTransaction, user_id)
         assert len(rows) == 1
 
-    async def test_correction_overwrites_by_id(self, db, test_user, patch_provider):
+    async def test_correction_overwrites_by_id(self, ingest_env, patch_provider):
+        factory, user_id = ingest_env
+        now = _utcnow()
         window = dict(
-            start_date=datetime(2026, 6, 1, tzinfo=timezone.utc),
-            end_date=datetime(2026, 6, 30, tzinfo=timezone.utc),
+            start_date=now - timedelta(days=40),
+            end_date=now - timedelta(days=10),
         )
         patch_provider(
             _FakeProvider(transaction_pages=[[_transaction_fixture(netAmount=-1502.30)]])
         )
-        await pull_transactions(db, test_user.id, ACCOUNT_HASH, **window)
+        await pull_transactions(
+            user_id, ACCOUNT_HASH, session_factory=factory, **window
+        )
 
         patch_provider(
             _FakeProvider(transaction_pages=[[_transaction_fixture(netAmount=-1400.00)]])
         )
-        await pull_transactions(db, test_user.id, ACCOUNT_HASH, **window)
+        await pull_transactions(
+            user_id, ACCOUNT_HASH, session_factory=factory, **window
+        )
 
-        rows = (
-            await db.execute(
-                select(ImportedTransaction).where(ImportedTransaction.user_id == test_user.id)
-            )
-        ).scalars().all()
+        rows = await _read_all(factory, ImportedTransaction, user_id)
         assert len(rows) == 1
         assert rows[0].net_amount == Decimal("-1400.00")
 
     async def test_default_window_is_30_days_when_no_prior_transactions(
-        self, db, test_user, patch_provider
+        self, ingest_env, patch_provider
     ):
+        factory, user_id = ingest_env
         fake = patch_provider(_FakeProvider(transaction_pages=[[]]))
-        before = datetime.now(timezone.utc)
-        await pull_transactions(db, test_user.id, ACCOUNT_HASH)
-        after = datetime.now(timezone.utc)
+        before = _utcnow()
+        await pull_transactions(user_id, ACCOUNT_HASH, session_factory=factory)
+        after = _utcnow()
 
         assert len(fake.transaction_calls) == 1
         _, called_start, called_end = fake.transaction_calls[0]
-        expected_start_floor = before - timedelta(days=30)
-        expected_start_ceiling = after - timedelta(days=30)
-        assert expected_start_floor <= called_start <= expected_start_ceiling
+        assert (before - timedelta(days=30)) <= called_start <= (
+            after - timedelta(days=30)
+        )
 
     async def test_default_window_starts_at_cursor_when_transactions_exist(
-        self, db, test_user, patch_provider
+        self, ingest_env, patch_provider
     ):
+        factory, user_id = ingest_env
+        now = _utcnow()
+        cursor_dt = (now - timedelta(days=20)).replace(microsecond=0)
         patch_provider(
-            _FakeProvider(transaction_pages=[[_transaction_fixture()]])
+            _FakeProvider(
+                transaction_pages=[
+                    [_transaction_fixture(tradeDate=_schwab_ts(cursor_dt))]
+                ]
+            )
         )
         first_run = await pull_transactions(
-            db,
-            test_user.id,
+            user_id,
             ACCOUNT_HASH,
-            start_date=datetime(2026, 6, 1, tzinfo=timezone.utc),
-            end_date=datetime(2026, 6, 2, tzinfo=timezone.utc),
+            start_date=now - timedelta(days=25),
+            end_date=now - timedelta(days=15),
+            session_factory=factory,
         )
         assert first_run.item_count == 1
 
         fake2 = patch_provider(_FakeProvider(transaction_pages=[[]]))
-        await pull_transactions(db, test_user.id, ACCOUNT_HASH)
+        run2 = await pull_transactions(user_id, ACCOUNT_HASH, session_factory=factory)
 
         _, called_start, _ = fake2.transaction_calls[0]
-        # Cursor = the stored transaction's occurred_at (2026-06-01T14:32:00Z).
-        assert called_start == datetime(2026, 6, 1, 14, 32, tzinfo=timezone.utc)
+        # Cursor = the stored transaction's occurred_at; within the 60-day
+        # horizon, so used unclamped and no gap note is recorded.
+        assert called_start == cursor_dt
+        assert run2.notes is None
 
-    async def test_wide_window_makes_multiple_chunked_calls(self, db, test_user, patch_provider):
+    async def test_stale_cursor_is_clamped_and_gap_recorded(
+        self, ingest_env, patch_provider
+    ):
+        """The H fix: a since-last-cursor default older than Schwab's 60-day
+        history boundary must NOT brick the pull - the effective start is
+        clamped to the horizon and the unrecoverable gap is recorded on the
+        run row."""
+        factory, user_id = ingest_env
+        now = _utcnow()
+        stale_dt = (now - timedelta(days=90)).replace(microsecond=0)
+
+        # Seed a committed transaction 90 days old, so the cursor default
+        # resolves to a start Schwab would reject.
+        kwargs = _normalize_transaction(
+            _transaction_fixture(activityId=777, tradeDate=_schwab_ts(stale_dt))
+        )
+        async with factory() as seed_db:
+            seed_db.add(
+                ImportedTransaction(
+                    user_id=user_id,
+                    account_hash=ACCOUNT_HASH,
+                    source="schwab_api",
+                    **kwargs,
+                )
+            )
+            await seed_db.commit()
+
+        fake = patch_provider(_FakeProvider(transaction_pages=[[]]))
+        before = _utcnow()
+        run = await pull_transactions(user_id, ACCOUNT_HASH, session_factory=factory)
+        after = _utcnow()
+
+        # The pull SUCCEEDED (this is the whole point of the clamp)...
+        assert run.status == ImportStatus.COMPLETE
+        # ...with the effective start clamped to the horizon, not the cursor.
+        assert len(fake.transaction_calls) == 1
+        _, called_start, _ = fake.transaction_calls[0]
+        assert (before - timedelta(days=_CLAMP_DAYS)) <= called_start <= (
+            after - timedelta(days=_CLAMP_DAYS)
+        )
+        assert run.window_start == called_start
+        # ...and the unrecoverable gap is recorded loudly, not silently.
+        assert run.notes is not None
+        assert "HISTORY GAP" in run.notes
+        assert stale_dt.isoformat() in run.notes
+        assert str(TRANSACTION_HISTORY_LIMIT_DAYS) in run.notes
+
+    async def test_explicit_ancient_start_date_is_clamped(
+        self, ingest_env, patch_provider
+    ):
+        factory, user_id = ingest_env
+        now = _utcnow()
+        fake = patch_provider(_FakeProvider(transaction_pages=[[]]))
+        before = _utcnow()
+        run = await pull_transactions(
+            user_id,
+            ACCOUNT_HASH,
+            start_date=now - timedelta(days=120),
+            session_factory=factory,
+        )
+        after = _utcnow()
+
+        assert run.status == ImportStatus.COMPLETE
+        _, called_start, _ = fake.transaction_calls[0]
+        assert (before - timedelta(days=_CLAMP_DAYS)) <= called_start <= (
+            after - timedelta(days=_CLAMP_DAYS)
+        )
+        assert run.notes is not None
+        assert "HISTORY GAP" in run.notes
+
+    async def test_wide_window_makes_multiple_chunked_calls(
+        self, ingest_env, patch_provider, monkeypatch
+    ):
+        """The chunked traversal is future-proofing (a clamped window fits
+        one 60-day chunk today), so exercise it by shrinking the chunk size
+        below the window span."""
+        factory, user_id = ingest_env
+        monkeypatch.setattr(schwab_ingestion, "_MAX_TRANSACTION_WINDOW_DAYS", 20)
         fake = patch_provider(_FakeProvider(transaction_pages=[[], [], []]))
-        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        end = start + timedelta(days=130)
-        await pull_transactions(db, test_user.id, ACCOUNT_HASH, start_date=start, end_date=end)
+        now = _utcnow()
+        await pull_transactions(
+            user_id,
+            ACCOUNT_HASH,
+            start_date=now - timedelta(days=50),
+            end_date=now,
+            session_factory=factory,
+        )
 
         assert len(fake.transaction_calls) == 3
 
     async def test_failure_mid_pagination_rolls_back_all_chunks(
-        self, db, test_user, patch_provider
+        self, ingest_env, patch_provider, monkeypatch
     ):
+        factory, user_id = ingest_env
+        monkeypatch.setattr(schwab_ingestion, "_MAX_TRANSACTION_WINDOW_DAYS", 20)
         fake = _FakeProvider(
             transaction_pages=[[_transaction_fixture()], []],
             raise_on_call="transactions",
@@ -703,36 +925,34 @@ class TestPullTransactions:
         fake._raise_on_call_at = 2  # succeed on chunk 1, fail on chunk 2
         patch_provider(fake)
 
-        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        end = start + timedelta(days=130)
+        now = _utcnow()
         with pytest.raises(SchwabAPIError):
-            await pull_transactions(db, test_user.id, ACCOUNT_HASH, start_date=start, end_date=end)
-
-        rows = (
-            await db.execute(
-                select(ImportedTransaction).where(ImportedTransaction.user_id == test_user.id)
+            await pull_transactions(
+                user_id,
+                ACCOUNT_HASH,
+                start_date=now - timedelta(days=50),
+                end_date=now,
+                session_factory=factory,
             )
-        ).scalars().all()
+
+        rows = await _read_all(factory, ImportedTransaction, user_id)
         assert rows == []
 
-        runs = (
-            await db.execute(
-                select(BrokerImportRun).where(
-                    BrokerImportRun.user_id == test_user.id,
-                    BrokerImportRun.kind == ImportKind.TRANSACTIONS,
-                )
-            )
-        ).scalars().all()
+        runs = await _read_all(factory, BrokerImportRun, user_id)
         assert len(runs) == 1
+        assert runs[0].kind == ImportKind.TRANSACTIONS
         assert runs[0].status == ImportStatus.FAILED
 
-    async def test_zero_gap_window_is_a_successful_noop(self, db, test_user, patch_provider):
+    async def test_zero_gap_window_is_a_successful_noop(
+        self, ingest_env, patch_provider
+    ):
         """Cursor already caught up to 'now' - a valid complete run with
         zero items, not a failure."""
-        now = datetime.now(timezone.utc)
+        factory, user_id = ingest_env
+        now = _utcnow()
         patch_provider(_FakeProvider(transaction_pages=[]))
         run = await pull_transactions(
-            db, test_user.id, ACCOUNT_HASH, start_date=now, end_date=now
+            user_id, ACCOUNT_HASH, start_date=now, end_date=now, session_factory=factory
         )
         assert run.status == ImportStatus.COMPLETE
         assert run.item_count == 0
@@ -742,7 +962,9 @@ class TestPullTransactions:
 # Model-level constraint checks
 # ---------------------------------------------------------------------------
 class TestModelConstraints:
-    async def test_duplicate_symbol_within_run_violates_unique_constraint(self, db, test_user):
+    async def test_duplicate_symbol_within_run_violates_unique_constraint(
+        self, db, test_user
+    ):
         run = BrokerImportRun(
             user_id=test_user.id,
             account_hash=ACCOUNT_HASH,
@@ -783,13 +1005,19 @@ class TestModelConstraints:
         kwargs = _normalize_transaction(_transaction_fixture())
         db.add(
             ImportedTransaction(
-                user_id=test_user.id, account_hash=ACCOUNT_HASH, source="schwab_api", **kwargs
+                user_id=test_user.id,
+                account_hash=ACCOUNT_HASH,
+                source="schwab_api",
+                **kwargs,
             )
         )
         await db.flush()
         db.add(
             ImportedTransaction(
-                user_id=test_user.id, account_hash=ACCOUNT_HASH, source="schwab_api", **kwargs
+                user_id=test_user.id,
+                account_hash=ACCOUNT_HASH,
+                source="schwab_api",
+                **kwargs,
             )
         )
         with pytest.raises(IntegrityError):

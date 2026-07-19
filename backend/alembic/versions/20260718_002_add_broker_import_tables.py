@@ -71,6 +71,11 @@ def upgrade() -> None:
         sa.Column('window_end', sa.DateTime(timezone=True), nullable=True),
         sa.Column('item_count', sa.Integer(), nullable=True),
         sa.Column('error_message', sa.Text(), nullable=True),
+        # Loud caveats on a COMPLETE run (e.g. the clamped-history-gap note
+        # when a transactions window start predated Schwab's 60-day
+        # boundary); separate from error_message so a completed-with-caveat
+        # run is never mistaken for a failed one.
+        sa.Column('notes', sa.Text(), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),

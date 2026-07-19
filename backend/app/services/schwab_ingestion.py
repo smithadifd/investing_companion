@@ -13,13 +13,35 @@ an overlapping window updates existing rows in place (a Schwab correction,
 same ID with changed fields, overwrites) and never duplicates. Deletions are
 out of scope for v1.
 
-Every pull is ONE DB transaction: any API/parse/DB failure rolls back
-everything written so far for that pull (fail closed - a partial snapshot,
-or a half-applied transactions batch, must never be visible), then a
-SEPARATE always-committed transaction records a ``status=failed`` run row
-(a sanitized reason only - never a raw exception's text, which could echo
-request/response content) so the failure is observable without ever leaving
-partial data behind.
+SESSION OWNERSHIP: :func:`pull_positions` and :func:`pull_transactions` own
+their entire transactional lifecycle - each creates its OWN session from the
+application sessionmaker (``AsyncSessionLocal``; injectable for tests via
+``session_factory``) and never accepts a caller session. This is deliberate:
+committing/rolling back a session a caller also holds would flush and commit
+whatever unrelated pending state that caller had accumulated, silently
+entangling an ingestion pull with work it knows nothing about. A failed pull
+therefore rolls back only its own writes, and the ``status=failed`` audit
+row is committed on a SECOND, fresh session (so bookkeeping survives even a
+broken first connection). The read helpers (:func:`get_latest_complete_run`,
+:func:`get_current_positions`) and :func:`get_connected_provider` do accept
+a caller session - they never commit or roll back.
+
+Every pull is ONE DB transaction on its own session: any API/parse/DB
+failure rolls back everything written for that pull (fail closed - a partial
+snapshot, or a half-applied transactions batch, must never be visible), then
+the separate always-committed audit transaction records the ``status=failed``
+run row (a sanitized reason only - never a raw exception's text, which could
+echo request/response content) so the failure is observable without ever
+leaving partial data behind.
+
+SCHWAB HISTORY BOUNDARY: the transactions endpoint only accepts start dates
+within the trailing 60 days and has no pagination past that boundary (see
+``TRANSACTION_HISTORY_LIMIT_DAYS``), so the effective window start is always
+clamped to that horizon. When clamping truncates the requested start - e.g.
+the since-last-cursor default after a >60-day ingestion outage - the
+truncation is recorded LOUDLY (``BrokerImportRun.notes`` + a warning log):
+the skipped span is unrecoverable via this API, and the broker-CSV import
+(sub-PR 3) is the designated recovery path.
 
 NO reconciliation logic and NO API endpoint/UI here - those are sub-PR 2 and
 the existing Settings UI respectively. This module only lands the ingestion
@@ -33,7 +55,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Iterator, Optional
+from typing import Callable, Iterator, Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -59,12 +81,37 @@ logger = logging.getLogger(__name__)
 
 SOURCE = "schwab_api"
 
-# Schwab's transactions endpoint caps a single call's window at 60 days
-# (schwab-py's own default lookback when start_date is omitted). A wide
-# cursor gap (a first-ever pull, or one resuming after a long outage) is
-# walked in <=60-day chunks - see _date_windows.
+# Schwab's transactions endpoint only accepts start dates within 60 days of
+# the current date, and schwab-py implements no pagination beyond that
+# boundary:
+# https://schwab-py.readthedocs.io/en/stable/client.html#schwab.client.Client.get_transactions
+# ("Date must be within 60 days of the current date.") A start_date older
+# than this makes the WHOLE call fail - and the since-last-cursor default
+# would produce exactly that after any >60-day ingestion gap - so
+# pull_transactions clamps the effective window start to this horizon and
+# records the truncated (API-unrecoverable) gap on the run row.
+TRANSACTION_HISTORY_LIMIT_DAYS = 60
+# Clamp one day inside the documented limit so a pull that computes its
+# window shortly before making the call can't drift past the boundary
+# mid-flight.
+_TRANSACTION_START_CLAMP_DAYS = TRANSACTION_HISTORY_LIMIT_DAYS - 1
+
+# Max width of a single get_transactions call's window. With the 60-day
+# history horizon above, a clamped window always fits in one call today;
+# the chunked traversal (_date_windows) is kept so a wider window would
+# still be walked correctly if Schwab ever extends the horizon.
 _MAX_TRANSACTION_WINDOW_DAYS = 60
 _DEFAULT_TRANSACTION_LOOKBACK_DAYS = 30
+
+_SessionFactory = Callable[[], AsyncSession]
+
+
+def _default_session_factory() -> _SessionFactory:
+    # Imported lazily so importing this module never eagerly builds the
+    # engine (mirrors the lazy import style used elsewhere in services/).
+    from app.db.session import AsyncSessionLocal
+
+    return AsyncSessionLocal
 
 
 class SchwabNotConnectedError(Exception):
@@ -88,7 +135,14 @@ async def get_connected_provider(
     db: AsyncSession, user_id: uuid.UUID
 ) -> SchwabProvider:
     """Build a ``SchwabProvider`` bound to ``user_id``'s stored token, or
-    raise :class:`SchwabNotConnectedError`."""
+    raise :class:`SchwabNotConnectedError`.
+
+    Read-only against ``db`` at call time. NOTE: the returned provider holds
+    ``db`` and will COMMIT it if schwab-py refreshes the access token during
+    a later call (token persistence). The pull functions therefore hand this
+    their own service-owned session, never a caller's; external callers
+    doing the same should pass a session they own.
+    """
     if not is_schwab_configured():
         raise SchwabNotConnectedError("Schwab is not configured on this server")
 
@@ -238,11 +292,13 @@ async def _record_failed_run(
     window_start: Optional[datetime] = None,
     window_end: Optional[datetime] = None,
 ) -> None:
-    """Record a ``status=failed`` run row in its own (always-committed)
-    transaction, so a failed pull is observable without ever attaching
-    partial position/transaction rows. Called from inside the ``except``
-    that wraps the failed attempt's ``db.begin_nested()`` block, which has
-    already rolled back to the savepoint by the time this runs."""
+    """Record a ``status=failed`` run row and commit ``db``.
+
+    The pull functions call this with a FRESH service-owned session (never
+    the one the failed attempt dirtied, which may hold a broken connection
+    after a DB-level failure, and never a caller's), so the bookkeeping
+    commit can only ever contain this one row.
+    """
     reason = _safe_error_reason(exc)
     run = BrokerImportRun(
         user_id=user_id,
@@ -268,28 +324,32 @@ async def _record_failed_run(
 # Positions
 # ---------------------------------------------------------------------------
 async def pull_positions(
-    db: AsyncSession, user_id: uuid.UUID, account_hash: str
+    user_id: uuid.UUID,
+    account_hash: str,
+    *,
+    session_factory: Optional[_SessionFactory] = None,
 ) -> BrokerImportRun:
     """One full positions snapshot for ``(user_id, account_hash)``.
 
-    Fetches, normalizes, and inserts every current position inside a single
-    DB transaction alongside the run row; any failure rolls all of it back
-    and records a separate failed-run row instead (fail closed - the
-    previous snapshot, if any, is left untouched either way).
+    Owns its sessions (see the module docstring's SESSION OWNERSHIP note):
+    the fetch, normalization, and every row for this run are written and
+    committed on a session this function creates; any failure rolls back
+    only that session and records a ``status=failed`` run on a second fresh
+    session (fail closed - the previous snapshot, if any, is left untouched
+    either way).
+
+    ``session_factory`` defaults to the application ``AsyncSessionLocal``;
+    tests inject a factory bound to the test engine.
     """
-    provider = await get_connected_provider(db, user_id)
-    try:
+    factory = session_factory or _default_session_factory()
+    async with factory() as db:
+        provider = await get_connected_provider(db, user_id)
         try:
-            # The fetch, normalize, and every write for this run share one
-            # SAVEPOINT: an exception anywhere inside - the API call, a
-            # malformed row, or a DB-level failure on flush - rolls back
-            # everything written so far for THIS attempt and nothing else
-            # (the previous snapshot, if any, was never touched to begin
-            # with). Using a SAVEPOINT block here rather than a bare
-            # ``await db.rollback()`` keeps this safe to call on a session
-            # that may have other pending work outside this function's
-            # control.
-            async with db.begin_nested():
+            try:
+                # Provider API calls happen BEFORE any ingestion row is
+                # added, so a mid-call token-refresh persistence commit
+                # (see get_connected_provider) can never commit a partial
+                # run.
                 raw_positions = await provider.get_positions(account_hash)
                 normalized = [_normalize_position(p) for p in raw_positions]
 
@@ -302,7 +362,7 @@ async def pull_positions(
                     item_count=len(normalized),
                 )
                 db.add(run)
-                await db.flush()  # assign run.id within the savepoint
+                await db.flush()  # assign run.id without committing yet
 
                 for kwargs in normalized:
                     db.add(
@@ -314,17 +374,19 @@ async def pull_positions(
                             **kwargs,
                         )
                     )
-        except Exception as exc:
-            await _record_failed_run(
-                db, user_id, account_hash, ImportKind.POSITIONS, exc
-            )
-            raise
 
-        await db.commit()
-        await db.refresh(run)
-        return run
-    finally:
-        await provider.aclose()
+                await db.commit()
+                await db.refresh(run)
+                return run
+            except Exception as exc:
+                await db.rollback()
+                async with factory() as audit_db:
+                    await _record_failed_run(
+                        audit_db, user_id, account_hash, ImportKind.POSITIONS, exc
+                    )
+                raise
+        finally:
+            await provider.aclose()
 
 
 async def get_latest_complete_run(
@@ -332,7 +394,10 @@ async def get_latest_complete_run(
 ) -> Optional[BrokerImportRun]:
     """The most recent ``status=complete`` positions run for ``(user_id,
     account_hash)``, or ``None`` if positions have never been successfully
-    pulled. "Current positions" = this run's ``ImportedPosition`` rows."""
+    pulled. "Current positions" = this run's ``ImportedPosition`` rows.
+
+    Read-only; safe to call with any session.
+    """
     stmt = (
         select(BrokerImportRun)
         .where(
@@ -352,7 +417,7 @@ async def get_current_positions(
 ) -> list[ImportedPosition]:
     """Positions from the latest complete snapshot run, or ``[]`` if none
     yet. A thin read helper for sub-PR 2 to build reconciliation on top of -
-    no reconciliation logic lives here."""
+    no reconciliation logic lives here. Read-only; safe with any session."""
     run = await get_latest_complete_run(db, user_id, account_hash)
     if run is None:
         return []
@@ -370,10 +435,10 @@ def _date_windows(
     """Yield consecutive ``[chunk_start, chunk_end)`` windows no wider than
     ``max_days``, covering ``[start, end)``.
 
-    Schwab's transactions endpoint has no cursor/next-page token - its only
-    pagination primitive is this date-window cap - so a wide requested range
-    is walked as repeated calls, one per chunk (this is what the binding
-    design's "full pagination traversal" means here).
+    With the 60-day history horizon (TRANSACTION_HISTORY_LIMIT_DAYS) a
+    clamped window currently always fits in one chunk; this traversal is
+    the safety net that keeps a wider window correct if the horizon ever
+    grows.
     """
     if end <= start:
         return
@@ -391,7 +456,9 @@ async def _default_transaction_window_start(
     """Start of the pull window when the caller doesn't pass one explicitly:
     the latest already-imported transaction's time for this account (so a
     routine re-pull only asks for what's new), else a 30-day default
-    lookback for a first-ever pull."""
+    lookback for a first-ever pull. The 60-day API-horizon clamp is applied
+    by pull_transactions AFTER this, so a stale cursor (long ingestion gap)
+    can't produce a start date Schwab would reject."""
     latest = await db.scalar(
         select(func.max(ImportedTransaction.occurred_at)).where(
             ImportedTransaction.user_id == user_id,
@@ -405,39 +472,74 @@ async def _default_transaction_window_start(
     )
 
 
+def _history_gap_note(requested_start: datetime, clamped_start: datetime) -> str:
+    """The loud, run-row-visible record of an API-unrecoverable history gap."""
+    return (
+        f"HISTORY GAP: requested window start {requested_start.isoformat()} "
+        f"predates Schwab's {TRANSACTION_HISTORY_LIMIT_DAYS}-day transaction "
+        f"history boundary; start clamped to {clamped_start.isoformat()}. "
+        "Transactions in the skipped span are unrecoverable via the API - "
+        "the broker-CSV import (sub-PR 3) is the recovery path."
+    )
+
+
 async def pull_transactions(
-    db: AsyncSession,
     user_id: uuid.UUID,
     account_hash: str,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    *,
+    session_factory: Optional[_SessionFactory] = None,
 ) -> BrokerImportRun:
     """Pull + upsert transactions for ``(user_id, account_hash)`` in
     ``[start_date, end_date)``.
 
-    Defaults: ``start_date`` = since the last stored transaction for this
-    account, or 30 days back on a first pull; ``end_date`` = now. A wide
-    window is walked in <=60-day chunks (see ``_date_windows``). Every
-    chunk's rows are normalized and upserted (by ``activityId``, so a
-    correction overwrites and an overlapping re-pull never duplicates)
-    inside ONE DB transaction for the whole pull; a failure at any point
-    rolls back all of it and records a failed run instead.
-    """
-    window_end = end_date or datetime.now(timezone.utc)
-    window_start = start_date or await _default_transaction_window_start(
-        db, user_id, account_hash
-    )
+    Owns its sessions exactly like :func:`pull_positions` (see the module
+    docstring's SESSION OWNERSHIP note).
 
-    provider = await get_connected_provider(db, user_id)
-    try:
+    Defaults: ``start_date`` = since the last stored transaction for this
+    account, or 30 days back on a first pull; ``end_date`` = now. The
+    effective start is then CLAMPED to Schwab's 60-day history horizon
+    (``TRANSACTION_HISTORY_LIMIT_DAYS`` - the API rejects older starts and
+    has no pagination past them); a clamp that truncates the requested
+    start records the unrecoverable gap on ``run.notes`` and logs a
+    warning, and the run still completes with whatever the API can serve.
+    Rows are normalized and upserted (by ``activityId``, so a correction
+    overwrites and an overlapping re-pull never duplicates) in ONE
+    transaction for the whole pull; a failure at any point rolls back all
+    of it and records a failed run instead.
+    """
+    factory = session_factory or _default_session_factory()
+    async with factory() as db:
+        now = datetime.now(timezone.utc)
+        window_end = end_date or now
+        requested_start = start_date or await _default_transaction_window_start(
+            db, user_id, account_hash
+        )
+
+        # Clamp to the API's history horizon (TRANSACTION_HISTORY_LIMIT_DAYS):
+        # an unclamped stale cursor would make EVERY subsequent pull fail,
+        # permanently, until someone intervened.
+        clamp_floor = now - timedelta(days=_TRANSACTION_START_CLAMP_DAYS)
+        window_start = max(requested_start, clamp_floor)
+        notes: Optional[str] = None
+        if window_start > requested_start:
+            notes = _history_gap_note(requested_start, window_start)
+            logger.warning(
+                "Schwab transactions pull for account_hash=%s: %s",
+                account_hash,
+                notes,
+            )
+
+        provider = await get_connected_provider(db, user_id)
         try:
-            # See pull_positions' comment: the whole fetch (every chunk),
-            # normalize, and upsert phase shares one SAVEPOINT, so a
-            # failure at any chunk rolls back every row written for this
-            # attempt, never a partially-applied pull.
-            async with db.begin_nested():
+            try:
+                # All API calls happen before any ingestion row is added -
+                # see pull_positions' comment on token-refresh commits.
                 raw_transactions: list[dict] = []
-                for chunk_start, chunk_end in _date_windows(window_start, window_end):
+                for chunk_start, chunk_end in _date_windows(
+                    window_start, window_end, _MAX_TRANSACTION_WINDOW_DAYS
+                ):
                     chunk = await provider.get_transactions(
                         account_hash, chunk_start, chunk_end
                     )
@@ -454,9 +556,10 @@ async def pull_transactions(
                     window_start=window_start,
                     window_end=window_end,
                     item_count=len(normalized),
+                    notes=notes,
                 )
                 db.add(run)
-                await db.flush()  # assign run.id within the savepoint
+                await db.flush()  # assign run.id without committing yet
 
                 for kwargs in normalized:
                     stmt = pg_insert(ImportedTransaction).values(
@@ -490,20 +593,22 @@ async def pull_transactions(
                         },
                     )
                     await db.execute(stmt)
-        except Exception as exc:
-            await _record_failed_run(
-                db,
-                user_id,
-                account_hash,
-                ImportKind.TRANSACTIONS,
-                exc,
-                window_start=window_start,
-                window_end=window_end,
-            )
-            raise
 
-        await db.commit()
-        await db.refresh(run)
-        return run
-    finally:
-        await provider.aclose()
+                await db.commit()
+                await db.refresh(run)
+                return run
+            except Exception as exc:
+                await db.rollback()
+                async with factory() as audit_db:
+                    await _record_failed_run(
+                        audit_db,
+                        user_id,
+                        account_hash,
+                        ImportKind.TRANSACTIONS,
+                        exc,
+                        window_start=window_start,
+                        window_end=window_end,
+                    )
+                raise
+        finally:
+            await provider.aclose()

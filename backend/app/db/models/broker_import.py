@@ -117,6 +117,14 @@ class BrokerImportRun(Base, TimestampMixin):
     # ourselves) its message. Never a third-party exception's raw text -
     # see schwab_ingestion._safe_error_reason.
     error_message: Mapped[Optional[str]] = mapped_column(Text)
+    # Loud, structured caveats on a COMPLETE run - today: the HISTORY GAP
+    # note written when a transactions pull's requested window start
+    # predated Schwab's 60-day history boundary and had to be clamped (the
+    # skipped span is unrecoverable via the API; broker-CSV import, sub-PR
+    # 3, is the recovery path). See schwab_ingestion._history_gap_note.
+    # Kept separate from error_message so a completed-with-caveat run is
+    # never mistaken for a failed one.
+    notes: Mapped[Optional[str]] = mapped_column(Text)
 
     user: Mapped["User"] = relationship()
 

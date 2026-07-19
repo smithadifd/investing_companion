@@ -331,6 +331,9 @@ class TestEODWrapCatalysts:
         assert "CATALYSTS" not in message
 
     def test_catalyst_appended_to_postmarket_mover_line(self, monkeypatch):
+        """CCJ appears ONLY in POST-MARKET MOVERS (not BIG MOVERS) - its
+        first (and only) mover occurrence is there, so that's where the
+        catalyst suffix lands."""
         monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
 
         kwargs = self._base_kwargs()
@@ -340,6 +343,36 @@ class TestEODWrapCatalysts:
         assert "⬆️ CCJ +2.40% — Uranium supply deal announced." in message
         # CCJ's catalyst is already inline in POST-MARKET MOVERS - must not
         # also be repeated in the standalone CATALYSTS section.
+        assert "CATALYSTS" not in message
+
+    def test_symbol_in_both_mover_sections_suffixed_exactly_once(self, monkeypatch):
+        """A symbol qualifying for BOTH mover sections (e.g. an earnings
+        mover that keeps moving after hours) gets its catalyst at the FIRST
+        occurrence only: suffixed in BIG MOVERS, bare in POST-MARKET MOVERS,
+        absent from the standalone CATALYSTS section."""
+        monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
+
+        catalyst_text = "DOE announced new uranium reserve program."
+        kwargs = self._base_kwargs()
+        # UUUU already leads BIG MOVERS (+5.20%); make it a post-market
+        # mover too.
+        kwargs["postmarket_movers"] = [
+            {"symbol": "UUUU", "change_percent": 2.9},
+            {"symbol": "CCJ", "change_percent": 2.4},
+        ]
+        kwargs["catalysts"] = {"UUUU": catalyst_text}
+        message = format_eod_wrap(EODData(**kwargs))
+
+        # Exactly one rendering of the catalyst text in the whole wrap.
+        assert message.count(catalyst_text) == 1
+        # Suffixed at the first occurrence (BIG MOVERS)...
+        big_movers_section = message.split("BIG MOVERS (>3%)\n", 1)[1].split("\n\n", 1)[0]
+        assert f"⬆️ UUUU +5.20% — {catalyst_text}" in big_movers_section
+        # ...bare at the second (POST-MARKET MOVERS)...
+        postmarket_section = message.split("POST-MARKET MOVERS (>2%)\n", 1)[1].split("\n\n", 1)[0]
+        assert "⬆️ UUUU +2.90%" in postmarket_section
+        assert catalyst_text not in postmarket_section
+        # ...and never in the standalone section.
         assert "CATALYSTS" not in message
 
     def test_catalysts_section_for_non_mover_watchlist_symbols(self, monkeypatch):

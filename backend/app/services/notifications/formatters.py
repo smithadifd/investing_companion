@@ -408,7 +408,14 @@ def _theme_narrative(positions: list[dict]) -> str:
 
 
 def format_eod_wrap(data: EODData) -> str:
-    """Format the end-of-day wrap notification as plain text."""
+    """Format the end-of-day wrap notification as plain text.
+
+    Catalyst rendering rule: a symbol's catalyst text appears exactly once
+    per wrap - suffixed onto its FIRST mover occurrence in render order
+    (BIG MOVERS before POST-MARKET MOVERS; a symbol qualifying for both
+    sections renders bare in the second), else listed in the standalone
+    CATALYSTS section when the symbol appears in neither mover section.
+    """
     # Seeded from assembly-side failures (e.g. the catalysts query) so they
     # feed the same footer as this function's own per-section try/excepts.
     # Default is [] - identical to the pre-existing `warnings: list[str] = []`.
@@ -503,12 +510,25 @@ def format_eod_wrap(data: EODData) -> str:
         logger.warning(f"Error formatting positions: {e}")
 
     # -- Big Movers --
-    # Tracks every symbol actually printed by EOD's two mover sections (BIG
+    # Tracks every symbol already printed by EOD's two mover sections (BIG
     # MOVERS + POST-MARKET MOVERS) - mirrors format_morning_pulse's
     # shown_mover_symbols, but spans both sections here since EOD has two.
-    # Feeds the standalone CATALYSTS section below so it never repeats a
-    # symbol that already got its catalyst suffixed inline.
-    enriched_symbols: set[str] = set()
+    # Consulted INSIDE both mover loops (in render order) so a symbol
+    # qualifying for both sections gets its catalyst suffixed at the first
+    # occurrence only, and by the standalone CATALYSTS section below so it
+    # never repeats a symbol already shown by either mover section.
+    shown_mover_symbols: set[str] = set()
+
+    def _mover_line(arrow: str, m: dict) -> str:
+        """One mover line; catalyst suffix at the symbol's first occurrence."""
+        line = f"{arrow} {m['symbol']} {_fmt_pct(m['change_percent'])}"
+        if m["symbol"] not in shown_mover_symbols:
+            catalyst = (data.catalysts or {}).get(m["symbol"])
+            if catalyst:
+                line += f" — {catalyst}"
+        shown_mover_symbols.add(m["symbol"])
+        return line
+
     try:
         big_up = [m for m in data.big_movers if m["change_percent"] > 3.0]
         big_down = [m for m in data.big_movers if m["change_percent"] < -3.0]
@@ -518,19 +538,9 @@ def format_eod_wrap(data: EODData) -> str:
             big_up.sort(key=lambda m: m["change_percent"], reverse=True)
             big_down.sort(key=lambda m: m["change_percent"])
             for m in big_up[:4]:
-                enriched_symbols.add(m["symbol"])
-                line = f"⬆️ {m['symbol']} {_fmt_pct(m['change_percent'])}"
-                catalyst = (data.catalysts or {}).get(m["symbol"])
-                if catalyst:
-                    line += f" — {catalyst}"
-                lines.append(line)
+                lines.append(_mover_line("⬆️", m))
             for m in big_down[:4]:
-                enriched_symbols.add(m["symbol"])
-                line = f"⬇️ {m['symbol']} {_fmt_pct(m['change_percent'])}"
-                catalyst = (data.catalysts or {}).get(m["symbol"])
-                if catalyst:
-                    line += f" — {catalyst}"
-                lines.append(line)
+                lines.append(_mover_line("⬇️", m))
             sections.append("\n".join(lines))
         else:
             sections.append("BIG MOVERS (>3%)\nNo moves >3% today")
@@ -543,33 +553,28 @@ def format_eod_wrap(data: EODData) -> str:
         if data.postmarket_movers:
             lines = ["POST-MARKET MOVERS (>2%)"]
             for m in data.postmarket_movers[:5]:
-                enriched_symbols.add(m["symbol"])
                 arrow = "⬆️" if m["change_percent"] > 0 else "⬇️"
-                line = f"{arrow} {m['symbol']} {_fmt_pct(m['change_percent'])}"
-                catalyst = (data.catalysts or {}).get(m["symbol"])
-                if catalyst:
-                    line += f" — {catalyst}"
-                lines.append(line)
+                lines.append(_mover_line(arrow, m))
             sections.append("\n".join(lines))
     except Exception as e:
         warnings.append("post-market movers")
         logger.warning(f"Error formatting post-market movers: {e}")
 
     # -- Catalysts (News & Catalyst agent, non-mover watchlist news) --
-    # Both mover sections above already got their catalyst inline; this
-    # surfaces high-relevance news for watchlist names that *didn't* move
-    # (in either section), so it never repeats a symbol already shown.
-    # Absent/empty data.catalysts (the default) adds no section - required
-    # for byte-identical output. Placed immediately after the mover
-    # sections, mirroring format_morning_pulse's CATALYSTS adjacency to its
-    # one mover section.
+    # Every mover symbol above already got its catalyst inline (at its first
+    # occurrence); this surfaces high-relevance news for watchlist names
+    # that *didn't* move (in either section), so it never repeats a symbol
+    # already shown. Absent/empty data.catalysts (the default) adds no
+    # section - required for byte-identical output. Placed immediately after
+    # the mover sections, mirroring format_morning_pulse's CATALYSTS
+    # adjacency to its one mover section.
     catalysts_section = ""
     try:
         if data.catalysts:
             extra = [
                 (symbol, line)
                 for symbol, line in data.catalysts.items()
-                if symbol not in enriched_symbols
+                if symbol not in shown_mover_symbols
             ]
             if extra:
                 lines = ["CATALYSTS"]

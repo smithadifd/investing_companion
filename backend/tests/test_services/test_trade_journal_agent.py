@@ -279,10 +279,12 @@ def test_build_discord_message_neutralizes_mentions_in_summary():
 # ---------------------------------------------------------------------------
 # Budget recording must survive a malformed/unparseable response
 # ---------------------------------------------------------------------------
-async def test_call_llm_records_tokens_even_when_content_parsing_fails(monkeypatch):
+async def test_call_llm_settles_tokens_even_when_content_parsing_fails(monkeypatch):
     """Usage is billed by Anthropic the moment messages.create() returns - the
     budget counter must reflect that even if this agent's own parsing of the
     response content then blows up on an unexpected shape."""
+    from app.services.ai_budget import ReservationToken
+
     message = MagicMock()
     message.usage = MagicMock(input_tokens=120, output_tokens=0)
     # A malformed content shape: content[0] has no `.text` attribute, so
@@ -292,8 +294,11 @@ async def test_call_llm_records_tokens_even_when_content_parsing_fails(monkeypat
     client = MagicMock()
     client.messages.create.return_value = message
 
-    record = AsyncMock()
-    monkeypatch.setattr(tj.token_budget, "record", record)
+    reservation = ReservationToken(id="fake", who="u", day="2026-01-01", reserved=1500)
+    reserve = AsyncMock(return_value=reservation)
+    settle = AsyncMock()
+    monkeypatch.setattr(tj.token_budget, "reserve", reserve)
+    monkeypatch.setattr(tj.token_budget, "settle", settle)
 
     with patch("anthropic.Anthropic", return_value=client):
         with pytest.raises(AttributeError):
@@ -301,7 +306,7 @@ async def test_call_llm_records_tokens_even_when_content_parsing_fails(monkeypat
                 "sk-test", AIModel.CLAUDE_SONNET, "prompt text", uuid.uuid4()
             )
 
-    record.assert_awaited_once_with(ANY, 120)
+    settle.assert_awaited_once_with(ANY, reservation, 120)
 
 
 # ---------------------------------------------------------------------------
@@ -387,7 +392,14 @@ def _patch_window(monkeypatch, window: JournalWindow = FIXED_WINDOW):
 
 
 def _patch_budget(monkeypatch):
-    monkeypatch.setattr(tj.token_budget, "record", AsyncMock())
+    from app.services.ai_budget import ReservationToken
+
+    async def fake_reserve(user_id, tokens):
+        return ReservationToken(id="fake", who=str(user_id), day="2026-01-01", reserved=tokens)
+
+    monkeypatch.setattr(tj.token_budget, "reserve", AsyncMock(side_effect=fake_reserve))
+    monkeypatch.setattr(tj.token_budget, "settle", AsyncMock())
+    monkeypatch.setattr(tj.token_budget, "release", AsyncMock())
 
 
 async def _entry(db, user_id) -> TradeJournalEntry | None:

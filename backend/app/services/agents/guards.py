@@ -23,6 +23,19 @@ re-deriving them:
 None of these three mechanisms is new; this module only composes them behind
 one call so a follow-up agent doesn't have to import and sequence all three
 itself.
+
+U10 note (atomic reserve/settle): this guard's budget check
+(:meth:`AITokenBudget.check`) is intentionally NOT the atomicity boundary —
+it stays a cheap, non-mutating early exit (skip assembling agent context
+when the budget is obviously already exhausted). Enforcement now lives in
+``AITokenBudget.reserve()``, called atomically immediately before each real
+LLM call in the service layer (``AIService`` + the three agent modules), so
+two concurrent calls racing a near-exhausted budget can never both pass.
+Because ``reserve()`` writes to the same Redis counter this guard's
+``check()`` reads, an in-flight (unsettled) reservation already counts
+against what this guard sees - it is "reserve-aware" without needing its
+own atomic op. See ``app/services/ai_budget.py`` module docstring for the
+full design.
 """
 
 from __future__ import annotations

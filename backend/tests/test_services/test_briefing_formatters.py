@@ -8,6 +8,7 @@ from app.services.notifications.formatters import (
     AlertTrigger,
     EODData,
     MorningData,
+    ThemeData,
     format_eod_wrap,
     format_morning_pulse,
 )
@@ -241,3 +242,233 @@ class TestEODPostMarketMovers:
     def test_no_section_when_no_postmarket_data(self):
         message = format_eod_wrap(EODData())
         assert "POST-MARKET" not in message
+
+
+class TestEODWrapCatalysts:
+    """News & Catalyst agent injection into the EOD wrap (U11, mirroring
+    #210's TestMorningPulseCatalysts)."""
+
+    _FIXED_NOW = datetime(2026, 7, 18, 16, 30, 0, tzinfo=ZoneInfo("America/New_York"))
+
+    # Captured from this branch's pre-catalysts format_eod_wrap for the exact
+    # EODData built below, with _get_et_now frozen to _FIXED_NOW - a real
+    # byte-for-byte baseline, not a hand-computed guess (mirrors the morning
+    # pulse golden's provenance).
+    _GOLDEN_NO_CATALYSTS = (
+        "🌙 End of Day Wrap - Jul 18, 2026\n\n"
+        "MARKET CLOSE\nSPY +0.35%\nVIX 14.8\n\n"
+        "THEME PERFORMANCE\n⚛️ Uranium & Nuclear: UUUU +2.10% | Strong day\n\n"
+        "MY POSITIONS\nBest: CCJ +1.50% | VOO +0.20%\nWorst: VOO +0.20% | EQT -0.80%\n\n"
+        "BIG MOVERS (>3%)\n⬆️ UUUU +5.20%\n\n"
+        "POST-MARKET MOVERS (>2%)\n⬆️ CCJ +2.40%\n\n"
+        "ALERTS\n🔔 1 triggered today | 35 active\n"
+        "• CCJ < 105.00: Triggered at $95.03\n  ↳ Trim tier\n"
+        "Approaching:\n• EQT half-starter zone: < $52 — -1.2% away\n\n"
+        "TRIGGER PLAYBOOK\n• [HIT] Uranium thesis → add tier\n\n"
+        "TOMORROW\n🔴 FOMC"
+    )
+
+    @staticmethod
+    def _base_kwargs() -> dict:
+        return dict(
+            market={
+                "SPY": {"price": 550.0, "change_percent": 0.35},
+                "^VIX": {"price": 14.8, "change_percent": 0},
+            },
+            themes=[
+                ThemeData(
+                    name="Uranium & Nuclear",
+                    emoji="⚛️",
+                    positions=[{"symbol": "UUUU", "change_percent": 2.1}],
+                )
+            ],
+            my_positions=[
+                {"symbol": "CCJ", "change_percent": 1.5},
+                {"symbol": "EQT", "change_percent": -0.8},
+                {"symbol": "VOO", "change_percent": 0.2},
+            ],
+            big_movers=[{"symbol": "UUUU", "change_percent": 5.2}],
+            postmarket_movers=[{"symbol": "CCJ", "change_percent": 2.4}],
+            alerts_triggered=[
+                AlertTrigger(name="CCJ < 105.00", triggered_value=95.03, notes="Trim tier")
+            ],
+            active_alerts=35,
+            approaching=["• EQT half-starter zone: < $52 — -1.2% away"],
+            playbook_status=["• [HIT] Uranium thesis → add tier"],
+            tomorrow_events=[
+                {"event_time": None, "title": "FOMC", "importance": "high", "event_type": "", "symbol": None}
+            ],
+        )
+
+    def test_byte_identical_when_catalysts_and_unavailable_sections_absent(self, monkeypatch):
+        """Leaving the new fields at their defaults (None / []) must render
+        identically to the pre-existing formatter - the load-bearing
+        inertness guarantee (per the adjudicated addendum: enforceable
+        whenever the catalyst query returns nothing, which is what happens
+        today in prod since the agents have never run)."""
+        monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
+
+        data = EODData(**self._base_kwargs())  # catalysts/unavailable_sections default
+
+        message = format_eod_wrap(data)
+
+        assert message == self._GOLDEN_NO_CATALYSTS
+        assert "CATALYSTS" not in message
+        assert "Some data unavailable" not in message
+
+    def test_catalyst_appended_to_big_mover_line(self, monkeypatch):
+        monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
+
+        kwargs = self._base_kwargs()
+        kwargs["catalysts"] = {"UUUU": "DOE announced new uranium reserve program."}
+        message = format_eod_wrap(EODData(**kwargs))
+
+        assert (
+            "⬆️ UUUU +5.20% — DOE announced new uranium reserve program." in message
+        )
+        # UUUU's catalyst is already inline in BIG MOVERS - must not also be
+        # repeated in the standalone CATALYSTS section.
+        assert "CATALYSTS" not in message
+
+    def test_catalyst_appended_to_postmarket_mover_line(self, monkeypatch):
+        monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
+
+        kwargs = self._base_kwargs()
+        kwargs["catalysts"] = {"CCJ": "Uranium supply deal announced."}
+        message = format_eod_wrap(EODData(**kwargs))
+
+        assert "⬆️ CCJ +2.40% — Uranium supply deal announced." in message
+        # CCJ's catalyst is already inline in POST-MARKET MOVERS - must not
+        # also be repeated in the standalone CATALYSTS section.
+        assert "CATALYSTS" not in message
+
+    def test_catalysts_section_for_non_mover_watchlist_symbols(self, monkeypatch):
+        monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
+
+        kwargs = self._base_kwargs()
+        kwargs["catalysts"] = {"EQT": "New pipeline capacity approved."}
+        message = format_eod_wrap(EODData(**kwargs))
+
+        assert "CATALYSTS" in message
+        assert "• EQT: New pipeline capacity approved." in message
+        # Neither mover section is affected (no catalyst assigned to UUUU or
+        # CCJ here) - isolate each and confirm nothing got appended.
+        big_movers_section = message.split("BIG MOVERS (>3%)\n", 1)[1].split("\n\n", 1)[0]
+        assert big_movers_section == "⬆️ UUUU +5.20%"
+        postmarket_section = message.split("POST-MARKET MOVERS (>2%)\n", 1)[1].split("\n\n", 1)[0]
+        assert postmarket_section == "⬆️ CCJ +2.40%"
+
+    def test_catalysts_section_placed_after_movers_before_tomorrow(self, monkeypatch):
+        monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
+
+        kwargs = self._base_kwargs()
+        kwargs["catalysts"] = {"EQT": "New pipeline capacity approved."}
+        message = format_eod_wrap(EODData(**kwargs))
+
+        assert (
+            message.index("POST-MARKET MOVERS")
+            < message.index("CATALYSTS")
+            < message.index("TOMORROW")
+        )
+
+    def test_catalysts_section_capped_at_three_lines(self, monkeypatch):
+        monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
+
+        kwargs = self._base_kwargs()
+        kwargs["catalysts"] = {f"SYM{i}": f"Catalyst {i}" for i in range(4)}
+        message = format_eod_wrap(EODData(**kwargs))
+
+        catalysts_block = message.split("CATALYSTS\n", 1)[1].split("\n\n", 1)[0]
+        assert len(catalysts_block.strip().splitlines()) == 3
+
+    def test_unavailable_sections_feeds_the_footer(self, monkeypatch):
+        monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
+
+        kwargs = self._base_kwargs()
+        kwargs["unavailable_sections"] = ["catalysts"]
+        message = format_eod_wrap(EODData(**kwargs))
+
+        assert "⚠️ Some data unavailable" in message
+
+    def test_successful_empty_catalysts_no_warning_no_section(self, monkeypatch):
+        """A query that legitimately returns nothing (slow news day, or the
+        agent has never run) must not trip the footer warning - only an
+        assembly-side FAILURE (unavailable_sections) does that."""
+        monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
+
+        kwargs = self._base_kwargs()
+        kwargs["catalysts"] = {}
+        message = format_eod_wrap(EODData(**kwargs))
+
+        assert "CATALYSTS" not in message
+        assert "Some data unavailable" not in message
+
+    def test_truncation_drops_catalysts_before_mover_sections(self, monkeypatch):
+        """When dropping TOMORROW alone isn't enough (catalyst text is
+        long), CATALYSTS drops next - core price/mover data survives before
+        the catalysts extra. (Base message here is 479 chars; the 3 catalyst
+        lines alone add ~1830 chars, comfortably over the 2000 limit even
+        with TOMORROW already gone, so the ladder must reach CATALYSTS.)"""
+        monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
+
+        kwargs = self._base_kwargs()
+        kwargs["catalysts"] = {
+            "EQT": "x" * 600,
+            "VOO": "y" * 600,
+            "SPY": "z" * 600,
+        }
+
+        message = format_eod_wrap(EODData(**kwargs))
+
+        assert len(message) <= 2000
+        assert "TOMORROW" not in message
+        assert "CATALYSTS" not in message
+        # The higher-priority sections ahead of CATALYSTS in the ladder
+        # survive intact.
+        assert "BIG MOVERS (>3%)" in message
+        assert "POST-MARKET MOVERS (>2%)" in message
+        assert "MARKET CLOSE" in message
+
+    def test_truncation_drops_tomorrow_only_when_that_alone_suffices(self, monkeypatch):
+        """The ladder stops as soon as the message fits - a bulky TOMORROW
+        with a short CATALYSTS must not drop CATALYSTS unnecessarily."""
+        monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
+
+        kwargs = self._base_kwargs()
+        kwargs["catalysts"] = {"EQT": "New pipeline capacity approved with strong upside."}
+        kwargs["tomorrow_events"] = [
+            {
+                "event_time": None,
+                "title": "FOMC " + "a" * 1500,
+                "importance": "high",
+                "event_type": "",
+                "symbol": None,
+            }
+        ]
+
+        message = format_eod_wrap(EODData(**kwargs))
+
+        assert len(message) <= 2000
+        assert "TOMORROW" not in message
+        assert "CATALYSTS" in message
+        assert "New pipeline capacity approved" in message
+
+    def test_mention_neutralization_preserved_through_eod_formatter(self, monkeypatch):
+        """Formatter-level check that pre-neutralized catalyst text (as
+        get_catalyst_lines always returns - see test_catalysts.py, and the
+        assembly-level test in test_tasks/test_alerts_eod_catalysts.py for
+        the DB-backed path) passes through the EOD formatter unchanged - the
+        formatter must not need its own sanitization."""
+        from app.services.catalysts import _neutralize_mentions
+
+        monkeypatch.setattr(formatters_module, "_get_et_now", lambda: self._FIXED_NOW)
+
+        neutralized = _neutralize_mentions("Ping the desk @everyone about this.")
+        assert "@everyone" not in neutralized  # sanity: fixture is actually defanged
+
+        kwargs = self._base_kwargs()
+        kwargs["catalysts"] = {"EQT": neutralized}
+        message = format_eod_wrap(EODData(**kwargs))
+
+        assert "@everyone" not in message
+        assert neutralized in message

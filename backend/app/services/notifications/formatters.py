@@ -374,6 +374,18 @@ class EODData:
     playbook_status: list[str] = field(default_factory=list)
     # Tomorrow's calendar: [{event_time, title, importance, event_type, symbol}, ...]
     tomorrow_events: list[dict] = field(default_factory=list)
+    # News & Catalyst agent (T1 sub-PR 2/4's MorningData.catalysts, mirrored
+    # for the EOD wrap in U11): symbol -> catalyst line (<=80 chars), e.g.
+    # "DOE announced new uranium reserve program." None/empty (the default)
+    # must render byte-identical to before this field existed - see
+    # tests/test_services/test_briefing_formatters.py's catalyst-absent case.
+    catalysts: Optional[dict[str, str]] = None
+    # Section names that failed to assemble this run, from OUTSIDE the
+    # formatter (e.g. the catalysts DB query in alerts.py's assembly step).
+    # Seeds the same "Some data unavailable" footer the formatter's own
+    # per-section try/except blocks feed - one source of truth for the
+    # warning, regardless of where the failure happened.
+    unavailable_sections: list[str] = field(default_factory=list)
 
 
 def _theme_narrative(positions: list[dict]) -> str:
@@ -397,7 +409,10 @@ def _theme_narrative(positions: list[dict]) -> str:
 
 def format_eod_wrap(data: EODData) -> str:
     """Format the end-of-day wrap notification as plain text."""
-    warnings: list[str] = []
+    # Seeded from assembly-side failures (e.g. the catalysts query) so they
+    # feed the same footer as this function's own per-section try/excepts.
+    # Default is [] - identical to the pre-existing `warnings: list[str] = []`.
+    warnings: list[str] = list(data.unavailable_sections)
     sections: list[str] = []
 
     now_et = _get_et_now()
@@ -488,6 +503,12 @@ def format_eod_wrap(data: EODData) -> str:
         logger.warning(f"Error formatting positions: {e}")
 
     # -- Big Movers --
+    # Tracks every symbol actually printed by EOD's two mover sections (BIG
+    # MOVERS + POST-MARKET MOVERS) - mirrors format_morning_pulse's
+    # shown_mover_symbols, but spans both sections here since EOD has two.
+    # Feeds the standalone CATALYSTS section below so it never repeats a
+    # symbol that already got its catalyst suffixed inline.
+    enriched_symbols: set[str] = set()
     try:
         big_up = [m for m in data.big_movers if m["change_percent"] > 3.0]
         big_down = [m for m in data.big_movers if m["change_percent"] < -3.0]
@@ -497,9 +518,19 @@ def format_eod_wrap(data: EODData) -> str:
             big_up.sort(key=lambda m: m["change_percent"], reverse=True)
             big_down.sort(key=lambda m: m["change_percent"])
             for m in big_up[:4]:
-                lines.append(f"⬆️ {m['symbol']} {_fmt_pct(m['change_percent'])}")
+                enriched_symbols.add(m["symbol"])
+                line = f"⬆️ {m['symbol']} {_fmt_pct(m['change_percent'])}"
+                catalyst = (data.catalysts or {}).get(m["symbol"])
+                if catalyst:
+                    line += f" — {catalyst}"
+                lines.append(line)
             for m in big_down[:4]:
-                lines.append(f"⬇️ {m['symbol']} {_fmt_pct(m['change_percent'])}")
+                enriched_symbols.add(m["symbol"])
+                line = f"⬇️ {m['symbol']} {_fmt_pct(m['change_percent'])}"
+                catalyst = (data.catalysts or {}).get(m["symbol"])
+                if catalyst:
+                    line += f" — {catalyst}"
+                lines.append(line)
             sections.append("\n".join(lines))
         else:
             sections.append("BIG MOVERS (>3%)\nNo moves >3% today")
@@ -512,12 +543,45 @@ def format_eod_wrap(data: EODData) -> str:
         if data.postmarket_movers:
             lines = ["POST-MARKET MOVERS (>2%)"]
             for m in data.postmarket_movers[:5]:
+                enriched_symbols.add(m["symbol"])
                 arrow = "⬆️" if m["change_percent"] > 0 else "⬇️"
-                lines.append(f"{arrow} {m['symbol']} {_fmt_pct(m['change_percent'])}")
+                line = f"{arrow} {m['symbol']} {_fmt_pct(m['change_percent'])}"
+                catalyst = (data.catalysts or {}).get(m["symbol"])
+                if catalyst:
+                    line += f" — {catalyst}"
+                lines.append(line)
             sections.append("\n".join(lines))
     except Exception as e:
         warnings.append("post-market movers")
         logger.warning(f"Error formatting post-market movers: {e}")
+
+    # -- Catalysts (News & Catalyst agent, non-mover watchlist news) --
+    # Both mover sections above already got their catalyst inline; this
+    # surfaces high-relevance news for watchlist names that *didn't* move
+    # (in either section), so it never repeats a symbol already shown.
+    # Absent/empty data.catalysts (the default) adds no section - required
+    # for byte-identical output. Placed immediately after the mover
+    # sections, mirroring format_morning_pulse's CATALYSTS adjacency to its
+    # one mover section.
+    catalysts_section = ""
+    try:
+        if data.catalysts:
+            extra = [
+                (symbol, line)
+                for symbol, line in data.catalysts.items()
+                if symbol not in enriched_symbols
+            ]
+            if extra:
+                lines = ["CATALYSTS"]
+                for symbol, line in extra[:3]:
+                    lines.append(f"• {symbol}: {line}")
+                catalysts_section = "\n".join(lines)
+    except Exception as e:
+        warnings.append("catalysts")
+        logger.warning(f"Error formatting catalysts: {e}")
+
+    if catalysts_section:
+        sections.append(catalysts_section)
 
     # -- Alerts --
     try:
@@ -594,9 +658,17 @@ def format_eod_wrap(data: EODData) -> str:
 
     message = "\n\n".join(sections)
 
-    # Truncate if over Discord limit - drop tomorrow first, then big movers
+    # Truncate if over Discord limit - drop tomorrow first, then catalysts,
+    # then a hard char cut. CATALYSTS drops before the (higher-priority)
+    # mover sections - i.e. right after TOMORROW in the ladder - so a rare
+    # catalyst headline that pushes the message over the limit never costs
+    # the core price/mover data ahead of it.
     if len(message) > DISCORD_CHAR_LIMIT and tomorrow_section:
         sections = [s for s in sections if s != tomorrow_section]
+        message = "\n\n".join(sections)
+
+    if len(message) > DISCORD_CHAR_LIMIT and catalysts_section:
+        sections = [s for s in sections if s != catalysts_section]
         message = "\n\n".join(sections)
 
     if len(message) > DISCORD_CHAR_LIMIT:

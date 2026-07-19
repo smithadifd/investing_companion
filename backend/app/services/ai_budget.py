@@ -227,6 +227,18 @@ if current + delta < 0 then
 end
 
 local new_total = redis.call('INCRBY', KEYS[1], delta)
+-- Mirrors reserve()'s and the fallback branch's "first write of the day"
+-- guard: if the day key didn't already exist (e.g. evicted under the
+-- deployment's allkeys-lru posture while this reservation's own record
+-- survived), this INCRBY just created it from scratch, and it would
+-- otherwise persist with no TTL forever - re-establish the day's TTL.
+-- `current == 0` alone can't distinguish "missing key" from "legitimately
+-- at zero", but new_total == delta can: it only holds when this call's
+-- INCRBY was the sole contribution to the key's value, i.e. it started
+-- from nothing.
+if new_total == delta then
+  redis.call('EXPIRE', KEYS[1], day_ttl)
+end
 redis.call('DEL', KEYS[2])
 redis.call('SET', KEYS[3], '1', 'EX', marker_ttl)
 

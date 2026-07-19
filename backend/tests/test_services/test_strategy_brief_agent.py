@@ -541,6 +541,36 @@ async def test_compose_brief_returns_none_on_llm_exception(monkeypatch):
     assert budget.settled == [(budget.reserved[0][0], 0)]
 
 
+async def test_compose_brief_returns_none_when_reserve_raises_budget_exceeded(monkeypatch):
+    """guard()'s advisory check() (run earlier, non-mutating) can pass and
+    then reserve() - the real, atomic enforcement boundary - still raise
+    moments later; that race is documented as expected in ai_budget.py's
+    module docstring. _compose_brief must degrade the same way it does for
+    any other "can't compose a brief right now" condition (log + return
+    None) rather than let BudgetExceededError propagate uncaught out of
+    execute() into the Celery task as an unhandled error."""
+    from app.services.ai_budget import BudgetExceededError
+
+    monkeypatch.setattr(
+        sb.AIService, "get_settings", AsyncMock(return_value=MagicMock(default_model=None))
+    )
+
+    class ExceededBudget(FakeBudget):
+        async def reserve(self, user_id, tokens):
+            raise BudgetExceededError(used=999, limit=100)
+
+    budget = ExceededBudget()
+
+    with patch("anthropic.Anthropic") as ctor:
+        result = await sb._compose_brief(
+            MagicMock(), uuid.uuid4(), "sk-test", _empty_context(), budget=budget
+        )
+        ctor.assert_not_called()  # blocked before any API/token spend
+
+    assert result is None
+    assert budget.settled == []  # no reservation was ever minted to settle/release
+
+
 async def test_compose_brief_returns_none_on_empty_response(monkeypatch):
     monkeypatch.setattr(
         sb.AIService, "get_settings", AsyncMock(return_value=MagicMock(default_model=None))

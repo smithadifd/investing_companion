@@ -421,6 +421,35 @@ async def test_score_llm_call_failure_leaves_items_unscored(db, monkeypatch):
     assert items[0].relevance is None  # persisted, still unscored
 
 
+async def test_score_reserve_budget_exceeded_leaves_items_unscored(db, monkeypatch):
+    """guard()'s advisory check() (run earlier in execute(), non-mutating)
+    can pass and then reserve() - the real, atomic enforcement boundary -
+    still raise moments later; that race is documented as expected in
+    ai_budget.py's module docstring. _score() must degrade the same way it
+    does for any other "can't score right now" condition (log + leave the
+    batch unscored for the next run's re-query) rather than let
+    BudgetExceededError propagate uncaught out of execute() into the Celery
+    task as an unhandled error."""
+    from app.services.ai_budget import BudgetExceededError
+
+    items = await _make_items(db, 1)
+    _mock_ai_service(monkeypatch)
+
+    async def fake_reserve(user_id, tokens):
+        raise BudgetExceededError(used=999, limit=100)
+
+    monkeypatch.setattr(news_token_budget, "reserve", fake_reserve)
+
+    with patch("anthropic.Anthropic") as ctor:
+        agent = NewsCatalystAgent()
+        await agent._score(db, uuid.uuid4(), items)
+        ctor.assert_not_called()  # blocked before any API/token spend
+
+    assert items[0].relevance is None
+    await db.refresh(items[0])
+    assert items[0].relevance is None  # persisted, still unscored - retried next run
+
+
 async def test_score_malformed_response_leaves_items_unscored(db, monkeypatch):
     items = await _make_items(db, 1)
     _mock_ai_service(monkeypatch)

@@ -321,6 +321,36 @@ async def test_settle_after_reservation_record_expired_is_best_effort_fallback(
     assert any("expired" in rec.message.lower() for rec in caplog.records)
 
 
+async def test_settle_reestablishes_ttl_when_day_counter_was_evicted(real_redis):
+    """If the day counter key is gone at settle time (allkeys-lru eviction
+    under memory pressure - the deployment posture this module documents as
+    best-effort, not a ledger) but the reservation record survived, settle()
+    recreates the day counter via INCRBY. That recreated key must carry a
+    TTL, same as a fresh key created by reserve() or by the expired-fallback
+    branch - otherwise it would persist with no TTL until an eviction picks
+    it up again, silently breaking the "expires automatically, no cleanup
+    needed" contract in this exact narrow case."""
+    budget = _budget(real_redis)
+    uid = uuid.uuid4()
+
+    reservation = await budget.reserve(uid, 50)
+    day_key = budget._day_key(reservation.who, reservation.day)
+    assert await real_redis.ttl(day_key) > 0  # reserve() set it
+
+    # Simulate an allkeys-lru eviction of ONLY the day counter - the
+    # reservation record (a different key) survives.
+    deleted = await real_redis.delete(day_key)
+    assert deleted == 1
+
+    # actual > reserved: delta (+40) is positive and unclamped, so this
+    # exercises the general "recreated key" path, not just the floor-clamp
+    # special case.
+    await budget.settle(uid, reservation, 90)
+
+    assert await budget.used(uid) == 40
+    assert await real_redis.ttl(day_key) > 0
+
+
 # ---------------------------------------------------------------------------
 # Disabled budget (limit <= 0) - reserve()/settle() are pure no-ops
 # ---------------------------------------------------------------------------

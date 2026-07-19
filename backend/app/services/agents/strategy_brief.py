@@ -42,6 +42,7 @@ from app.services.agents.guards import AgentFlag
 from app.services.ai import AIService
 from app.services.ai_budget import (
     AITokenBudget,
+    BudgetExceededError,
     ReservationToken,
     token_budget as _default_token_budget,
 )
@@ -606,7 +607,23 @@ async def _compose_brief(
     # Atomically reserve the per-call ceiling; fails closed on an exhausted
     # budget, fails open (untracked token) on a Redis outage. This is the
     # sole enforcement boundary - see app/services/ai_budget.py.
-    reservation: ReservationToken = await budget.reserve(user_id, LLM_MAX_TOKENS)
+    #
+    # guard() (AdvisoryAgent.guard -> check_agent_preconditions) already ran
+    # a non-mutating advisory check earlier in this task, but that check is
+    # deliberately not paired with this reserve() call (see ai_budget.py's
+    # module docstring) - the budget can legitimately tip over between the
+    # two. That is expected and correct, so treat it exactly like any other
+    # "can't compose a brief right now" condition: log and return None,
+    # rather than letting it propagate as an unhandled Celery task error for
+    # what is a normal, designed-for race.
+    try:
+        reservation: ReservationToken = await budget.reserve(user_id, LLM_MAX_TOKENS)
+    except BudgetExceededError:
+        logger.info(
+            "strategy_brief: daily AI token budget exhausted at reserve time "
+            "(guard's earlier advisory check can race this); skipping"
+        )
+        return None
 
     try:
         client = anthropic.Anthropic(api_key=api_key)

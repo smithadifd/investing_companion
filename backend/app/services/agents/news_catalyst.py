@@ -68,7 +68,7 @@ from app.db.models.news_item import NewsItem
 from app.schemas.ai import AIModel
 from app.services.agents.base import AdvisoryAgent
 from app.services.ai import AIService
-from app.services.ai_budget import ReservationToken, token_budget
+from app.services.ai_budget import BudgetExceededError, ReservationToken, token_budget
 from app.services.data_providers.finnhub import FinnhubNewsProvider
 from app.services.watchlist import WatchlistService
 
@@ -521,7 +521,24 @@ class NewsCatalystAgent(AdvisoryAgent):
         # Atomically reserve the per-call ceiling; fails closed on an
         # exhausted budget, fails open (untracked token) on a Redis outage.
         # This is the sole enforcement boundary - see app/services/ai_budget.py.
-        reservation: ReservationToken = await token_budget.reserve(user_id, LLM_MAX_TOKENS)
+        #
+        # guard()'s earlier advisory check (check_agent_preconditions) is
+        # deliberately not paired with this reserve() call (see
+        # ai_budget.py's module docstring) - the budget can legitimately tip
+        # over between the two. That is expected and correct, so treat it
+        # like any other "can't score right now" condition: log and leave
+        # this batch unscored (it's picked up again next run - see
+        # execute()'s re-query comment) rather than letting it propagate as
+        # an unhandled Celery task error for a normal, designed-for race.
+        try:
+            reservation: ReservationToken = await token_budget.reserve(user_id, LLM_MAX_TOKENS)
+        except BudgetExceededError:
+            logger.info(
+                "news_catalyst: daily AI token budget exhausted at reserve time "
+                "(guard's earlier advisory check can race this); leaving %d items unscored",
+                len(batch),
+            )
+            return
 
         try:
             client = anthropic.Anthropic(api_key=api_key)

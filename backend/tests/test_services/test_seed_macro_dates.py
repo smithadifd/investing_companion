@@ -48,7 +48,7 @@ class TestFomc2025Dates:
         ]
 
     def test_known_wrong_examples_now_correct(self):
-        """The #36 verifier's receipts: both meetings were guessed a week-plus
+        """The #36 verifier's receipts: both meetings were guessed one week
         late in the pre-fix seed list."""
         assert (date(2025, 10, 28), date(2025, 10, 29)) in FOMC_DATES_2025
         assert (date(2025, 11, 4), date(2025, 11, 5)) not in FOMC_DATES_2025
@@ -112,7 +112,9 @@ class TestGdp2026Dates:
     plus the individual embargoed press releases cited in the block comment
     above GDP_DATES_2026 in seed_macro_events.py. Retrieved 2026-07-21."""
 
-    def test_matches_bea_schedule_exactly(self):
+    def test_matches_bea_schedule_for_supported_non_colliding_dates(self):
+        """Exact-equality on the seed list as shipped -- deliberately excludes
+        both April-2026 BEA releases (see the collision test below)."""
         assert GDP_DATES_2026 == [
             (date(2026, 1, 22), "Q3 2025 Updated Estimate"),
             (date(2026, 2, 20), "Q4 2025 Advance"),

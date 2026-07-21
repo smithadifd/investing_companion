@@ -66,7 +66,7 @@ from app.services.economic_event import EconomicEventService
 # confirms the Aug 22, 2025 item below is real but is NOT a rate-decision
 # meeting).
 #
-# 2025 corrected: the last two meetings were guessed a week-plus off.
+# 2025 corrected: the last two meetings were guessed one week late.
 #   - Nov 4-5, 2025 -> Oct 28-29, 2025 (real meeting 7 days earlier)
 #   - Dec 16-17, 2025 -> Dec 9-10, 2025 (real meeting 7 days earlier, SEP)
 # Excluded on purpose: Aug 22, 2025 is a "notation vote" approving the Fed's

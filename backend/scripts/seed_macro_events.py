@@ -24,6 +24,13 @@ recurrence-key dedup path (``EconomicEventService.sync_macro_events``): the live
 feed never bypasses it, and a re-run updates a moved date in place instead of
 duplicating it.
 
+Calendar accuracy audit (2026-07-21, issue 015 -- docs/issues/015-calendar-accuracy-audit.md):
+FOMC and GDP were re-derived from their primary calendars (federalreserve.gov,
+bea.gov) and corrected -- see the source/citation block above each list below.
+CPI and NFP were NOT re-derived this pass: bls.gov was unreachable from this
+pass's fetch tooling (HTTP 403 on every path tried) -- see the block comments
+above ``CPI_DATES_2025``/``NFP_DATES_2025`` for the follow-up.
+
 Usage:
     cd backend
     python -m scripts.seed_macro_events
@@ -53,6 +60,26 @@ from app.services.economic_event import EconomicEventService
 # ============================================================================
 # FOMC Meeting Schedule
 # Source: https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
+# Retrieved: 2026-07-21 (fetched directly from the Fed's own calendar page;
+# cross-checked against FOMC minutes/press-release URLs — e.g.
+# fomcminutes20250917.htm confirms Sep 16-17, 2025; monetary20250822a.htm
+# confirms the Aug 22, 2025 item below is real but is NOT a rate-decision
+# meeting).
+#
+# 2025 corrected: the last two meetings were guessed one week late.
+#   - Nov 4-5, 2025 -> Oct 28-29, 2025 (real meeting 7 days earlier)
+#   - Dec 16-17, 2025 -> Dec 9-10, 2025 (real meeting 7 days earlier, SEP)
+# Excluded on purpose: Aug 22, 2025 is a "notation vote" approving the Fed's
+# Statement on Longer-Run Goals and Monetary Policy Strategy — an
+# administrative vote, not a 2-day meeting with a 2pm ET rate statement, so
+# it doesn't fit this list's (day1, day2) rate-decision shape and isn't one
+# of the Fed's 8 regularly scheduled meetings.
+#
+# 2026 corrected (previously marked "Tentative"; now the Fed's confirmed
+# published calendar): three meetings were guessed exactly 7 days late.
+#   - May 5-6, 2026 -> Apr 28-29, 2026
+#   - Nov 3-4, 2026 -> Oct 27-28, 2026
+#   - Dec 15-16, 2026 -> Dec 8-9, 2026 (SEP)
 # ============================================================================
 
 # FOMC meetings are typically 2-day events (Tue-Wed or Wed-Thu)
@@ -64,27 +91,41 @@ FOMC_DATES_2025: List[Tuple[date, date]] = [
     (date(2025, 6, 17), date(2025, 6, 18)),   # Jun 17-18 (SEP*)
     (date(2025, 7, 29), date(2025, 7, 30)),   # Jul 29-30
     (date(2025, 9, 16), date(2025, 9, 17)),   # Sep 16-17 (SEP*)
-    (date(2025, 11, 4), date(2025, 11, 5)),   # Nov 4-5
-    (date(2025, 12, 16), date(2025, 12, 17)), # Dec 16-17 (SEP*)
+    (date(2025, 10, 28), date(2025, 10, 29)), # Oct 28-29 -- CORRECTED (was Nov 4-5)
+    (date(2025, 12, 9), date(2025, 12, 10)),  # Dec 9-10 (SEP*) -- CORRECTED (was Dec 16-17)
 ]
 # * = Summary of Economic Projections meeting
 
 FOMC_DATES_2026: List[Tuple[date, date]] = [
-    # Tentative - typically released late 2025
-    (date(2026, 1, 27), date(2026, 1, 28)),
-    (date(2026, 3, 17), date(2026, 3, 18)),
-    (date(2026, 5, 5), date(2026, 5, 6)),
-    (date(2026, 6, 16), date(2026, 6, 17)),
-    (date(2026, 7, 28), date(2026, 7, 29)),
-    (date(2026, 9, 15), date(2026, 9, 16)),
-    (date(2026, 11, 3), date(2026, 11, 4)),
-    (date(2026, 12, 15), date(2026, 12, 16)),
+    # Fed's confirmed published 2026 calendar (see source note above).
+    (date(2026, 1, 27), date(2026, 1, 28)),   # Jan 27-28
+    (date(2026, 3, 17), date(2026, 3, 18)),   # Mar 17-18 (SEP*)
+    (date(2026, 4, 28), date(2026, 4, 29)),   # Apr 28-29 -- CORRECTED (was May 5-6)
+    (date(2026, 6, 16), date(2026, 6, 17)),   # Jun 16-17 (SEP*)
+    (date(2026, 7, 28), date(2026, 7, 29)),   # Jul 28-29
+    (date(2026, 9, 15), date(2026, 9, 16)),   # Sep 15-16 (SEP*)
+    (date(2026, 10, 27), date(2026, 10, 28)), # Oct 27-28 -- CORRECTED (was Nov 3-4)
+    (date(2026, 12, 8), date(2026, 12, 9)),   # Dec 8-9 (SEP*) -- CORRECTED (was Dec 15-16)
 ]
 
 
 # ============================================================================
 # CPI Release Schedule (usually second week of month)
 # Source: https://www.bls.gov/schedule/news_release/cpi.htm
+#
+# NOT RE-DERIVED in the 2026-07-21 pass (issue 015 audit): every bls.gov path
+# tried (schedule/news_release/cpi.htm, bls/2025-lapse-revised-release-dates.htm,
+# schedule/2026/home.htm, schedule/news_release/current_year.asp, cpi/,
+# news.release/cpi.htm, download.bls.gov, apps.bls.gov) returned HTTP 403 or
+# failed DNS resolution for this pass's fetch tooling — the primary source is
+# unreachable, so per this fix's decision authority these dates are LEFT AS-IS
+# rather than corrected from a secondary source. Known independently
+# corroborated (news-secondary, NOT used to change code here) via the Oct-Nov
+# 2025 shutdown: the Sep-2025 CPI (normally ~Oct 15) had a special COLA-driven
+# release Oct 24, 2025; the Oct-2025 CPI was canceled outright; Nov-2025 CPI
+# released Dec 18, 2025; Dec-2025 CPI released Jan 13, 2026; a SECOND
+# lapse pushed Jan-2026 CPI from Feb 11 to Feb 13, 2026. Follow-up: re-run this
+# derivation once bls.gov is reachable (e.g. an authenticated/browser fetch).
 # ============================================================================
 
 CPI_DATES_2025: List[date] = [
@@ -121,6 +162,13 @@ CPI_DATES_2026: List[date] = [
 # ============================================================================
 # NFP (Non-Farm Payrolls) / Jobs Report (first Friday of month)
 # Source: https://www.bls.gov/schedule/news_release/empsit.htm
+#
+# NOT RE-DERIVED in the 2026-07-21 pass — same bls.gov unreachable blocker as
+# CPI above (see that block comment). Known independently corroborated
+# (news-secondary, NOT used to change code here): the Sep-2025 jobs report
+# (normally ~Oct 3) was delayed to Nov 20, 2025; the Oct-2025 report was never
+# separately published (partial data folded into the next report); Nov-2025
+# released Dec 16, 2025. Follow-up: re-run once bls.gov is reachable.
 # ============================================================================
 
 NFP_DATES_2025: List[date] = [
@@ -156,7 +204,40 @@ NFP_DATES_2026: List[date] = [
 
 # ============================================================================
 # GDP Release Schedule (quarterly, ~1 month after quarter end)
-# Three releases: Advance, Second, Third
+# Three releases: Advance, Second, Third -- except where the 2025 shutdown
+# collapsed the cycle (see below).
+# Source: https://www.bea.gov/news/schedule (full-2025 / full-2026 tabs, plus
+# individual embargoed press releases). Retrieved: 2026-07-21.
+#
+# The Oct-Nov 2025 government shutdown collapsed BEA's Q3-2025 cycle: the
+# Advance estimate (originally Oct 30, 2025) and the Second estimate
+# (originally Nov 26, 2025) were both CANCELED ("sufficient source data will
+# not be available in time") and merged into one "Initial Estimate" released
+# Dec 23, 2025 --
+# https://www.bea.gov/news/2025/gross-domestic-product-3rd-quarter-2025-initial-estimate-and-corporate-profits.
+# The would-be Third estimate (originally Dec 19, 2025) became an "Updated
+# Estimate" released Jan 22, 2026, BEA 26-04 --
+# https://www.bea.gov/sites/default/files/2026-01/gdp3q25-updated.pdf.
+# The Q4-2025 cycle was pushed in turn: Advance Jan 29 -> Feb 20, 2026;
+# Second Feb 26 -> Mar 13, 2026; Third Mar 27 -> Apr 9, 2026 --
+# https://www.bea.gov/index.php/news/blog/2026-01-15/economic-release-schedule-updates-gdp-personal-income-and-outlays,
+# https://www.bea.gov/news/2026/gdp-third-estimate-industries-corporate-profits-state-gdp-and-state-personal-income-4th.
+# By Q1-2026 the cycle is back on its original cadence: Second and Third
+# landed on their originally-scheduled May 28 / Jun 25, 2026 dates, confirmed
+# directly against https://www.bea.gov/news/2026/gdp-second-estimate-and-corporate-profits-1st-quarter-2026
+# and https://www.bea.gov/news/2026/gdp-third-estimate-industries-corporate-profits-state-gdp-and-state-personal-income-1st.
+#
+# STRUCTURAL COLLISION (reported, not resolved here -- see PR description):
+# the corrected Q4-2025 Third estimate (Apr 9, 2026) and Q1-2026's Advance
+# estimate (Apr 30, 2026, itself corrected by one day from a guessed Apr 29)
+# both land in April 2026. ``macro_recurrence_key`` buckets GDP by
+# release-month (fred.py), i.e. one GDP row per calendar month, so encoding
+# both would silently collide/overwrite in the DB upsert -- a mechanics
+# change (finer-grained recurrence key) that is out of scope for this
+# date-only fix. Neither date is added below; both citations are recorded
+# here so a follow-up mechanics PR doesn't have to re-derive them:
+#   Apr 9, 2026 Q4-2025 Third -- https://www.bea.gov/news/2026/gdp-third-estimate-industries-corporate-profits-state-gdp-and-state-personal-income-4th
+#   Apr 30, 2026 Q1-2026 Advance -- https://www.bea.gov/news/2026/gdp-advance-estimate-1st-quarter-2026
 # ============================================================================
 
 GDP_DATES_2025: List[Tuple[date, str]] = [
@@ -169,24 +250,27 @@ GDP_DATES_2025: List[Tuple[date, str]] = [
     (date(2025, 7, 30), "Q2 2025 Advance"),
     (date(2025, 8, 28), "Q2 2025 Second"),
     (date(2025, 9, 25), "Q2 2025 Third"),
-    (date(2025, 10, 30), "Q3 2025 Advance"),
-    (date(2025, 11, 26), "Q3 2025 Second"),
-    (date(2025, 12, 23), "Q3 2025 Third"),
+    # Oct 30 "Q3 2025 Advance" and Nov 26 "Q3 2025 Second" were CANCELED by
+    # the shutdown and merged into the single Dec 23 release below (see the
+    # block comment above) -- no October or November GDP release occurred.
+    (date(2025, 12, 23), "Q3 2025 Initial Estimate"),  # CORRECTED label (was "Q3 2025 Third"); date unchanged
 ]
 
 GDP_DATES_2026: List[Tuple[date, str]] = [
-    (date(2026, 1, 29), "Q4 2025 Advance"),
-    (date(2026, 2, 26), "Q4 2025 Second"),
-    (date(2026, 3, 26), "Q4 2025 Third"),
-    (date(2026, 4, 29), "Q1 2026 Advance"),
-    (date(2026, 5, 28), "Q1 2026 Second"),
-    (date(2026, 6, 25), "Q1 2026 Third"),
-    (date(2026, 7, 30), "Q2 2026 Advance"),
-    (date(2026, 8, 27), "Q2 2026 Second"),
-    (date(2026, 9, 24), "Q2 2026 Third"),
-    (date(2026, 10, 29), "Q3 2026 Advance"),
-    (date(2026, 11, 25), "Q3 2026 Second"),
-    (date(2026, 12, 22), "Q3 2026 Third"),
+    (date(2026, 1, 22), "Q3 2025 Updated Estimate"),  # NEW -- replaces the would-be Dec 19, 2025 Third estimate
+    (date(2026, 2, 20), "Q4 2025 Advance"),   # CORRECTED -- moved from Jan 29, 2026 (shutdown)
+    (date(2026, 3, 13), "Q4 2025 Second"),    # CORRECTED -- moved from Feb 26, 2026 (shutdown)
+    # April 2026 intentionally has no entry: Apr 9 "Q4 2025 Third" and
+    # Apr 30 "Q1 2026 Advance" both fall here -- a structural collision under
+    # the month-bucketed recurrence key. See STRUCTURAL COLLISION note above.
+    (date(2026, 5, 28), "Q1 2026 Second"),    # confirmed unchanged
+    (date(2026, 6, 25), "Q1 2026 Third"),     # confirmed unchanged
+    (date(2026, 7, 30), "Q2 2026 Advance"),   # confirmed unchanged
+    (date(2026, 8, 26), "Q2 2026 Second"),    # CORRECTED (was Aug 27)
+    (date(2026, 9, 30), "Q2 2026 Third"),     # CORRECTED (was Sep 24)
+    (date(2026, 10, 29), "Q3 2026 Advance"),  # confirmed unchanged
+    (date(2026, 11, 25), "Q3 2026 Second"),   # confirmed unchanged
+    (date(2026, 12, 23), "Q3 2026 Third"),    # CORRECTED (was Dec 22)
 ]
 
 

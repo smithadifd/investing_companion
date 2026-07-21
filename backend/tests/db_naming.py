@@ -15,22 +15,42 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from pathlib import Path
 
 from sqlalchemy.engine import make_url
 from sqlalchemy.engine.url import URL
 
 # Every test database name (derived OR supplied via TEST_DATABASE_URL) must
-# contain this marker. This is the fail-closed guard against drop_all()/
-# create_all() ever landing on a real, non-test database — validation runs
-# before any connection or DDL (see resolve_test_database_url).
+# match this anchored pattern. This is the fail-closed guard against
+# drop_all()/create_all() ever landing on a real, non-test database —
+# validation runs before any connection or DDL (see
+# resolve_test_database_url).
+#
+# A plain substring check (`"_test" in name`) is NOT fail-closed: it also
+# accepts names like "production_test_backup" or "customer_testimonials"
+# (both contain "_test" as a substring), which are exactly the kind of
+# real-looking name this guard exists to keep drop_all()/DROP DATABASE away
+# from. Anchoring to the derived shape closes that gap; CI's pre-provisioned
+# "investing_companion_test" matches the bare (no-hash-suffix) form.
 REQUIRED_NAME_MARKER = "_test"
+_SAFE_NAME_PATTERN = re.compile(r"^investing_companion_test(_[0-9a-f]{10})?$")
 
 # Overrides the derived default entirely. Its database is caller-managed
 # (e.g. CI's pre-provisioned service container): this suite creates/drops
 # TABLES in it but never the database itself. Follows this repo's existing
 # *_DATABASE_URL / *_URL env-var naming (see app/core/config.py).
 ENV_OVERRIDE = "TEST_DATABASE_URL"
+
+# Escape hatch for a legitimate override database whose name doesn't (and
+# can't) match _SAFE_NAME_PATTERN — e.g. a hand-picked name for a scratch DB
+# used while debugging. Must be set to the EXACT candidate name (not just
+# "truthy") to opt in; this is a deliberate double-declaration ("say the
+# dangerous thing twice") so a stray/unrelated env var can't silently widen
+# the check. Still subject to the length and character-safety checks below,
+# and still required to contain REQUIRED_NAME_MARKER — this only loosens the
+# *shape* requirement, not the "must look like a test database" one.
+ALLOW_NAME_ENV = "TEST_DATABASE_ALLOW_NAME"
 
 _DERIVED_PREFIX = "investing_companion_test_"
 _HASH_LEN = 10  # 26-char prefix + 10 hex chars stays well under the 63-byte Postgres identifier limit
@@ -48,13 +68,11 @@ def validate_test_db_name(name: str) -> None:
     drop_all()/create_all() (or our own CREATE DATABASE/DROP DATABASE)
     ever pointing at a real database.
     """
-    if not name or REQUIRED_NAME_MARKER not in name:
+    if not name:
         raise UnsafeTestDatabaseName(
             f"Refusing to use {name!r} as a test database: the name must "
-            f"contain {REQUIRED_NAME_MARKER!r}. This guards drop_all()/"
-            "create_all() against ever pointing at a real database. If you "
-            f"set {ENV_OVERRIDE}, make sure its database name contains "
-            f"{REQUIRED_NAME_MARKER!r}."
+            f"match {_SAFE_NAME_PATTERN.pattern!r}. This guards drop_all()/"
+            "create_all() against ever pointing at a real database."
         )
     if len(name) > 63:
         raise UnsafeTestDatabaseName(
@@ -67,6 +85,24 @@ def validate_test_db_name(name: str) -> None:
             "letters, digits, and underscores are allowed (it is used as an "
             "unquoted-safe identifier in CREATE/DROP DATABASE)."
         )
+    if _SAFE_NAME_PATTERN.match(name):
+        return
+    allowed = os.environ.get(ALLOW_NAME_ENV)
+    if allowed is not None and allowed == name and REQUIRED_NAME_MARKER in name:
+        return
+    raise UnsafeTestDatabaseName(
+        f"Refusing to use {name!r} as a test database: it must match "
+        f"{_SAFE_NAME_PATTERN.pattern!r} (every derived name does; CI's "
+        "pre-provisioned 'investing_companion_test' matches the bare form). "
+        f"A plain substring check for {REQUIRED_NAME_MARKER!r} would also "
+        "accept unsafe names like 'production_test_backup' or "
+        "'customer_testimonials' — this check is deliberately stricter. If "
+        "you have a legitimate need for a differently-shaped override "
+        f"database, set {ALLOW_NAME_ENV}={name!r} explicitly to opt in "
+        "(this does not loosen the check for anyone else, and the length/"
+        f"character-safety checks and the {REQUIRED_NAME_MARKER!r} "
+        "requirement still apply)."
+    )
 
 
 def checkout_root(conftest_file: str) -> Path:

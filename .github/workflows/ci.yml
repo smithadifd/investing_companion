@@ -67,6 +67,10 @@ jobs:
       - name: Run tests
         env:
           DATABASE_URL: postgresql+asyncpg://test_user:test_pass@localhost:5432/investing_companion_test
+          # Pin the suite's derived-by-default test DB (tests/db_naming.py)
+          # to the one the postgres service above actually provisioned —
+          # a path-derived default would name a database CI never created.
+          TEST_DATABASE_URL: postgresql+asyncpg://test_user:test_pass@localhost:5432/investing_companion_test
           REDIS_URL: redis://localhost:6379/0
           SECRET_KEY: ci-test-secret-key
           ENVIRONMENT: test

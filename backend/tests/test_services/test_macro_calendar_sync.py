@@ -1,8 +1,9 @@
 """DB-backed tests for macro-calendar upsert-through-dedup.
 
 ENV-GATED: these use the ``db`` fixture and therefore require a live
-PostgreSQL/TimescaleDB test database (``investing_companion_test``). They do not
-run in a bare CI/dev shell without that DB — the pure feed-parser / fallback
+PostgreSQL/TimescaleDB test database — see ``tests/conftest.py`` /
+``tests/db_naming.py`` for how it's named and provisioned. They do not run
+in a bare CI/dev shell without that DB — the pure feed-parser / fallback
 logic is covered network-and-DB-free in ``test_fred_provider.py``.
 """
 

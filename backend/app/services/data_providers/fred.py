@@ -23,6 +23,7 @@ scheme the seeder uses, so live and seeded events flow through the identical
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date, time
 from typing import Optional
@@ -111,18 +112,57 @@ _EVENT_META: dict[EventType, dict] = {
 }
 
 
-def macro_recurrence_key(event_type: EventType, d: date) -> str:
-    """Build the dedup key for a macro event: ``<type>_<year>_<month>``.
+def _slugify_ordinal(label: str) -> str:
+    """Normalize an estimate-ordinal label (e.g. "Advance", "Initial Estimate")
+    into a recurrence-key-safe slug: lowercase, non-alnum runs collapsed to a
+    single underscore, no leading/trailing underscore."""
+    slug = re.sub(r"[^a-z0-9]+", "_", label.strip().lower()).strip("_")
+    return slug or "unknown"
+
+
+def macro_recurrence_key(
+    event_type: EventType, d: date, ordinal: Optional[str] = None
+) -> str:
+    """Build the dedup key for a macro event: ``<type>_<year>_<month>``, or
+    ``<type>_<year>_<month>_<ordinal>`` when ``ordinal`` is given.
 
     Keyed on the release's *occurrence* (year + month), NOT the publication day,
     so a moved date within the month updates the existing row in place instead
     of duplicating — the issue-015 self-heal, uniformly across every macro type.
 
-    This holds for GDP too: the release schedule has exactly one GDP print per
-    calendar month (a quarter's Advance, Second, and Third estimates land in
-    three consecutive months), so a month bucket identifies it unambiguously.
+    GDP grain fix: a quarter's Advance/Second/Third BEA estimates normally
+    land in three consecutive months, but a disrupted cycle (e.g. a
+    government-shutdown cascade) can push two of them into the SAME month —
+    plain month bucketing then silently collides one estimate onto the other
+    (a real, previously-unresolved bug; see PR body). ``ordinal``
+    disambiguates that case, e.g. ``"gdp_2026_04_advance"`` vs
+    ``"gdp_2026_04_third"``. Callers that don't need disambiguation (every
+    non-GDP type today) simply omit it and get the original month-only key,
+    byte-for-byte unchanged — this is purely additive.
     """
-    return f"{event_type.value}_{d.year}_{d.month:02d}"
+    key = f"{event_type.value}_{d.year}_{d.month:02d}"
+    if ordinal:
+        key = f"{key}_{_slugify_ordinal(ordinal)}"
+    return key
+
+
+# BEA's normal (undisrupted) GDP cadence keeps a stable month-mod-3 pattern:
+# Advance in Jan/Apr/Jul/Oct, Second in Feb/May/Aug/Nov, Third in
+# Mar/Jun/Sep/Dec. The live FRED release-dates feed only returns bare dates
+# (no per-estimate label) so, unlike the hand-maintained seed list (which has
+# an explicit label — see seed_macro_events._gdp_ordinal, the authoritative
+# source when it applies), this is a best-effort inference used only for the
+# live path. It can be wrong for a disrupted cadence (e.g. a shutdown-delayed
+# release landing outside its usual month) — its only job is to keep
+# same-month live GDP prints from silently colliding into one row, not to be
+# a source of truth for the estimate label.
+_GDP_ORDINAL_BY_MONTH_MOD3: dict[int, str] = {1: "advance", 2: "second", 0: "third"}
+
+
+def gdp_estimate_ordinal(d: date) -> str:
+    """Best-effort Advance/Second/Third ordinal inferred from the release
+    month alone — see the module comment above ``_GDP_ORDINAL_BY_MONTH_MOD3``."""
+    return _GDP_ORDINAL_BY_MONTH_MOD3[d.month % 3]
 
 
 class FredCalendarProvider:
@@ -172,6 +212,9 @@ class FredCalendarProvider:
         self, event_type: EventType, dates: list[date], year: int
     ) -> list[MacroEventSpec]:
         """Turn raw release dates into deduped specs for a single year."""
+        if event_type == EventType.GDP:
+            return self._gdp_dates_to_specs(dates, year)
+
         meta = _EVENT_META[event_type]
         specs: dict[str, MacroEventSpec] = {}
         for d in dates:
@@ -188,6 +231,54 @@ class FredCalendarProvider:
                 importance=meta["importance"],
                 event_time=meta["time"],
             )
+        return list(specs.values())
+
+    def _gdp_dates_to_specs(self, dates: list[date], year: int) -> list[MacroEventSpec]:
+        """GDP specs, grouped by month first so a same-month collision (two
+        real prints in one calendar month) is resolved deterministically
+        instead of one silently overwriting the other in ``specs``.
+
+        Per month bucket:
+          * Exactly one date -- the common case -- gets the best-effort
+            semantic ``gdp_estimate_ordinal`` label (advance/second/third),
+            which also happens to match the seed list's label-derived ordinal
+            in the normal (undisrupted) cadence, keeping live and seeded keys
+            aligned for the same real release.
+          * Two or more dates -- an actual collision -- can't be reliably
+            told apart as "which one is really Advance vs Third" from bare
+            dates alone, so each gets a stable positional ordinal
+            (``release_1``, ``release_2``, ...) instead of a semantic guess
+            that could be confidently wrong. This is strictly better than the
+            pre-fix behavior (silent overwrite, one print vanishes) even
+            though it doesn't carry the true BEA label.
+        """
+        meta = _EVENT_META[EventType.GDP]
+        by_month: dict[tuple[int, int], list[date]] = {}
+        for d in dates:
+            if d.year != year:
+                continue
+            by_month.setdefault((d.year, d.month), []).append(d)
+
+        specs: dict[str, MacroEventSpec] = {}
+        for month_dates in by_month.values():
+            month_dates = sorted(set(month_dates))
+            if len(month_dates) == 1:
+                ordinal_by_date = {month_dates[0]: gdp_estimate_ordinal(month_dates[0])}
+            else:
+                ordinal_by_date = {
+                    d: f"release_{idx}" for idx, d in enumerate(month_dates, start=1)
+                }
+            for d, ordinal in ordinal_by_date.items():
+                key = macro_recurrence_key(EventType.GDP, d, ordinal=ordinal)
+                specs[key] = MacroEventSpec(
+                    event_type=EventType.GDP.value,
+                    event_date=d,
+                    recurrence_key=key,
+                    title=meta["title"],
+                    description=meta["description"],
+                    importance=meta["importance"],
+                    event_time=meta["time"],
+                )
         return list(specs.values())
 
     # ------------------------------------------------------------------

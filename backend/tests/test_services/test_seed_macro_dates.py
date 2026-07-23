@@ -31,6 +31,8 @@ from scripts.seed_macro_events import (
     GDP_DATES_2026,
     NFP_DATES_2025,
     NFP_DATES_2026,
+    _gdp_ordinal,
+    _is_advance_equivalent,
     seed_statistical_specs,
 )
 
@@ -139,10 +141,13 @@ class TestGdp2026Dates:
     def test_april_2026_structural_collision_is_reported_not_shoehorned(self):
         """Q4-2025 Third (Apr 9, corrected) and Q1-2026 Advance (Apr 30,
         corrected) both land in April 2026 -- one calendar month, two real
-        releases. The month-bucketed recurrence_key (macro_recurrence_key in
-        fred.py) can only hold one GDP row per month, so fixing the mechanics
-        is out of scope here; neither date is shoehorned into the seed list.
-        This test pins that the omission is deliberate, not a leftover gap."""
+        releases. The recurrence-key MECHANICS are now fixed (see
+        macro_recurrence_key's ``ordinal`` param + the accompanying
+        migration), so encoding both would no longer collide -- but
+        restoring these two real calendar entries is a separate data
+        decision, deliberately left out of this list in this pass rather
+        than bundled in unasked. This test pins that the omission here is
+        still deliberate, not a leftover gap."""
         months = {d.month for d, _label in GDP_DATES_2026}
         assert 4 not in months
         dates = [d for d, _label in GDP_DATES_2026]
@@ -316,3 +321,87 @@ class TestSeedSpecsStillDedupClean:
         specs = seed_statistical_specs(2026)
         keys = [s.recurrence_key for s in specs]
         assert len(keys) == len(set(keys))
+
+
+class TestGdpOrdinalLabelParsing:
+    """GDP recurrence-key grain fix: the seed list's label text is the
+    authoritative source for a GDP row's ordinal (unlike the live FRED feed,
+    which only gets a bare date -- see fred.gdp_estimate_ordinal)."""
+
+    def test_advance_second_third(self):
+        assert _gdp_ordinal("Q4 2024 Advance") == "advance"
+        assert _gdp_ordinal("Q4 2024 Second") == "second"
+        assert _gdp_ordinal("Q4 2024 Third") == "third"
+
+    def test_shutdown_relabeled_variants(self):
+        assert _gdp_ordinal("Q3 2025 Initial Estimate") == "initial_estimate"
+        assert _gdp_ordinal("Q3 2025 Updated Estimate") == "updated_estimate"
+
+    def test_initial_estimate_not_mistaken_for_third(self):
+        """"Initial Estimate" doesn't contain the substring "Third" -- pin
+        that the more-specific token is matched instead of falling through
+        to an unrelated shorter token by accident."""
+        assert _gdp_ordinal("Q3 2025 Initial Estimate") != "third"
+
+    def test_every_2025_and_2026_label_produces_a_recognized_ordinal(self):
+        recognized = {
+            "advance", "second", "third", "initial_estimate", "updated_estimate",
+        }
+        for _d, label in GDP_DATES_2025 + GDP_DATES_2026:
+            assert _gdp_ordinal(label) in recognized, label
+
+
+class TestGdpAdvanceEquivalentImportance:
+    """Importance-heuristic drift fix: a government-shutdown-relabeled
+    "Initial Estimate" release is the Advance-equivalent for importance
+    purposes even though it doesn't contain the substring "Advance"."""
+
+    def test_advance_is_advance_equivalent(self):
+        assert _is_advance_equivalent("Q1 2025 Advance") is True
+
+    def test_initial_estimate_is_advance_equivalent(self):
+        assert _is_advance_equivalent("Q3 2025 Initial Estimate") is True
+
+    def test_second_and_third_are_not(self):
+        assert _is_advance_equivalent("Q1 2025 Second") is False
+        assert _is_advance_equivalent("Q1 2025 Third") is False
+
+    def test_updated_estimate_is_not_advance_equivalent(self):
+        """"Updated Estimate" replaces a would-be Third estimate, not an
+        Advance -- it must stay "medium", unchanged from before this fix."""
+        assert _is_advance_equivalent("Q3 2025 Updated Estimate") is False
+
+    def test_real_seed_list_entry_now_tagged_high(self):
+        """The actual Dec 23, 2025 "Q3 2025 Initial Estimate" entry in the
+        seed list -- previously silently dropped to "medium" importance by
+        the old substring-only "Advance" check -- is now "high"."""
+        specs = seed_statistical_specs(2025)
+        initial_estimate = next(
+            s for s in specs
+            if s.event_type == "gdp" and "Initial Estimate" in s.title
+        )
+        assert initial_estimate.importance == "high"
+
+
+class TestGdpSpecsCarryOrdinalKeys:
+    """seed_statistical_specs (the function the seeder actually calls) now
+    produces month+ordinal GDP keys, not the old collision-prone month-only
+    keys."""
+
+    def test_2025_gdp_keys_carry_ordinal_suffix(self):
+        specs = [s for s in seed_statistical_specs(2025) if s.event_type == "gdp"]
+        assert specs  # sanity: GDP is actually present
+        for s in specs:
+            assert s.recurrence_key.startswith("gdp_2025_")
+            # month-only keys are exactly 12 chars ("gdp_YYYY_MM"); anything
+            # produced here must be longer (has an ordinal suffix).
+            assert len(s.recurrence_key) > len("gdp_2025_01")
+
+    def test_advance_and_third_keys_for_a_known_pair(self):
+        specs = {
+            s.title: s.recurrence_key
+            for s in seed_statistical_specs(2025)
+            if s.event_type == "gdp"
+        }
+        assert specs["GDP Q4 2024 Advance"] == "gdp_2025_01_advance"
+        assert specs["GDP Q4 2024 Third"] == "gdp_2025_03_third"

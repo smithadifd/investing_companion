@@ -36,6 +36,7 @@ import type {
   MarketOverview,
   Account,
   AccountCreate,
+  AccountReconciliation,
   AccountUpdate,
   ExposureResponse,
   NeedsAttentionResponse,
@@ -1225,6 +1226,18 @@ class ApiClient {
 
   async deleteAccount(id: number): Promise<void> {
     await this.fetch(`/accounts/${id}`, { method: 'DELETE' });
+  }
+
+  /**
+   * Read-only §6 reconciliation view for one account (Schwab-vs-IC deltas).
+   * 409 when the account has no active Schwab link.
+   */
+  async getAccountReconciliation(
+    accountId: number
+  ): Promise<AccountReconciliation> {
+    return this.fetch<AccountReconciliation>(
+      `/accounts/${accountId}/reconciliation`
+    );
   }
 
   /**

@@ -787,6 +787,40 @@ export interface AccountRef {
   account_type: string | null;
 }
 
+// Schwab account link (hash -> IC account mapping, §1/§4)
+export interface AccountLink {
+  id: number;
+  account_hash: string;
+  source: string;
+  account_id: number | null;
+  status: 'active' | 'orphaned';
+  created_at: string;
+  updated_at: string;
+}
+
+// Read-only §6 reconciliation view. Strictly a display of Schwab-vs-IC deltas
+// — no adopt/mutation surface. Decimal fields arrive as strings from the API.
+export interface ReconciliationPosition {
+  symbol: string;
+  asset_type: string | null;
+  eligible: boolean;
+  ineligible_reason: string | null;
+  schwab_quantity: string | null;
+  ic_quantity: string | null;
+  quantity_delta: string; // never null
+  schwab_basis: string | null;
+  ic_basis: string | null;
+  basis_delta: string | null;
+  ledger_inconsistent: boolean;
+}
+
+export interface AccountReconciliation {
+  last_import_at: string | null;
+  never_imported: boolean;
+  newer_failed_import_at: string | null;
+  positions: ReconciliationPosition[];
+}
+
 // Trade types
 export type TradeType = 'buy' | 'sell' | 'short' | 'cover';
 

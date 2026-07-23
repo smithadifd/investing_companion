@@ -24,6 +24,12 @@ recurrence-key dedup path (``EconomicEventService.sync_macro_events``): the live
 feed never bypasses it, and a re-run updates a moved date in place instead of
 duplicating it.
 
+Every run also retires SEED-source rows the current spec lists no longer
+define (``EconomicEventService.retire_orphaned_macro_events``), so a shrunk or
+corrected spec list self-cleans instead of leaving stale rows behind forever
+-- ``--clear`` remains as a manual full-wipe escape hatch, but normal re-seeds
+no longer need it.
+
 Calendar accuracy audit (2026-07-21, issue 015 -- docs/issues/015-calendar-accuracy-audit.md):
 FOMC and GDP were re-derived from their primary calendars (federalreserve.gov,
 bea.gov) and corrected -- see the source/citation block above each list below.
@@ -41,6 +47,7 @@ Usage:
 
 import argparse
 import asyncio
+import re
 from datetime import date, time
 from typing import List, Tuple
 
@@ -227,15 +234,18 @@ NFP_DATES_2026: List[date] = [
 # directly against https://www.bea.gov/news/2026/gdp-second-estimate-and-corporate-profits-1st-quarter-2026
 # and https://www.bea.gov/news/2026/gdp-third-estimate-industries-corporate-profits-state-gdp-and-state-personal-income-1st.
 #
-# STRUCTURAL COLLISION (reported, not resolved here -- see PR description):
-# the corrected Q4-2025 Third estimate (Apr 9, 2026) and Q1-2026's Advance
+# STRUCTURAL COLLISION -- MECHANICS NOW FIXED (see fred.macro_recurrence_key's
+# ``ordinal`` param + the accompanying migration in this same PR): the
+# corrected Q4-2025 Third estimate (Apr 9, 2026) and Q1-2026's Advance
 # estimate (Apr 30, 2026, itself corrected by one day from a guessed Apr 29)
-# both land in April 2026. ``macro_recurrence_key`` buckets GDP by
-# release-month (fred.py), i.e. one GDP row per calendar month, so encoding
-# both would silently collide/overwrite in the DB upsert -- a mechanics
-# change (finer-grained recurrence key) that is out of scope for this
-# date-only fix. Neither date is added below; both citations are recorded
-# here so a follow-up mechanics PR doesn't have to re-derive them:
+# both land in April 2026, and the recurrence key now disambiguates same-month
+# GDP prints by estimate ordinal (e.g. "gdp_2026_04_third" vs
+# "gdp_2026_04_advance"), so encoding both would no longer collide.
+#
+# Neither date is added below in THIS pass, though -- restoring two real
+# calendar entries is a data decision distinct from the mechanics fix, and is
+# left for a deliberate follow-up rather than bundled in here unasked. Both
+# citations are recorded so that follow-up doesn't have to re-derive them:
 #   Apr 9, 2026 Q4-2025 Third -- https://www.bea.gov/news/2026/gdp-third-estimate-industries-corporate-profits-state-gdp-and-state-personal-income-4th
 #   Apr 30, 2026 Q1-2026 Advance -- https://www.bea.gov/news/2026/gdp-advance-estimate-1st-quarter-2026
 # ============================================================================
@@ -362,17 +372,64 @@ def _monthly_specs(
     ]
 
 
+# Ordered longest/most-specific first so "Initial Estimate" / "Updated
+# Estimate" (the shutdown-relabeled variants) are matched before a looser
+# "Third" / "Second" substring inside them could apply instead.
+_GDP_ORDINAL_TOKENS: List[Tuple[str, str]] = [
+    ("initial estimate", "initial_estimate"),
+    ("updated estimate", "updated_estimate"),
+    ("advance", "advance"),
+    ("second", "second"),
+    ("third", "third"),
+]
+
+
+def _gdp_ordinal(label: str) -> str:
+    """Derive the recurrence-key ordinal token from a GDP seed-list label.
+
+    The seed list's labels ("Q4 2024 Advance", "Q3 2025 Initial Estimate", ...)
+    are the ground truth for which BEA estimate a date is for -- unlike the
+    live FRED feed (see fred.gdp_estimate_ordinal), which only gets bare
+    dates and has to guess.
+    """
+    lowered = label.lower()
+    for token, slug in _GDP_ORDINAL_TOKENS:
+        if token in lowered:
+            return slug
+    # Defensive fallback for an unrecognized label: never silently collapse
+    # it onto another entry's key -- slugify the whole label so it stays
+    # distinct (surfaces as an odd-looking but non-colliding key, not a
+    # silent overwrite of a different release).
+    return re.sub(r"[^a-z0-9]+", "_", lowered.strip()).strip("_") or "unknown"
+
+
+def _is_advance_equivalent(label: str) -> bool:
+    """True for labels that should get "high" importance the way a normal
+    Advance estimate does.
+
+    Government-shutdown-affected releases get relabeled -- e.g. the Q3-2025
+    cycle's canceled Advance + Second merged into a single Dec 23, 2025
+    "Initial Estimate" release (see the GDP_DATES_2025/2026 block comment
+    above) -- and that relabeled release is the Advance-equivalent for
+    importance-tagging purposes even though the substring "Advance" no
+    longer appears in its label.
+    """
+    return "Advance" in label or "Initial Estimate" in label
+
+
 def _gdp_specs(year: int) -> List[MacroEventSpec]:
-    """GDP specs — month-keyed (one GDP print per calendar month), self-healing."""
+    """GDP specs — month+ordinal-keyed (one row per BEA estimate), self-healing."""
     dates = GDP_DATES_2025 if year == 2025 else GDP_DATES_2026
     return [
         MacroEventSpec(
             event_type=EventType.GDP.value,
             event_date=d,
-            recurrence_key=macro_recurrence_key(EventType.GDP, d),
+            recurrence_key=macro_recurrence_key(
+                EventType.GDP, d, ordinal=_gdp_ordinal(label)
+            ),
             title=f"GDP {label}",
             description="Gross Domestic Product report. Measures total economic output.",
-            importance="high" if "Advance" in label else "medium",
+            importance="high" if _is_advance_equivalent(label) else "medium",
             event_time=time(8, 30),
         )
         for d, label in dates
@@ -392,6 +449,52 @@ def seed_statistical_specs(year: int) -> List[MacroEventSpec]:
     if year == 2025:  # Only 2025 PCE dates are hand-maintained.
         specs += _monthly_specs(EventType.PCE, PCE_DATES_2025, _PCE_META)
     return specs
+
+
+# ============================================================================
+# Orphan retirement -- current spec universe + retirement pass
+#
+# A shrunk or changed spec list (an entry removed/corrected, a year retired)
+# used to leave the corresponding old row behind in the DB forever -- the
+# only escape hatch was `--clear`, which wipes ALL macro data, not just the
+# orphans. This section computes "what SHOULD exist right now" and the
+# seeding entrypoint below uses it to retire exactly the SEED-source rows
+# that have fallen out of it, so a normal re-seed self-cleans.
+# ============================================================================
+
+# Every year this script currently has hand-maintained lists for. Orphan
+# retirement always evaluates against the FULL union across these years, NOT
+# just whichever --year this invocation is seeding -- a single-year run must
+# never treat the OTHER year's still-valid rows as orphaned just because this
+# run didn't happen to touch them.
+SEED_SPEC_YEARS: Tuple[int, ...] = (2025, 2026)
+
+# The event types the hand-maintained seed lists cover. Orphan retirement is
+# scoped to exactly these -- a SEED-source row of some unrelated event type
+# must never be swept up just because this pipeline's key universe doesn't
+# include it. (scripts/seed_demo_data.py, a separate demo-environment
+# pipeline against its own database, also tags rows EventSource.SEED with an
+# entirely different GDP key scheme -- this scoping is what keeps this
+# pipeline's retirement pass from ever being able to reach those rows even if
+# it were ever pointed at the same database.)
+MACRO_SEED_EVENT_TYPES: List[str] = [
+    EventType.FOMC.value,
+    EventType.CPI.value,
+    EventType.NFP.value,
+    EventType.GDP.value,
+    EventType.PCE.value,
+]
+
+
+def current_seed_keys() -> set:
+    """The full universe of recurrence_keys the hand-maintained seed lists
+    currently define, across every supported year -- the orphan-retirement
+    pass's "what should still exist" reference set."""
+    keys: set = set()
+    for seed_year in SEED_SPEC_YEARS:
+        keys.update(spec.recurrence_key for spec in _fomc_specs(seed_year))
+        keys.update(spec.recurrence_key for spec in seed_statistical_specs(seed_year))
+    return keys
 
 
 # ============================================================================
@@ -444,7 +547,8 @@ async def clear_seeded_events(db: AsyncSession) -> int:
 async def seed_macro_events(
     year: int = 2025, clear: bool = False, use_live: bool = True
 ) -> None:
-    """Main seeding function: resolve source, upsert through the dedup path."""
+    """Main seeding function: resolve source, upsert through the dedup path,
+    then retire SEED-source rows the current spec lists no longer define."""
     provider = FredCalendarProvider()
 
     async with AsyncSessionLocal() as db:
@@ -469,6 +573,24 @@ async def seed_macro_events(
         print(f"  Processed {total_seen} events ({total_created} created, "
               f"{total_seen - total_created} updated in place)")
 
+        # Orphan retirement (mechanics fix): see the module comment above
+        # SEED_SPEC_YEARS. Scoped to SEED-source rows of the event types this
+        # pipeline manages, across every supported year -- never just `year`,
+        # and never a FRED-sourced or manual row. IMPORTANT ordering note: if
+        # a prior GDP recurrence-key format is still live in the DB (i.e. the
+        # 20260723_001 migration hasn't been applied yet), this pass would
+        # see those rows' old-format keys as "not in the current (new-format)
+        # spec" and delete real GDP history instead of leaving it for the
+        # migration to re-key. That migration runs as a standalone Alembic
+        # step at deploy time, strictly before this script is ever invoked
+        # again (see PR body) -- this pass must never be reachable before it.
+        retired = await service.retire_orphaned_macro_events(
+            current_seed_keys(), MACRO_SEED_EVENT_TYPES
+        )
+        if retired:
+            print(f"  Retired {retired} orphaned SEED-source event(s) no "
+                  f"longer present in the current spec lists")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Seed macro economic events")
@@ -482,7 +604,11 @@ def main():
     parser.add_argument(
         "--clear",
         action="store_true",
-        help="Clear existing auto-seeded events first",
+        help=(
+            "Clear ALL existing auto-seeded events first (manual escape hatch; "
+            "normal re-seeds now self-clean orphans automatically, see "
+            "retire_orphaned_macro_events)"
+        ),
     )
     parser.add_argument(
         "--all",

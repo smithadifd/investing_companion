@@ -527,6 +527,59 @@ class EconomicEventService:
         await self.db.commit()
         return {"created": created, "updated": len(specs) - created}
 
+    async def retire_orphaned_macro_events(
+        self,
+        current_keys: "set[str]",
+        event_types: "list[str]",
+        source: str = EventSource.SEED.value,
+    ) -> int:
+        """Delete macro rows whose recurrence_key has fallen out of the
+        current spec lists — the scoped alternative to a full wipe.
+
+        When a hand-maintained spec list changes or shrinks (an entry
+        removed/corrected, a year retired), the old row used to survive
+        forever — ``upsert_macro_event`` only ever creates/updates, it never
+        deletes, so the caller's only escape hatch was a full ``--clear``
+        wipe of every auto-seeded row. This targets exactly the orphans.
+
+        Scoped defensively on two axes so a shrinking/changed spec can never
+        reach data it doesn't own:
+          * ``source`` — only rows THIS pipeline itself wrote (default:
+            SEED). A FRED-sourced or user-manual row is never a candidate,
+            regardless of whether its key happens to be absent from
+            ``current_keys``.
+          * ``event_types`` — only the event types the caller's spec lists
+            actually cover. Guards against sweeping up an unrelated
+            SEED-tagged row some other pipeline wrote under a different key
+            scheme (e.g. a demo-data seeder that also tags rows
+            ``EventSource.SEED``).
+
+        Refuses (raises ``ValueError``) on an empty ``current_keys`` — that
+        is almost certainly a caller bug (e.g. an empty year range), and
+        running it for real would delete every matching row's entire
+        history.
+
+        The caller owns the transaction commit point the same way
+        ``sync_macro_events`` does (commit happens here). Returns the number
+        of rows deleted.
+        """
+        if not current_keys:
+            raise ValueError(
+                "retire_orphaned_macro_events refused: current_keys is empty "
+                "(would delete every matching row — pass the real current "
+                "spec key set, not an accidental empty one)"
+            )
+
+        stmt = delete(EconomicEvent).where(
+            EconomicEvent.source == source,
+            EconomicEvent.event_type.in_(event_types),
+            EconomicEvent.recurrence_key.is_not(None),
+            EconomicEvent.recurrence_key.not_in(current_keys),
+        )
+        result = await self.db.execute(stmt)
+        await self.db.commit()
+        return result.rowcount
+
     # -------------------------------------------------------------------------
     # Statistics
     # -------------------------------------------------------------------------

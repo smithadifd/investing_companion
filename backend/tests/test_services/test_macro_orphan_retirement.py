@@ -12,20 +12,29 @@ the sub-fixes bundled into this PR:
     builder already covered in test_fred_provider.py
     (TestGdpCollisionResolvedAtDbLayer).
   * The migration/retirement ordering hazard called out in the PR body: an
-    old-format GDP row must survive re-key-then-retire, and WOULD be wrongly
-    deleted by retire-before-rekey -- proving the ordering actually matters,
-    not just asserting the safe path works (TestMigrationOrderingSafety).
+    old-format GDP row must survive re-key-then-retire
+    (TestMigrationOrderingSafety). The unsafe order (retire-before-rekey)
+    used to wrongly delete that row -- fixed by a runtime guard in
+    ``retire_orphaned_macro_events`` (see PR #223 review comment
+    https://github.com/smithadifd/investing_companion/pull/223#issuecomment-5054386185)
+    that now detects the pre-migration key format and aborts the whole
+    retirement pass instead of deleting anything; proven below by asserting
+    the guard raises and the row count is provably unchanged, not just that
+    the ordering matters in the abstract.
 """
 
 from datetime import date, time
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 
 from app.db.models.economic_event import EconomicEvent, EventSource, EventType
 from app.db.migrations_sql import GDP_REKEY_UPGRADE_SQL
 from app.services.data_providers.fred import MacroEventSpec, macro_recurrence_key
-from app.services.economic_event import EconomicEventService
+from app.services.economic_event import (
+    EconomicEventService,
+    MacroKeyMigrationPendingError,
+)
 from scripts.seed_macro_events import (
     MACRO_SEED_EVENT_TYPES,
     _fomc_specs,
@@ -227,9 +236,13 @@ class TestGdpCollisionResolvedAtDbLayer:
 
 class TestMigrationOrderingSafety:
     """Proof (iv): the migration/retirement ordering hazard called out in the
-    PR body. Old-format GDP rows must survive re-key-then-retire; the same
-    row WOULD be wrongly deleted by retire-before-rekey, proving the ordering
-    genuinely matters and isn't just defensive over-caution."""
+    PR body. Old-format GDP rows must survive re-key-then-retire (the safe,
+    shipped order). The unsafe order -- retirement running before the
+    migration -- is now caught by a runtime guard in
+    ``retire_orphaned_macro_events`` (see MacroKeyMigrationPendingError):
+    it detects any GDP row still on the pre-migration key format and aborts
+    the ENTIRE retirement pass before the DELETE runs, rather than silently
+    treating real history as an orphan."""
 
     async def _insert_legacy_gdp_row(self, db) -> None:
         """Simulate a row seeded by the OLD code, before the GDP grain fix:
@@ -284,30 +297,91 @@ class TestMigrationOrderingSafety:
         assert survived.recurrence_key == "gdp_2025_01_advance"
 
     @pytest.mark.asyncio
-    async def test_retire_before_rekey_would_wrongly_orphan_the_row(self, db):
-        """The UNSAFE order, kept as a regression guard: if retirement ran
-        against the still-old-format key (migration skipped/not yet
-        applied), it incorrectly treats real GDP history as an orphan and
-        deletes it -- this is exactly the hazard the PR body's ordering
-        decision exists to prevent. This test intentionally reproduces the
-        hazard as a passing test that documents the failure mode; it is not
-        the shipped behavior for a normal deploy (see the previous test)."""
+    async def test_retire_before_rekey_is_blocked_by_the_pre_migration_guard(
+        self, db
+    ):
+        """The UNSAFE order: retirement invoked while the still-old-format
+        key is live (migration skipped/not yet applied). Without a guard,
+        this would incorrectly treat real GDP history as an orphan and
+        delete it -- exactly the hazard the PR body's ordering decision
+        exists to prevent (and what this test used to prove by asserting the
+        row got deleted). ``retire_orphaned_macro_events`` now detects the
+        pre-migration key format before its DELETE runs and aborts the whole
+        pass instead: this test proves the abort, not just the danger."""
         await self._insert_legacy_gdp_row(db)
+
+        before_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(EconomicEvent)
+                .where(EconomicEvent.event_date == date(2025, 1, 30))
+            )
+        ).scalar_one()
+        assert before_count == 1
 
         service = EconomicEventService(db)
         # Retirement runs directly against current_seed_keys(), which is
         # already NEW-format ("gdp_2025_01_advance", ...) because the spec
         # builder (this same PR) always emits ordinal-suffixed GDP keys now.
-        # The still-old-format row ("gdp_2025_01") is therefore invisible to
-        # that set and gets deleted.
+        # The still-old-format row ("gdp_2025_01") would be invisible to
+        # that set -- the guard must fire before the DELETE ever runs.
+        with pytest.raises(MacroKeyMigrationPendingError) as exc_info:
+            await service.retire_orphaned_macro_events(
+                current_seed_keys(), MACRO_SEED_EVENT_TYPES
+            )
+
+        # (c) actionable: names the fix and the count of affected rows.
+        message = str(exc_info.value)
+        assert "alembic upgrade head" in message
+        assert "1" in message
+
+        # (b) provably unchanged: same row count, same still-old-format key
+        # -- nothing was deleted, nothing was mutated.
+        after_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(EconomicEvent)
+                .where(EconomicEvent.event_date == date(2025, 1, 30))
+            )
+        ).scalar_one()
+        assert after_count == 1
+
+        survivor = (
+            await db.execute(
+                select(EconomicEvent).where(EconomicEvent.event_date == date(2025, 1, 30))
+            )
+        ).scalar_one()
+        assert survivor.recurrence_key == "gdp_2025_01"
+
+    @pytest.mark.asyncio
+    async def test_guard_does_not_false_positive_block_a_cpi_only_retirement(
+        self, db
+    ):
+        """The guard must not become an overly broad block: a legacy
+        old-format GDP row sitting in the DB must NOT stop a retirement pass
+        that isn't even scoped to GDP (event_types doesn't include "gdp") --
+        that pass can never reach a GDP row regardless (the DELETE itself is
+        scoped to event_types), so gating it on an irrelevant precondition
+        would be a false-positive block on legitimate operation."""
+        await self._insert_legacy_gdp_row(db)
+
+        service = EconomicEventService(db)
+        await service.sync_macro_events(
+            [_cpi_spec(date(2020, 1, 14), "cpi_2020_01_seed_stale")],
+            source=EventSource.SEED.value,
+        )
+
         retired = await service.retire_orphaned_macro_events(
-            current_seed_keys(), MACRO_SEED_EVENT_TYPES
+            {"cpi_2099_01_unrelated"}, event_types=[EventType.CPI.value]
         )
         assert retired == 1
 
-        gone = (
+        # The unrelated legacy GDP row is untouched either way (not asserted
+        # gone, not the CPI-only call's concern) -- just confirming the call
+        # didn't raise.
+        legacy_still_present = (
             await db.execute(
                 select(EconomicEvent).where(EconomicEvent.event_date == date(2025, 1, 30))
             )
         ).scalar_one_or_none()
-        assert gone is None
+        assert legacy_still_present is not None

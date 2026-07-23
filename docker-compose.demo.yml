@@ -107,8 +107,18 @@ services:
     # so a reply necessarily comes from (and confirms the health of) this
     # process - without depending on this container's node name matching a
     # `-d celery@<hostname>` destination.
+    #
+    # Review hardening (fresh-reviewer pass): `inspect ping` defaults its
+    # reply-wait to 1.0s when `-t/--timeout` is omitted (verified against the
+    # pinned celery==5.6.3 CLI source, celery/bin/control.py). That default
+    # works but is undocumented-in-repo and version-fragile, and 1.0s leaves
+    # little headroom under transient broker load (Redis persistence pause,
+    # GC, etc.) before a healthy worker gets marked unhealthy. Pin it
+    # explicitly to 5s - still safely inside this healthcheck's own 10s
+    # `timeout:` ceiling below, which remains the real backstop against a
+    # true hang (e.g. broker connect() stalling, which `-t` does not bound).
     healthcheck:
-      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping"]
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping --timeout=5"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -146,8 +156,24 @@ services:
     # beat has no local worker identity to target with `-d`, so ping the
     # broker broadcast-style - a reply from celery_worker confirms this
     # container can reach the same broker it needs to dispatch tasks on.
+    #
+    # Known limitation (disclosed, not fixed here): `inspect ping` targets
+    # celery's remote-control bus, which only WORKER nodes subscribe to -
+    # celery beat does not respond to it. So this reply is evidence that (a)
+    # this beat container can reach the broker and (b) some worker is alive
+    # on it; it is NOT direct evidence beat's own scheduling loop is still
+    # ticking. A beat process wedged internally while the container/broker
+    # link stays nominal would still report healthy. That's a real gap, but
+    # strictly better than the status quo this PR fixes (celery_beat is
+    # currently ALWAYS unhealthy, a 100% false negative) - a true beat-
+    # liveness signal (e.g. schedule-file mtime heartbeat) is a bigger change
+    # than this config-only fix's scope and is left as a follow-up.
+    #
+    # Same --timeout=5 hardening as celery_worker above (explicit instead of
+    # relying on celery's undocumented 1.0s CLI default); still bounded by
+    # this healthcheck's own 10s `timeout:` ceiling.
     healthcheck:
-      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping"]
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping --timeout=5"]
       interval: 30s
       timeout: 10s
       retries: 3

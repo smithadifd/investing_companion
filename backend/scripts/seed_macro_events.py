@@ -658,6 +658,26 @@ async def seed_macro_events(
                   f"longer present in the current spec lists")
 
 
+async def _seed_all(clear: bool = False, use_live: bool = True) -> None:
+    """Seed both 2025 and 2026 within a SINGLE event loop.
+
+    Kept as one coroutine (awaited under one ``asyncio.run()``) on purpose.
+    The module-level async engine in ``app/db/session.py`` pools an asyncpg
+    connection bound to the loop it is first used on. Driving 2025 and 2026
+    under two *separate* ``asyncio.run()`` calls puts the second seed on a
+    fresh loop, and the pooled connection -- still attached to loop 1 --
+    raises ``RuntimeError: ... got Future ... attached to a different loop``.
+    One loop for both years avoids that entirely (same bug class as
+    docs/issues/012's Redis half), without disposing/recreating the engine
+    between years.
+
+    ``clear`` is honored only for the 2025 pass; 2026 never clears, so a
+    ``--all --clear`` run doesn't wipe the rows the 2025 pass just wrote.
+    """
+    await seed_macro_events(2025, clear, use_live)
+    await seed_macro_events(2026, False, use_live)  # Don't clear twice
+
+
 def main():
     parser = argparse.ArgumentParser(description="Seed macro economic events")
     parser.add_argument(
@@ -691,8 +711,7 @@ def main():
     use_live = not args.no_live
 
     if args.all:
-        asyncio.run(seed_macro_events(2025, args.clear, use_live))
-        asyncio.run(seed_macro_events(2026, False, use_live))  # Don't clear twice
+        asyncio.run(_seed_all(args.clear, use_live))
     else:
         asyncio.run(seed_macro_events(args.year, args.clear, use_live))
 

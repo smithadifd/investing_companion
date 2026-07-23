@@ -33,9 +33,15 @@ no longer need it.
 Calendar accuracy audit (2026-07-21, issue 015 -- docs/issues/015-calendar-accuracy-audit.md):
 FOMC and GDP were re-derived from their primary calendars (federalreserve.gov,
 bea.gov) and corrected -- see the source/citation block above each list below.
-CPI and NFP were NOT re-derived this pass: bls.gov was unreachable from this
-pass's fetch tooling (HTTP 403 on every path tried) -- see the block comments
-above ``CPI_DATES_2025``/``NFP_DATES_2025`` for the follow-up.
+CPI and NFP were NOT re-derived in that first pass: bls.gov was unreachable
+from that pass's fetch tooling (HTTP 403 on every path tried).
+
+CPI/NFP follow-up (2026-07-23, issue 015 continued): bls.gov is still
+403-blocked from every egress tried (including residential IPs), so CPI and
+NFP were re-derived instead from Wayback Machine captures of BLS's own
+schedule pages (web.archive.org mirrors of bls.gov/schedule/news_release/
+cpi.htm and .../empsit.htm) -- see the source/citation blocks above
+``CPI_DATES_2025`` and ``NFP_DATES_2025`` below for the exact capture URLs.
 
 Usage:
     cd backend
@@ -118,21 +124,52 @@ FOMC_DATES_2026: List[Tuple[date, date]] = [
 
 # ============================================================================
 # CPI Release Schedule (usually second week of month)
-# Source: https://www.bls.gov/schedule/news_release/cpi.htm
+# Source: https://www.bls.gov/schedule/news_release/cpi.htm -- unreachable
+# live (HTTP 403 from every egress tried, including residential IPs), so
+# re-derived (2026-07-23, issue 015 continued) from Wayback Machine mirrors
+# of that page:
+#   https://web.archive.org/web/20250111210513/https://www.bls.gov/schedule/news_release/cpi.htm
+#     (captured 2025-01-11 -- original pre-shutdown 2025 schedule, Dec-2024
+#     through Nov-2025 data; cross-checked byte-identical against the
+#     2025-05-20, 2025-07-19 and 2025-09-10 captures below)
+#   https://web.archive.org/web/20250520035747/https://www.bls.gov/schedule/news_release/cpi.htm
+#   https://web.archive.org/web/20250719181414/https://www.bls.gov/schedule/news_release/cpi.htm
+#   https://web.archive.org/web/20250910071545/https://www.bls.gov/schedule/news_release/cpi.htm
+#   https://web.archive.org/web/20251025032156/https://www.bls.gov/schedule/news_release/cpi.htm
+#     (captured 2025-10-25, one day after the Sep-2025 release -- confirms
+#     the shutdown-driven COLA release Oct 24, 2025, replacing the
+#     originally-planned Oct 15, 2025)
+#   https://web.archive.org/web/20251121185534/https://www.bls.gov/schedule/news_release/cpi.htm
+#     (captured 2025-11-21 -- first stable post-shutdown capture: confirms
+#     the Oct-2025 CPI was canceled outright -- no "October 2025" row -- and
+#     the Nov-2025 CPI moved to Dec 18, 2025)
+#   https://web.archive.org/web/20260213183647/https://www.bls.gov/schedule/news_release/cpi.htm
+#     (captured 2026-02-13, release day -- confirms the Jan-2026 CPI's
+#     second-lapse-driven move from Feb 11 to Feb 13, 2026)
+#   https://web.archive.org/web/20260702222336/https://www.bls.gov/schedule/news_release/cpi.htm
+#     (captured 2026-07-02 -- most recent full-year-coverage capture,
+#     confirms the full Dec-2025-through-Nov-2026-data schedule below;
+#     cross-checked unchanged against the 2026-05-01 capture)
 #
-# NOT RE-DERIVED in the 2026-07-21 pass (issue 015 audit): every bls.gov path
-# tried (schedule/news_release/cpi.htm, bls/2025-lapse-revised-release-dates.htm,
-# schedule/2026/home.htm, schedule/news_release/current_year.asp, cpi/,
-# news.release/cpi.htm, download.bls.gov, apps.bls.gov) returned HTTP 403 or
-# failed DNS resolution for this pass's fetch tooling — the primary source is
-# unreachable, so per this fix's decision authority these dates are LEFT AS-IS
-# rather than corrected from a secondary source. Known independently
-# corroborated (news-secondary, NOT used to change code here) via the Oct-Nov
-# 2025 shutdown: the Sep-2025 CPI (normally ~Oct 15) had a special COLA-driven
-# release Oct 24, 2025; the Oct-2025 CPI was canceled outright; Nov-2025 CPI
-# released Dec 18, 2025; Dec-2025 CPI released Jan 13, 2026; a SECOND
-# lapse pushed Jan-2026 CPI from Feb 11 to Feb 13, 2026. Follow-up: re-run this
-# derivation once bls.gov is reachable (e.g. an authenticated/browser fetch).
+# 2025 corrected: three routine one-day-off guesses plus the Oct-Nov 2025
+# shutdown's disruption of the last three releases.
+#   - Jun-2025 data: Jul 11 -> Jul 15, 2025 (routine guess, not shutdown-related)
+#   - Jul-2025 data: Aug 13 -> Aug 12, 2025 (routine guess)
+#   - Aug-2025 data: Sep 10 -> Sep 11, 2025 (routine guess)
+#   - Sep-2025 data: Oct 15 -> Oct 24, 2025 (shutdown: special COLA-driven release)
+#   - Oct-2025 data: CANCELED outright (was guessed Nov 13, 2025) -- omitted
+#     below entirely, mirroring the GDP shutdown-cancellation pattern (see #220)
+#   - Nov-2025 data: Dec 10 -> Dec 18, 2025 (shutdown-delayed)
+#
+# 2026 corrected: the Dec-2025/Jan-2026 releases (tail of the shutdown
+# disruption, including a second lapse) plus four routine one-day-off guesses.
+#   - Dec-2025 data: Jan 14 -> Jan 13, 2026
+#   - Jan-2026 data: Feb 11 -> Feb 13, 2026 (second lapse)
+#   - Mar-2026 data: Apr 14 -> Apr 10, 2026 (routine guess)
+#   - Aug-2026 data: Sep 15 -> Sep 11, 2026 (routine guess)
+#   - Sep-2026 data: Oct 13 -> Oct 14, 2026 (routine guess)
+#   - Oct-2026 data: Nov 12 -> Nov 10, 2026 (routine guess)
+#   - Nov-2026 data: Dec 9 -> Dec 10, 2026 (routine guess)
 # ============================================================================
 
 CPI_DATES_2025: List[date] = [
@@ -142,40 +179,67 @@ CPI_DATES_2025: List[date] = [
     date(2025, 4, 10),   # Mar
     date(2025, 5, 13),   # Apr
     date(2025, 6, 11),   # May
-    date(2025, 7, 11),   # Jun
-    date(2025, 8, 13),   # Jul
-    date(2025, 9, 10),   # Aug
-    date(2025, 10, 15),  # Sep
-    date(2025, 11, 13),  # Oct
-    date(2025, 12, 10),  # Nov
+    date(2025, 7, 15),   # Jun -- CORRECTED (was Jul 11)
+    date(2025, 8, 12),   # Jul -- CORRECTED (was Aug 13)
+    date(2025, 9, 11),   # Aug -- CORRECTED (was Sep 10)
+    date(2025, 10, 24),  # Sep -- CORRECTED (was Oct 15; shutdown COLA release)
+    # Oct 2025 CPI was CANCELED outright by the Oct-Nov 2025 shutdown -- no
+    # entry (was guessed Nov 13, 2025). See source block above.
+    date(2025, 12, 18),  # Nov -- CORRECTED (was Dec 10; shutdown-delayed)
 ]
 
 CPI_DATES_2026: List[date] = [
-    date(2026, 1, 14),
-    date(2026, 2, 11),
-    date(2026, 3, 11),
-    date(2026, 4, 14),
-    date(2026, 5, 12),
-    date(2026, 6, 10),
-    date(2026, 7, 14),
-    date(2026, 8, 12),
-    date(2026, 9, 15),
-    date(2026, 10, 13),
-    date(2026, 11, 12),
-    date(2026, 12, 9),
+    date(2026, 1, 13),   # Dec 2025 data -- CORRECTED (was Jan 14)
+    date(2026, 2, 13),   # Jan 2026 data -- CORRECTED (was Feb 11; second lapse)
+    date(2026, 3, 11),   # Feb
+    date(2026, 4, 10),   # Mar -- CORRECTED (was Apr 14)
+    date(2026, 5, 12),   # Apr
+    date(2026, 6, 10),   # May
+    date(2026, 7, 14),   # Jun
+    date(2026, 8, 12),   # Jul
+    date(2026, 9, 11),   # Aug -- CORRECTED (was Sep 15)
+    date(2026, 10, 14),  # Sep -- CORRECTED (was Oct 13)
+    date(2026, 11, 10),  # Oct -- CORRECTED (was Nov 12)
+    date(2026, 12, 10),  # Nov -- CORRECTED (was Dec 9)
 ]
 
 
 # ============================================================================
 # NFP (Non-Farm Payrolls) / Jobs Report (first Friday of month)
-# Source: https://www.bls.gov/schedule/news_release/empsit.htm
+# Source: https://www.bls.gov/schedule/news_release/empsit.htm -- unreachable
+# live (same HTTP 403 blocker as CPI above), so re-derived (2026-07-23,
+# issue 015 continued) from Wayback Machine mirrors of that page:
+#   https://web.archive.org/web/20250719172653/https://www.bls.gov/schedule/news_release/empsit.htm
+#     (captured 2025-07-19 -- original pre-shutdown 2025 schedule, Dec-2024
+#     through Nov-2025 data; cross-checked byte-identical against the
+#     2025-09-10 and 2025-10-06 captures below)
+#   https://web.archive.org/web/20250910073017/https://www.bls.gov/schedule/news_release/empsit.htm
+#   https://web.archive.org/web/20251006223843/https://www.bls.gov/schedule/news_release/empsit.htm
+#   https://web.archive.org/web/20251121185540/https://www.bls.gov/schedule/news_release/empsit.htm
+#     (captured 2025-11-21 -- first stable post-shutdown capture: Sep-2025
+#     jobs report delayed to Nov 20, 2025; Oct-2025 report never separately
+#     published -- no "October 2025" row; Nov-2025 report moved to Dec 16, 2025)
+#   https://web.archive.org/web/20260213183650/https://www.bls.gov/schedule/news_release/empsit.htm
+#     (captured 2026-02-13 -- confirms the Jan-2026 jobs report's move from
+#     the originally-planned Feb 6 to Feb 11, 2026, a second-lapse effect
+#     matching the CPI Feb 11->13 shift above)
+#   https://web.archive.org/web/20260702082019/https://www.bls.gov/schedule/news_release/empsit.htm
+#     (captured 2026-07-02 -- most recent full-year-coverage capture,
+#     confirms the full Dec-2025-through-Nov-2026-data schedule below;
+#     cross-checked unchanged against the 2026-05-01 capture)
 #
-# NOT RE-DERIVED in the 2026-07-21 pass — same bls.gov unreachable blocker as
-# CPI above (see that block comment). Known independently corroborated
-# (news-secondary, NOT used to change code here): the Sep-2025 jobs report
-# (normally ~Oct 3) was delayed to Nov 20, 2025; the Oct-2025 report was never
-# separately published (partial data folded into the next report); Nov-2025
-# released Dec 16, 2025. Follow-up: re-run once bls.gov is reachable.
+# 2025 corrected: only the last three releases moved, all shutdown-driven --
+# every other 2025 date below was already correct.
+#   - Sep-2025 data: Oct 3 -> Nov 20, 2025 (shutdown-delayed)
+#   - Oct-2025 data: never separately published (partial data folded into
+#     the next report) -- omitted below entirely (was guessed Nov 7, 2025),
+#     mirroring the GDP/CPI shutdown-cancellation pattern (see #220 / above)
+#   - Nov-2025 data: Dec 5 -> Dec 16, 2025 (shutdown-delayed)
+#
+# 2026 corrected: only the Jan-2026 release moved (tail of the shutdown
+# disruption, a second lapse) -- every other 2026 date below was already
+# correct.
+#   - Jan-2026 data: Feb 6 -> Feb 11, 2026 (second lapse)
 # ============================================================================
 
 NFP_DATES_2025: List[date] = [
@@ -188,24 +252,26 @@ NFP_DATES_2025: List[date] = [
     date(2025, 7, 3),    # Jun
     date(2025, 8, 1),    # Jul
     date(2025, 9, 5),    # Aug
-    date(2025, 10, 3),   # Sep
-    date(2025, 11, 7),   # Oct
-    date(2025, 12, 5),   # Nov
+    date(2025, 11, 20),  # Sep -- CORRECTED (was Oct 3; shutdown-delayed)
+    # Oct 2025 jobs report was never separately published (partial data
+    # folded into the next report) by the Oct-Nov 2025 shutdown -- no entry
+    # (was guessed Nov 7, 2025). See source block above.
+    date(2025, 12, 16),  # Nov -- CORRECTED (was Dec 5; shutdown-delayed)
 ]
 
 NFP_DATES_2026: List[date] = [
-    date(2026, 1, 9),
-    date(2026, 2, 6),
-    date(2026, 3, 6),
-    date(2026, 4, 3),
-    date(2026, 5, 8),
-    date(2026, 6, 5),
-    date(2026, 7, 2),
-    date(2026, 8, 7),
-    date(2026, 9, 4),
-    date(2026, 10, 2),
-    date(2026, 11, 6),
-    date(2026, 12, 4),
+    date(2026, 1, 9),    # Dec 2025 data
+    date(2026, 2, 11),   # Jan 2026 data -- CORRECTED (was Feb 6; second lapse)
+    date(2026, 3, 6),    # Feb
+    date(2026, 4, 3),    # Mar
+    date(2026, 5, 8),    # Apr
+    date(2026, 6, 5),    # May
+    date(2026, 7, 2),    # Jun
+    date(2026, 8, 7),    # Jul
+    date(2026, 9, 4),    # Aug
+    date(2026, 10, 2),   # Sep
+    date(2026, 11, 6),   # Oct
+    date(2026, 12, 4),   # Nov
 ]
 
 

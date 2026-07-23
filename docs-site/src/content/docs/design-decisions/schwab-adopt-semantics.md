@@ -27,7 +27,7 @@ Two constraints, not one: hash identity is unique on `(user_id, source, account_
 
 **Consequences:** adoption cannot happen for a hash with no `AccountLink` row, or one whose `account_id` is still null. The UI must surface unlinked hashes ("Unlinked Schwab account, hash ending `…XXXX`") and force a link-or-create-account step first — this is a hard gate, not a nice-to-have, because every later semantic in this doc assumes the mapping exists.
 
-- [ ] RATIFIED / - [ ] AMENDED: ___
+- [x] RATIFIED (Andrew, 2026-07-23) / - [ ] AMENDED: ___
 
 ## 2. Synthetic-opening vs. delta-adjustment trades
 
@@ -57,7 +57,7 @@ Fields on the trade record, and why each is new: `Trade` today (`trade.py:40-89`
 
 **Consequences:** requires a schema migration (new `Trade` columns + partial unique index) and a `TradeService` change (the detach-before-edit guard). Neither ships in this brief — this is the design the next-wave migration follows.
 
-- [ ] RATIFIED / - [ ] AMENDED: ___
+- [x] RATIFIED (Andrew, 2026-07-23) / - [ ] AMENDED: ___
 
 ## 3. Basis math: FIFO-remaining-lots, not net-cash
 
@@ -81,7 +81,7 @@ Two prerequisites the helper's spec must pin, since it's a fresh implementation 
 
 *Note on `fifo-matching.md`: that page's "Edge cases and known gaps" section currently claims fees are ignored in realized P&L and that no account partitioning or tests exist. All three claims are stale — `_recalculate_pairs` nets both legs' commissions into `realized_pnl` (`trade.py:474-480`, `:520-523`), partitions FIFO queues by `account_id` (`trade.py:454-455`), and `backend/tests/test_services/test_trade_positions.py` covers exactly that partitioning. This brief does not edit `fifo-matching.md` (out of scope per the ticket) — every claim above is grounded directly in the current `trade.py`/tests, not in that page. Fixing `fifo-matching.md` is flagged as a follow-up in the PR description.*
 
-- [ ] RATIFIED / - [ ] AMENDED: ___
+- [x] RATIFIED (Andrew, 2026-07-23) / - [ ] AMENDED: ___
 
 ## 4. Account-hash ↔ account mapping lifecycle
 
@@ -102,7 +102,7 @@ Lifecycle, using the `AccountLink` entity from [§1](#1-what-model-is-adopted-in
 
 **Consequences:** the linking UI is a real, non-trivial surface (unlinked-hash list, link/create flow, orphan warnings, re-link confirmation) — bigger than the read-only view in §6. It's the correct prerequisite for adoption, but not for the view alone; see §6 for what can ship without it.
 
-- [ ] RATIFIED / - [ ] AMENDED: ___
+- [x] RATIFIED (Andrew, 2026-07-23) / - [ ] AMENDED: ___
 
 ## 5. Asset-class eligibility
 
@@ -116,7 +116,7 @@ Lifecycle, using the `AccountLink` entity from [§1](#1-what-model-is-adopted-in
 
 **Consequences:** the reconciliation view (§6) always renders every `ImportedPosition` row for the linked account, with an `eligible` boolean and (when false) a short reason string ("asset_type OPTION not supported"). The inverse case — a symbol IC holds that Schwab's snapshot doesn't include at all, no `ImportedPosition` row to read an `asset_type` from — has no Schwab type to gate on; that row's `eligible` defaults to `true`, since anything already in the IC ledger is, by construction, a type IC's own model can hold (this section's whole premise). See [§6](#6-the-read-only-reconciliation-view-the-buildable-slice) for the exact nullability this implies on the response shape.
 
-- [ ] RATIFIED / - [ ] AMENDED: ___
+- [x] RATIFIED (Andrew, 2026-07-23) / - [ ] AMENDED: ___
 
 ## 6. The read-only reconciliation view — the buildable slice
 
@@ -163,7 +163,7 @@ GET /api/v1/accounts/{account_id}/reconciliation
 
 **Consequences:** this is the next AI-able ticket once §1-§5 are ratified: `AccountLink` migration + model + a minimal link/list endpoint, the open-lots helper, and the reconciliation GET endpoint + page. Still no mutation, no OAuth changes, no Schwab API calls beyond what PR #216 already added.
 
-- [ ] RATIFIED / - [ ] AMENDED: ___
+- [x] RATIFIED (Andrew, 2026-07-23) / - [ ] AMENDED: ___
 
 ## Demo-guard
 
@@ -175,19 +175,19 @@ Apply the same dependency to: linking/unlinking an `AccountLink` (§1/§4), and 
 
 **Consequences:** none beyond the endpoint boilerplate — this is a "do what everything else already does" recommendation, not a new pattern.
 
-- [ ] RATIFIED / - [ ] AMENDED: ___
+- [x] RATIFIED (Andrew, 2026-07-23) / - [ ] AMENDED: ___
 
 ## Ratification
 
-All six questions above, plus demo-guard, need Andrew's checkbox before any of this is buildable:
+**All seven RATIFIED by Andrew, 2026-07-23 (session #45 live interview) — this design is now buildable; §6 is the chartable next-wave slice.**
 
-- [ ] §1 What model is adopted into — RATIFIED / AMENDED: ___
-- [ ] §2 Synthetic-opening vs. delta-adjustment — RATIFIED / AMENDED: ___
-- [ ] §3 Basis math — RATIFIED / AMENDED: ___
-- [ ] §4 Account-hash ↔ account mapping lifecycle — RATIFIED / AMENDED: ___
-- [ ] §5 Asset-class eligibility — RATIFIED / AMENDED: ___
-- [ ] §6 Reconciliation view slice — RATIFIED / AMENDED: ___
-- [ ] Demo-guard — RATIFIED / AMENDED: ___
+- [x] §1 What model is adopted into — RATIFIED / AMENDED: ___
+- [x] §2 Synthetic-opening vs. delta-adjustment — RATIFIED / AMENDED: ___
+- [x] §3 Basis math — RATIFIED / AMENDED: ___
+- [x] §4 Account-hash ↔ account mapping lifecycle — RATIFIED / AMENDED: ___
+- [x] §5 Asset-class eligibility — RATIFIED / AMENDED: ___
+- [x] §6 Reconciliation view slice — RATIFIED / AMENDED: ___
+- [x] Demo-guard — RATIFIED / AMENDED: ___
 
 Once all seven are checked, §6's endpoint + `AccountLink` migration + the open-lots helper is a chartable next-wave ticket on its own; §2's `Trade` provenance migration and the adoption mutation endpoint are the wave after that.
 

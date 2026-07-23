@@ -2,28 +2,35 @@
 
 Network- and DB-free: exercises the raw hand-maintained date lists in
 ``scripts/seed_macro_events`` directly. Every expected dataset here sits next
-to the official primary source that pins it (retrieved 2026-07-21) so a future
-regression trips against a cited receipt, not a guess.
+to the official primary source that pins it so a future regression trips
+against a cited receipt, not a guess.
 
-Scope of this pass (see the block comments in seed_macro_events.py for the
-full derivation):
-  - FOMC 2025 + 2026: fully re-derived from federalreserve.gov (reachable).
-  - GDP 2025 + 2026: fully re-derived from bea.gov (reachable), including the
-    Oct-Nov 2025 shutdown's cancellations/mergers and one reported (not
-    resolved) structural collision in April 2026.
-  - CPI / NFP: NOT re-derived -- bls.gov was unreachable (HTTP 403 / DNS
-    failure on every path tried) for this pass's fetch tooling, so those seed
-    lists are untouched and have no new fixtures here. See the block comments
-    above ``CPI_DATES_2025``/``NFP_DATES_2025`` in the script.
+Scope (see the block comments in seed_macro_events.py for the full
+derivation):
+  - FOMC 2025 + 2026: fully re-derived from federalreserve.gov (reachable),
+    retrieved 2026-07-21.
+  - GDP 2025 + 2026: fully re-derived from bea.gov (reachable), retrieved
+    2026-07-21, including the Oct-Nov 2025 shutdown's cancellations/mergers
+    and one reported (not resolved) structural collision in April 2026.
+  - CPI / NFP 2025 + 2026: bls.gov itself is still unreachable (HTTP 403 from
+    every egress tried, including residential IPs) as of the 2026-07-23
+    follow-up, so these were re-derived from Wayback Machine captures of
+    BLS's own schedule pages instead -- see the block comments above
+    ``CPI_DATES_2025`` and ``NFP_DATES_2025`` in the script for the exact
+    capture URLs.
 """
 
 from datetime import date
 
 from scripts.seed_macro_events import (
+    CPI_DATES_2025,
+    CPI_DATES_2026,
     FOMC_DATES_2025,
     FOMC_DATES_2026,
     GDP_DATES_2025,
     GDP_DATES_2026,
+    NFP_DATES_2025,
+    NFP_DATES_2026,
     seed_statistical_specs,
 )
 
@@ -150,6 +157,148 @@ class TestGdp2026Dates:
         by_month = {d.month: label for d, label in GDP_DATES_2026}
         assert by_month[5] == "Q1 2026 Second"
         assert by_month[6] == "Q1 2026 Third"
+
+
+class TestCpi2025Dates:
+    """Source: Wayback Machine captures of
+    https://www.bls.gov/schedule/news_release/cpi.htm (live bls.gov is
+    HTTP-403-blocked; see the block comment above CPI_DATES_2025 in the
+    script for the full capture list). Pre-shutdown baseline confirmed via
+    https://web.archive.org/web/20250111210513/https://www.bls.gov/schedule/news_release/cpi.htm;
+    shutdown-era corrections confirmed via
+    https://web.archive.org/web/20251025032156/ and
+    https://web.archive.org/web/20251121185534/ (same URL root); the
+    Feb-2026 second-lapse date confirmed via
+    https://web.archive.org/web/20260213183647/ (same URL root)."""
+
+    def test_matches_bls_wayback_schedule_exactly(self):
+        assert CPI_DATES_2025 == [
+            date(2025, 1, 15),
+            date(2025, 2, 12),
+            date(2025, 3, 12),
+            date(2025, 4, 10),
+            date(2025, 5, 13),
+            date(2025, 6, 11),
+            date(2025, 7, 15),
+            date(2025, 8, 12),
+            date(2025, 9, 11),
+            date(2025, 10, 24),
+            date(2025, 12, 18),
+        ]
+
+    def test_october_shutdown_cancellation_is_not_present(self):
+        """The Oct-2025 CPI was canceled outright by the Oct-Nov 2025
+        shutdown -- the pre-fix guess (Nov 13, 2025) must not appear, and no
+        entry should land in November 2025 data's place (only the real
+        Nov-2025-data release, Dec 18, belongs in this list)."""
+        assert date(2025, 11, 13) not in CPI_DATES_2025
+        assert len(CPI_DATES_2025) == 11
+
+    def test_known_wrong_examples_now_correct(self):
+        assert date(2025, 10, 15) not in CPI_DATES_2025  # pre-shutdown Sep guess
+        assert date(2025, 10, 24) in CPI_DATES_2025       # shutdown COLA release
+        assert date(2025, 12, 10) not in CPI_DATES_2025  # pre-shutdown Nov guess
+        assert date(2025, 12, 18) in CPI_DATES_2025       # shutdown-delayed
+
+
+class TestCpi2026Dates:
+    """Source: https://web.archive.org/web/20260702222336/https://www.bls.gov/schedule/news_release/cpi.htm
+    (captured 2026-07-02, most recent full-year-coverage capture; the Feb 13
+    second-lapse date additionally confirmed via
+    https://web.archive.org/web/20260213183647/, same URL root)."""
+
+    def test_matches_bls_wayback_schedule_exactly(self):
+        assert CPI_DATES_2026 == [
+            date(2026, 1, 13),
+            date(2026, 2, 13),
+            date(2026, 3, 11),
+            date(2026, 4, 10),
+            date(2026, 5, 12),
+            date(2026, 6, 10),
+            date(2026, 7, 14),
+            date(2026, 8, 12),
+            date(2026, 9, 11),
+            date(2026, 10, 14),
+            date(2026, 11, 10),
+            date(2026, 12, 10),
+        ]
+
+    def test_twelve_months_no_more_no_less(self):
+        assert len(CPI_DATES_2026) == 12
+
+    def test_known_wrong_examples_now_correct(self):
+        assert date(2026, 1, 14) not in CPI_DATES_2026  # pre-fix Dec-2025-data guess
+        assert date(2026, 2, 11) not in CPI_DATES_2026  # pre-fix Jan-2026-data guess (second lapse moved it to 13)
+
+
+class TestNfp2025Dates:
+    """Source: Wayback Machine captures of
+    https://www.bls.gov/schedule/news_release/empsit.htm (live bls.gov is
+    HTTP-403-blocked; see the block comment above NFP_DATES_2025 in the
+    script for the full capture list). Pre-shutdown baseline confirmed via
+    https://web.archive.org/web/20250719172653/https://www.bls.gov/schedule/news_release/empsit.htm;
+    post-shutdown corrections confirmed via
+    https://web.archive.org/web/20251121185540/ (same URL root)."""
+
+    def test_matches_bls_wayback_schedule_exactly(self):
+        assert NFP_DATES_2025 == [
+            date(2025, 1, 10),
+            date(2025, 2, 7),
+            date(2025, 3, 7),
+            date(2025, 4, 4),
+            date(2025, 5, 2),
+            date(2025, 6, 6),
+            date(2025, 7, 3),
+            date(2025, 8, 1),
+            date(2025, 9, 5),
+            date(2025, 11, 20),
+            date(2025, 12, 16),
+        ]
+
+    def test_october_shutdown_cancellation_is_not_present(self):
+        """The Oct-2025 jobs report was never separately published (folded
+        into the next report) -- the pre-fix guess (Nov 7, 2025) must not
+        appear."""
+        assert date(2025, 11, 7) not in NFP_DATES_2025
+        assert len(NFP_DATES_2025) == 11
+
+    def test_known_wrong_examples_now_correct(self):
+        assert date(2025, 10, 3) not in NFP_DATES_2025   # pre-shutdown Sep guess
+        assert date(2025, 11, 20) in NFP_DATES_2025       # shutdown-delayed
+        assert date(2025, 12, 5) not in NFP_DATES_2025   # pre-shutdown Nov guess
+        assert date(2025, 12, 16) in NFP_DATES_2025       # shutdown-delayed
+
+
+class TestNfp2026Dates:
+    """Source: https://web.archive.org/web/20260702082019/https://www.bls.gov/schedule/news_release/empsit.htm
+    (captured 2026-07-02, most recent full-year-coverage capture; the Feb 11
+    second-lapse date additionally confirmed via
+    https://web.archive.org/web/20260213183650/, same URL root)."""
+
+    def test_matches_bls_wayback_schedule_exactly(self):
+        assert NFP_DATES_2026 == [
+            date(2026, 1, 9),
+            date(2026, 2, 11),
+            date(2026, 3, 6),
+            date(2026, 4, 3),
+            date(2026, 5, 8),
+            date(2026, 6, 5),
+            date(2026, 7, 2),
+            date(2026, 8, 7),
+            date(2026, 9, 4),
+            date(2026, 10, 2),
+            date(2026, 11, 6),
+            date(2026, 12, 4),
+        ]
+
+    def test_twelve_months_no_more_no_less(self):
+        assert len(NFP_DATES_2026) == 12
+
+    def test_known_wrong_example_now_correct(self):
+        """Jan-2026 jobs report's second-lapse move: originally-planned Feb
+        6, 2026 moved to Feb 11, 2026."""
+        assert date(2026, 2, 6) not in NFP_DATES_2026
+        assert date(2026, 2, 11) in NFP_DATES_2026
 
 
 class TestSeedSpecsStillDedupClean:

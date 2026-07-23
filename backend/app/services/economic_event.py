@@ -34,6 +34,33 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Matches a GDP recurrence_key still on the pre-migration
+# ``gdp_<year>_<month>`` format (no estimate-ordinal suffix) -- e.g.
+# "gdp_2025_01". Byte-for-byte the same pattern used by the migration's own
+# WHERE clause (GDP_REKEY_UPGRADE_SQL / GDP_REKEY_DOWNGRADE_SQL in
+# app/db/migrations_sql.py) and by alembic/versions/
+# 20260723_001_regrain_gdp_recurrence_keys.py, so "does a stale row exist"
+# here means exactly "has that migration's UPDATE not (yet) touched this
+# row" -- see retire_orphaned_macro_events's pre-delete guard below.
+_LEGACY_GDP_RECURRENCE_KEY_PATTERN = r"^gdp_[0-9]{4}_[0-9]{2}$"
+
+
+class MacroKeyMigrationPendingError(RuntimeError):
+    """Raised by ``retire_orphaned_macro_events`` when GDP rows still carry
+    pre-migration recurrence keys.
+
+    Migration ``20260723_001_regrain_gdp_recurrence_keys`` re-keys every
+    already-seeded GDP row from the old ``gdp_<year>_<month>`` format to a
+    new estimate-ordinal-suffixed format (e.g. ``gdp_2026_04_third``). Until
+    that migration has run, ``current_keys`` (always computed in the new
+    format by the current application code) can never contain an old-format
+    key, so every legacy GDP row would look like an orphan and get deleted
+    instead of re-keyed -- real GDP history loss, not a false positive. This
+    error means: the migration has not been applied to this database (not
+    run yet, ran partially, or this is a fresh/restored/staging DB) -- run
+    ``alembic upgrade head`` and retry.
+    """
+
 
 class EconomicEventService:
     """Service for economic event and calendar operations."""
@@ -559,6 +586,12 @@ class EconomicEventService:
         running it for real would delete every matching row's entire
         history.
 
+        Refuses (raises ``MacroKeyMigrationPendingError``) when
+        ``event_types`` includes GDP and any GDP row still carries a
+        pre-migration recurrence key — see that error's docstring and the
+        pre-delete guard below. This must run before the DELETE in the same
+        session with no intervening commit.
+
         The caller owns the transaction commit point the same way
         ``sync_macro_events`` does (commit happens here). Returns the number
         of rows deleted.
@@ -569,6 +602,57 @@ class EconomicEventService:
                 "(would delete every matching row — pass the real current "
                 "spec key set, not an accidental empty one)"
             )
+
+        # Pre-migration guard (data-loss hazard closed here — see PR review
+        # https://github.com/smithadifd/investing_companion/pull/223#issuecomment-5054386185):
+        # migration 20260723_001_regrain_gdp_recurrence_keys re-keys every
+        # already-seeded GDP row from the old ``gdp_<year>_<month>`` format
+        # to a new ordinal-suffixed format. If this pass ever runs against a
+        # database where that migration hasn't been applied yet (skipped,
+        # partially failed, or a fresh/restored/staging DB — the documented
+        # deploy convention for this repo is three manual, unenforced steps:
+        # restart containers, `alembic upgrade head`, then the seed script —
+        # nothing stops the seed script from running first), every
+        # old-format GDP row's key is invisible to ``current_keys`` (always
+        # computed in the new format by the current code) and gets wrongly
+        # deleted as an "orphan" instead of being re-keyed in place. Proved
+        # as a passing regression test in
+        # test_macro_orphan_retirement.py::TestMigrationOrderingSafety::
+        # test_retire_before_rekey_would_wrongly_orphan_the_row.
+        #
+        # Only checked when this call's event_types actually includes GDP —
+        # a GDP migration precondition has no bearing on e.g. a CPI-only
+        # retirement pass, which can never reach a GDP row regardless (the
+        # DELETE below is itself scoped to event_types).
+        #
+        # Deliberately NOT scoped by ``source``: the migration's own SQL has
+        # no source filter (it re-keys every GDP row, SEED or FRED-sourced —
+        # see migrations_sql.py), so a stale-format row of ANY source is
+        # equally valid proof the migration hasn't run against this
+        # database. This is a database-state precondition check, not a
+        # "what would this call delete" check.
+        #
+        # Runs in this same session, immediately before the DELETE below,
+        # with no commit in between — so there's no transactional gap for
+        # another process to insert/mutate a legacy row between the check
+        # and the delete.
+        if EventType.GDP.value in event_types:
+            stale_gdp_stmt = select(func.count(EconomicEvent.id)).where(
+                EconomicEvent.event_type == EventType.GDP.value,
+                EconomicEvent.recurrence_key.op("~")(
+                    _LEGACY_GDP_RECURRENCE_KEY_PATTERN
+                ),
+            )
+            stale_gdp_count = (await self.db.execute(stale_gdp_stmt)).scalar() or 0
+            if stale_gdp_count:
+                raise MacroKeyMigrationPendingError(
+                    "refusing to retire orphaned macro events: "
+                    f"{stale_gdp_count} GDP row(s) still carry pre-migration "
+                    "recurrence keys (format 'gdp_YYYY_MM', no estimate-ordinal "
+                    "suffix) — run `alembic upgrade head` first (migration "
+                    "20260723_001_regrain_gdp_recurrence_keys must re-key them "
+                    "before this retirement pass is safe to run)"
+                )
 
         stmt = delete(EconomicEvent).where(
             EconomicEvent.source == source,

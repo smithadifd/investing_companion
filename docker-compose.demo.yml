@@ -99,6 +99,20 @@ services:
       - ENVIRONMENT=production
       - DEMO_MODE=true
     command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info", "--concurrency=1"]
+    # Dockerfile.backend.prod's baked HEALTHCHECK curls :8000/health, which is
+    # correct for the api service but meaningless here - celery workers run no
+    # HTTP server on :8000, so that check can never pass. Override with a
+    # celery-native liveness probe instead: broadcast an inspect ping over the
+    # broker. Only one worker container is ever running in this deployment,
+    # so a reply necessarily comes from (and confirms the health of) this
+    # process - without depending on this container's node name matching a
+    # `-d celery@<hostname>` destination.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     depends_on:
       db:
         condition: service_healthy
@@ -127,6 +141,17 @@ services:
       - ENVIRONMENT=production
       - DEMO_MODE=true
     command: ["celery", "-A", "app.tasks.celery_app", "beat", "--loglevel=info"]
+    # Same override rationale as celery_worker above: the baked :8000/health
+    # curl check can never pass for a non-HTTP process. Unlike the worker,
+    # beat has no local worker identity to target with `-d`, so ping the
+    # broker broadcast-style - a reply from celery_worker confirms this
+    # container can reach the same broker it needs to dispatch tasks on.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     depends_on:
       celery_worker:
         condition: service_started

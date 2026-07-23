@@ -166,10 +166,10 @@ class TestCpi2025Dates:
     script for the full capture list). Pre-shutdown baseline confirmed via
     https://web.archive.org/web/20250111210513/https://www.bls.gov/schedule/news_release/cpi.htm;
     shutdown-era corrections confirmed via
-    https://web.archive.org/web/20251025032156/ and
-    https://web.archive.org/web/20251121185534/ (same URL root); the
+    https://web.archive.org/web/20251025032156/https://www.bls.gov/schedule/news_release/cpi.htm and
+    https://web.archive.org/web/20251121185534/https://www.bls.gov/schedule/news_release/cpi.htm; the
     Feb-2026 second-lapse date confirmed via
-    https://web.archive.org/web/20260213183647/ (same URL root)."""
+    https://web.archive.org/web/20260213183647/https://www.bls.gov/schedule/news_release/cpi.htm."""
 
     def test_matches_bls_wayback_schedule_exactly(self):
         assert CPI_DATES_2025 == [
@@ -205,7 +205,7 @@ class TestCpi2026Dates:
     """Source: https://web.archive.org/web/20260702222336/https://www.bls.gov/schedule/news_release/cpi.htm
     (captured 2026-07-02, most recent full-year-coverage capture; the Feb 13
     second-lapse date additionally confirmed via
-    https://web.archive.org/web/20260213183647/, same URL root)."""
+    https://web.archive.org/web/20260213183647/https://www.bls.gov/schedule/news_release/cpi.htm."""
 
     def test_matches_bls_wayback_schedule_exactly(self):
         assert CPI_DATES_2026 == [
@@ -238,7 +238,7 @@ class TestNfp2025Dates:
     script for the full capture list). Pre-shutdown baseline confirmed via
     https://web.archive.org/web/20250719172653/https://www.bls.gov/schedule/news_release/empsit.htm;
     post-shutdown corrections confirmed via
-    https://web.archive.org/web/20251121185540/ (same URL root)."""
+    https://web.archive.org/web/20251121185540/https://www.bls.gov/schedule/news_release/empsit.htm."""
 
     def test_matches_bls_wayback_schedule_exactly(self):
         assert NFP_DATES_2025 == [
@@ -273,7 +273,7 @@ class TestNfp2026Dates:
     """Source: https://web.archive.org/web/20260702082019/https://www.bls.gov/schedule/news_release/empsit.htm
     (captured 2026-07-02, most recent full-year-coverage capture; the Feb 11
     second-lapse date additionally confirmed via
-    https://web.archive.org/web/20260213183650/, same URL root)."""
+    https://web.archive.org/web/20260213183650/https://www.bls.gov/schedule/news_release/empsit.htm."""
 
     def test_matches_bls_wayback_schedule_exactly(self):
         assert NFP_DATES_2026 == [

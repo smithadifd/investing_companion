@@ -1,6 +1,6 @@
 # Issue 012: Redis Cache Client Event Loop Lifecycle in Celery
 
-**Status:** Open
+**Status:** Resolved (2026-07-17 — closed by IC #192 `60075f7`, regression test `test_run_async_cache_lifecycle.py`)
 **Created:** 2026-02-05
 **Priority:** Low
 **Affects:** Celery Tasks / Caching

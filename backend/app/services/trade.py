@@ -437,11 +437,15 @@ class TradeService:
         for pair in result.scalars():
             await self.db.delete(pair)
 
-        # Get all trades for this equity, ordered by execution time
+        # Get all trades for this equity, ordered by execution time. `id` is
+        # a secondary sort key so that trades sharing an identical
+        # `executed_at` (e.g. same-second imports/backfills) still sort
+        # deterministically - timestamp alone is not a unique key, and an
+        # unordered tie lets FIFO pairing/cost-basis vary across runs.
         stmt = (
             select(Trade)
             .where(Trade.user_id == user_id, Trade.equity_id == equity_id)
-            .order_by(Trade.executed_at)
+            .order_by(Trade.executed_at, Trade.id)
         )
         result = await self.db.execute(stmt)
         trades = result.scalars().all()

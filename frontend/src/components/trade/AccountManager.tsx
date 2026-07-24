@@ -9,10 +9,13 @@ import {
 } from '@/lib/hooks/useAccount';
 import { Modal } from '@/components/ui/Modal';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { ReconciliationView } from './ReconciliationView';
 
 interface AccountManagerProps {
   onClose: () => void;
 }
+
+type AccountManagerTab = 'accounts' | 'reconciliation';
 
 /**
  * Add/list/delete brokerage accounts. Deleting an account leaves its trades
@@ -29,6 +32,7 @@ export function AccountManager({ onClose }: AccountManagerProps) {
   const [riskProfile, setRiskProfile] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [tab, setTab] = useState<AccountManagerTab>('accounts');
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,6 +61,42 @@ export function AccountManager({ onClose }: AccountManagerProps) {
   return (
     <Modal onClose={onClose} title="Manage Accounts" maxWidth="lg">
       <div className="p-4 space-y-5">
+        {/* Tabs */}
+        <div
+          role="tablist"
+          aria-label="Account management"
+          className="flex gap-1 border-b border-neutral-200 dark:border-neutral-700"
+        >
+          <button
+            role="tab"
+            aria-selected={tab === 'accounts'}
+            onClick={() => setTab('accounts')}
+            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              tab === 'accounts'
+                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'
+            }`}
+          >
+            Accounts
+          </button>
+          <button
+            role="tab"
+            aria-selected={tab === 'reconciliation'}
+            onClick={() => setTab('reconciliation')}
+            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              tab === 'reconciliation'
+                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'
+            }`}
+          >
+            Reconciliation
+          </button>
+        </div>
+
+        {tab === 'reconciliation' ? (
+          <ReconciliationView accounts={accounts} />
+        ) : (
+        <>
         {/* Existing accounts */}
         <div>
           <h3 className="text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">
@@ -148,6 +188,8 @@ export function AccountManager({ onClose }: AccountManagerProps) {
             </button>
           </div>
         </form>
+        </>
+        )}
       </div>
 
       {deleteId !== null && (

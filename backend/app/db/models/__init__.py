@@ -1,6 +1,7 @@
 """Database models package."""
 
 from app.db.models.account import Account
+from app.db.models.account_link import AccountLink, AccountLinkStatus
 from app.db.models.alert import (
     Alert,
     AlertConditionType,
@@ -39,6 +40,8 @@ from app.db.models.watchlist import Watchlist, WatchlistItem
 
 __all__ = [
     "Account",
+    "AccountLink",
+    "AccountLinkStatus",
     "Alert",
     "AlertConditionType",
     "AlertDelivery",

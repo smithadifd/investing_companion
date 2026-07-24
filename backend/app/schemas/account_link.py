@@ -1,7 +1,6 @@
 """AccountLink schemas - the Schwab-hash -> IC-account mapping (§1/§4)."""
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,7 +31,7 @@ class AccountLinkResponse(BaseModel):
     id: int
     account_hash: str
     source: str
-    account_id: Optional[int]
+    account_id: int | None
     status: str
     created_at: datetime
     updated_at: datetime

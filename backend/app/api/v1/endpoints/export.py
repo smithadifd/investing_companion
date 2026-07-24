@@ -1,7 +1,7 @@
 """Export endpoints - structured state for external AI advisors."""
 
 import logging
-from typing import Literal, Union
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import PlainTextResponse
@@ -34,7 +34,7 @@ async def get_context_pack(
     ),
     current_user: User = Depends(get_current_user),
     service: ContextPackService = Depends(get_context_pack_service),
-) -> Union[ContextPack, PlainTextResponse]:
+) -> ContextPack | PlainTextResponse:
     """Build the versioned context pack for the current user."""
     try:
         pack = await service.build(current_user.id)

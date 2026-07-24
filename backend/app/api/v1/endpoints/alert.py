@@ -1,6 +1,5 @@
 """Alert endpoints."""
 
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,14 +31,14 @@ def get_alert_service(
     return AlertService(db, current_user.id)
 
 
-@router.get("", response_model=DataResponse[List[AlertResponse]])
+@router.get("", response_model=DataResponse[list[AlertResponse]])
 async def list_alerts(
     active_only: bool = False,
-    equity_id: Optional[int] = None,
-    ratio_id: Optional[int] = None,
+    equity_id: int | None = None,
+    ratio_id: int | None = None,
     current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
-) -> DataResponse[List[AlertResponse]]:
+) -> DataResponse[list[AlertResponse]]:
     """
     List all alerts.
 
@@ -116,13 +115,13 @@ async def get_alert_delivery_health(
     return DataResponse(data=health)
 
 
-@router.get("/history", response_model=DataResponse[List[AlertHistoryResponse]])
+@router.get("/history", response_model=DataResponse[list[AlertHistoryResponse]])
 async def get_all_alert_history(
     limit: int = 100,
     offset: int = 0,
     current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
-) -> DataResponse[List[AlertHistoryResponse]]:
+) -> DataResponse[list[AlertHistoryResponse]]:
     """
     Get all alert trigger history.
 
@@ -214,13 +213,13 @@ async def toggle_alert(
     return DataResponse(data=alert)
 
 
-@router.get("/{alert_id}/history", response_model=DataResponse[List[AlertHistoryResponse]])
+@router.get("/{alert_id}/history", response_model=DataResponse[list[AlertHistoryResponse]])
 async def get_alert_history(
     alert_id: int,
     limit: int = 50,
     current_user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
-) -> DataResponse[List[AlertHistoryResponse]]:
+) -> DataResponse[list[AlertHistoryResponse]]:
     """
     Get trigger history for a specific alert.
     """

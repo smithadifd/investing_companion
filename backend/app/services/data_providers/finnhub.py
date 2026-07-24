@@ -2,7 +2,6 @@
 
 import logging
 from datetime import datetime, timedelta
-from typing import List
 
 import httpx
 
@@ -25,7 +24,7 @@ class FinnhubNewsProvider:
 
     async def get_company_news(
         self, symbol: str, days_back: int = 7
-    ) -> List[dict]:
+    ) -> list[dict]:
         """Fetch company news for a symbol.
 
         Returns a list of raw news items from Finnhub.
@@ -65,7 +64,7 @@ class FinnhubNewsProvider:
             logger.error(f"Failed to fetch Finnhub news for {symbol}: {e}")
             return []
 
-    async def get_market_news(self, category: str = "general") -> List[dict]:
+    async def get_market_news(self, category: str = "general") -> list[dict]:
         """Fetch general market news.
 
         Categories: general, forex, crypto, merger.

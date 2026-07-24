@@ -18,7 +18,6 @@ Both the readiness card and the context pack consume this service so the
 two surfaces can't drift.
 """
 
-from typing import List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy import and_, func, select
@@ -46,11 +45,11 @@ class LessonService:
     async def list_lessons(
         self,
         user_id: UUID,
-        symbol: Optional[str] = None,
-        tag: Optional[str] = None,
+        symbol: str | None = None,
+        tag: str | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> Tuple[List[LessonResponse], int]:
+    ) -> tuple[list[LessonResponse], int]:
         conditions = [Lesson.user_id == user_id]
         if symbol:
             conditions.append(
@@ -80,13 +79,13 @@ class LessonService:
 
     async def get_lesson(
         self, lesson_id: int, user_id: UUID
-    ) -> Optional[LessonResponse]:
+    ) -> LessonResponse | None:
         lesson = await self._get(lesson_id, user_id)
         return self._to_response(lesson) if lesson else None
 
     async def create_lesson(
         self, user_id: UUID, data: LessonCreate
-    ) -> Optional[LessonResponse]:
+    ) -> LessonResponse | None:
         """Resolve the equity from trade_id, equity_id, or symbol (in that order)."""
         equity = None
         trade_id = None
@@ -123,7 +122,7 @@ class LessonService:
 
     async def update_lesson(
         self, lesson_id: int, user_id: UUID, data: LessonUpdate
-    ) -> Optional[LessonResponse]:
+    ) -> LessonResponse | None:
         lesson = await self._get(lesson_id, user_id)
         if not lesson:
             return None
@@ -163,9 +162,9 @@ class LessonService:
     async def relevant_lessons(
         self,
         user_id: UUID,
-        symbols: List[str],
+        symbols: list[str],
         limit: int = MAX_LESSONS_PER_ITEM,
-    ) -> List[LessonResponse]:
+    ) -> list[LessonResponse]:
         """Lessons matching the involved symbols per the module's matching rule."""
         involved = {s.upper() for s in symbols}
         if not involved:
@@ -198,7 +197,7 @@ class LessonService:
             .where(Lesson.user_id == user_id)
             .order_by(Lesson.created_at.desc(), Lesson.id.desc())
         )
-        matched: List[LessonResponse] = []
+        matched: list[LessonResponse] = []
         for lesson in (await self.db.execute(stmt)).scalars():
             symbol = lesson.equity.symbol.upper()
             tags = [t.lower() for t in (lesson.tags or [])]
@@ -214,12 +213,12 @@ class LessonService:
 
     async def recent_lessons(
         self, user_id: UUID, limit: int = 20
-    ) -> List[LessonResponse]:
+    ) -> list[LessonResponse]:
         """Most recent lessons, for the context pack's journal section."""
         lessons, _ = await self.list_lessons(user_id, limit=limit)
         return lessons
 
-    async def _get(self, lesson_id: int, user_id: UUID) -> Optional[Lesson]:
+    async def _get(self, lesson_id: int, user_id: UUID) -> Lesson | None:
         return await self.db.scalar(
             select(Lesson)
             .options(selectinload(Lesson.equity))

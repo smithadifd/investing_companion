@@ -2,7 +2,6 @@
 Application configuration using Pydantic Settings
 """
 import sys
-from typing import List, Union
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -46,7 +45,7 @@ class Settings(BaseSettings):
     # Empty (default) = trust NO proxy: XFF is ignored and the direct peer is
     # used for rate-limit identity, so a client can't spoof its rate-limit key.
     # Set this to your Caddy/ingress address(es) when deployed behind a proxy.
-    TRUSTED_PROXIES: Union[List[str], str] = []
+    TRUSTED_PROXIES: list[str] | str = []
 
     # Content-Security-Policy applied to responses (see SecurityHeadersMiddleware).
     # Default is API-appropriate: deny everything (JSON API serves no page assets).
@@ -136,7 +135,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # CORS
-    CORS_ORIGINS: Union[List[str], str] = ["http://localhost:3000", "http://localhost:3001"]
+    CORS_ORIGINS: list[str] | str = ["http://localhost:3000", "http://localhost:3001"]
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

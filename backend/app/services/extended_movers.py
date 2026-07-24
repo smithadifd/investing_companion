@@ -8,7 +8,8 @@ labeling rules.
 """
 
 import logging
-from typing import Iterable, Protocol, Optional
+from typing import Protocol
+from collections.abc import Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ MOVER_THRESHOLD_PERCENT = 2.0
 
 
 class ExtendedQuoteProvider(Protocol):
-    async def get_extended_quote(self, symbol: str) -> Optional[dict]: ...
+    async def get_extended_quote(self, symbol: str) -> dict | None: ...
 
 
 async def collect_extended_movers(

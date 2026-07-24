@@ -1,6 +1,5 @@
 """Schwab connection schemas (opt-in real-time quotes)."""
 
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -11,8 +10,8 @@ class SchwabStatus(BaseModel):
     configured: bool  # server has SCHWAB_APP_KEY/SECRET/CALLBACK_URL set
     connected: bool  # a valid (non-expired) token is stored
     needs_reconnect: bool = False  # token exists but passed the 7-day expiry
-    token_age_days: Optional[float] = None
-    expires_in_days: Optional[float] = None
+    token_age_days: float | None = None
+    expires_in_days: float | None = None
 
 
 class SchwabConnectResponse(BaseModel):

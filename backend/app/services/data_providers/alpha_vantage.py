@@ -15,7 +15,6 @@ behind Stooq in the chain: a last-resort quote source, not a primary.
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Optional
 
 import httpx
 
@@ -38,7 +37,7 @@ def is_alpha_vantage_configured() -> bool:
     return bool(settings.ALPHA_VANTAGE_API_KEY)
 
 
-def _safe_decimal(value) -> Optional[Decimal]:
+def _safe_decimal(value) -> Decimal | None:
     if value is None:
         return None
     text = str(value).strip().rstrip("%")
@@ -50,7 +49,7 @@ def _safe_decimal(value) -> Optional[Decimal]:
         return None
 
 
-def parse_global_quote(symbol: str, payload: dict) -> Optional[QuoteResponse]:
+def parse_global_quote(symbol: str, payload: dict) -> QuoteResponse | None:
     """Map an Alpha Vantage GLOBAL_QUOTE payload to a ``QuoteResponse``."""
     quote = (payload or {}).get("Global Quote") or {}
     price = _safe_decimal(quote.get("05. price"))
@@ -83,7 +82,7 @@ class AlphaVantageProvider(MarketDataProvider):
     name = "alpha_vantage"
     capabilities = frozenset({ProviderCapability.QUOTE})
 
-    def __init__(self, api_key: Optional[str] = None, timeout: float = _HTTP_TIMEOUT):
+    def __init__(self, api_key: str | None = None, timeout: float = _HTTP_TIMEOUT):
         key = api_key if api_key is not None else settings.ALPHA_VANTAGE_API_KEY
         if not key:
             raise ProviderError(
@@ -107,7 +106,7 @@ class AlphaVantageProvider(MarketDataProvider):
             raise ProviderError("Alpha Vantage rate limit / usage note")
         return payload
 
-    async def get_quote(self, symbol: str) -> Optional[QuoteResponse]:
+    async def get_quote(self, symbol: str) -> QuoteResponse | None:
         payload = await self._fetch_json(
             {
                 "function": "GLOBAL_QUOTE",

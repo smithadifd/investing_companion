@@ -14,7 +14,7 @@ duplicate evaluation work.
 import logging
 import uuid
 from contextlib import contextmanager
-from typing import Iterator
+from collections.abc import Iterator
 
 from app.core.config import settings
 

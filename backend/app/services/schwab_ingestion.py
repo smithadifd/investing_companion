@@ -55,7 +55,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Callable, Iterator, Optional
+from collections.abc import Callable, Iterator
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -163,7 +163,7 @@ async def get_connected_provider(
 # ---------------------------------------------------------------------------
 # Normalization
 # ---------------------------------------------------------------------------
-def _decimal(value) -> Optional[Decimal]:
+def _decimal(value) -> Decimal | None:
     if value is None:
         return None
     try:
@@ -201,7 +201,7 @@ def _normalize_position(raw: dict) -> dict:
     }
 
 
-def _primary_transfer_item(transfer_items: Optional[list]) -> Optional[dict]:
+def _primary_transfer_item(transfer_items: list | None) -> dict | None:
     """The trade-relevant leg of a transaction's ``transferItems``, if any:
     the first item carrying a ``positionEffect`` - Schwab's own signal that
     this leg is the tradeable instrument, as opposed to a CURRENCY/fee leg
@@ -212,7 +212,7 @@ def _primary_transfer_item(transfer_items: Optional[list]) -> Optional[dict]:
     return None
 
 
-def _parse_schwab_datetime(value) -> Optional[datetime]:
+def _parse_schwab_datetime(value) -> datetime | None:
     """Parse Schwab's ``YYYY-MM-DDTHH:MM:SS+0000``-style timestamps to an
     aware UTC ``datetime``."""
     if not value or not isinstance(value, str):
@@ -289,8 +289,8 @@ async def _record_failed_run(
     account_hash: str,
     kind: ImportKind,
     exc: Exception,
-    window_start: Optional[datetime] = None,
-    window_end: Optional[datetime] = None,
+    window_start: datetime | None = None,
+    window_end: datetime | None = None,
 ) -> None:
     """Record a ``status=failed`` run row and commit ``db``.
 
@@ -327,7 +327,7 @@ async def pull_positions(
     user_id: uuid.UUID,
     account_hash: str,
     *,
-    session_factory: Optional[_SessionFactory] = None,
+    session_factory: _SessionFactory | None = None,
 ) -> BrokerImportRun:
     """One full positions snapshot for ``(user_id, account_hash)``.
 
@@ -391,7 +391,7 @@ async def pull_positions(
 
 async def get_latest_complete_run(
     db: AsyncSession, user_id: uuid.UUID, account_hash: str
-) -> Optional[BrokerImportRun]:
+) -> BrokerImportRun | None:
     """The most recent ``status=complete`` positions run for ``(user_id,
     account_hash)``, or ``None`` if positions have never been successfully
     pulled. "Current positions" = this run's ``ImportedPosition`` rows.
@@ -414,7 +414,7 @@ async def get_latest_complete_run(
 
 async def get_newer_failed_import_at(
     db: AsyncSession, user_id: uuid.UUID, account_hash: str
-) -> Optional[datetime]:
+) -> datetime | None:
     """When the LATEST positions run is a ``failed`` one newer than the latest
     complete run (or there is no complete run at all), its ``created_at`` -
     else ``None``. Surfaces "your last pull attempt actually failed, don't
@@ -518,10 +518,10 @@ def _history_gap_note(requested_start: datetime, clamped_start: datetime) -> str
 async def pull_transactions(
     user_id: uuid.UUID,
     account_hash: str,
-    start_date: Optional[datetime] = None,
-    end_date: Optional[datetime] = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
     *,
-    session_factory: Optional[_SessionFactory] = None,
+    session_factory: _SessionFactory | None = None,
 ) -> BrokerImportRun:
     """Pull + upsert transactions for ``(user_id, account_hash)`` in
     ``[start_date, end_date)``.
@@ -554,7 +554,7 @@ async def pull_transactions(
         # permanently, until someone intervened.
         clamp_floor = now - timedelta(days=_TRANSACTION_START_CLAMP_DAYS)
         window_start = max(requested_start, clamp_floor)
-        notes: Optional[str] = None
+        notes: str | None = None
         if window_start > requested_start:
             notes = _history_gap_note(requested_start, window_start)
             logger.warning(

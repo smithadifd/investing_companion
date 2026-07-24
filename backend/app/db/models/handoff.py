@@ -8,7 +8,6 @@ mental model stops drifting from reality.
 """
 
 import uuid
-from typing import Optional
 
 from sqlalchemy import ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -23,7 +22,7 @@ class HandoffLog(Base, TimestampMixin):
     __tablename__ = "handoff_log"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=True,

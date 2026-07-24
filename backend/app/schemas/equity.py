@@ -2,7 +2,6 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -12,7 +11,7 @@ class EquitySearchResult(BaseModel):
 
     symbol: str
     name: str
-    exchange: Optional[str] = None
+    exchange: str | None = None
     asset_type: str = "stock"
 
     model_config = ConfigDict(from_attributes=True)
@@ -28,15 +27,15 @@ class QuoteResponse(BaseModel):
     open: Decimal
     high: Decimal
     low: Decimal
-    previous_close: Optional[Decimal] = None
+    previous_close: Decimal | None = None
     volume: int
-    market_cap: Optional[int] = None
+    market_cap: int | None = None
     timestamp: datetime
     # Provider-resilience metadata: which provider produced the quote and
     # whether it is degraded (served by a fallback because the primary was
     # unavailable). ``timestamp`` above is the "as of" time the UI renders so a
     # user can see when data went stale.
-    source: Optional[str] = None
+    source: str | None = None
     stale: bool = False
 
     model_config = ConfigDict(from_attributes=True)
@@ -50,7 +49,7 @@ class OHLCVData(BaseModel):
     high: Decimal
     low: Decimal
     close: Decimal
-    volume: Optional[int] = None
+    volume: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -60,26 +59,26 @@ class HistoryResponse(BaseModel):
 
     symbol: str
     interval: str
-    history: List[OHLCVData]
+    history: list[OHLCVData]
 
 
 class FundamentalsResponse(BaseModel):
     """Fundamental data for an equity."""
 
-    market_cap: Optional[int] = None
-    enterprise_value: Optional[int] = None
-    pe_ratio: Optional[Decimal] = None
-    forward_pe: Optional[Decimal] = None
-    peg_ratio: Optional[Decimal] = None
-    price_to_book: Optional[Decimal] = None
-    price_to_sales: Optional[Decimal] = None
-    eps_ttm: Optional[Decimal] = None
-    dividend_yield: Optional[Decimal] = None
-    beta: Optional[Decimal] = None
-    week_52_high: Optional[Decimal] = None
-    week_52_low: Optional[Decimal] = None
-    avg_volume: Optional[int] = None
-    profit_margin: Optional[Decimal] = None
+    market_cap: int | None = None
+    enterprise_value: int | None = None
+    pe_ratio: Decimal | None = None
+    forward_pe: Decimal | None = None
+    peg_ratio: Decimal | None = None
+    price_to_book: Decimal | None = None
+    price_to_sales: Decimal | None = None
+    eps_ttm: Decimal | None = None
+    dividend_yield: Decimal | None = None
+    beta: Decimal | None = None
+    week_52_high: Decimal | None = None
+    week_52_low: Decimal | None = None
+    avg_volume: int | None = None
+    profit_margin: Decimal | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -89,10 +88,10 @@ class EquityBase(BaseModel):
 
     symbol: str
     name: str
-    exchange: Optional[str] = None
+    exchange: str | None = None
     asset_type: str = "stock"
-    sector: Optional[str] = None
-    industry: Optional[str] = None
+    sector: str | None = None
+    industry: str | None = None
     country: str = "US"
     currency: str = "USD"
 
@@ -104,13 +103,13 @@ class EquityDetailResponse(BaseModel):
 
     symbol: str
     name: str
-    exchange: Optional[str] = None
+    exchange: str | None = None
     asset_type: str = "stock"
-    sector: Optional[str] = None
-    industry: Optional[str] = None
+    sector: str | None = None
+    industry: str | None = None
     country: str = "US"
     currency: str = "USD"
-    quote: Optional[QuoteResponse] = None
-    fundamentals: Optional[FundamentalsResponse] = None
+    quote: QuoteResponse | None = None
+    fundamentals: FundamentalsResponse | None = None
 
     model_config = ConfigDict(from_attributes=True)

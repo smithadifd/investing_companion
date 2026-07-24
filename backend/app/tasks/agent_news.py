@@ -18,7 +18,7 @@ instead of fighting a second event loop.
 """
 
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 from app.db.session import AsyncSessionLocal
 from app.services.agents.news_catalyst import NewsCatalystAgent

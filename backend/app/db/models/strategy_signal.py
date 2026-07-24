@@ -9,7 +9,7 @@ only lays down the table. No generation logic lives here yet.
 
 import uuid
 from datetime import date as date_
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Date, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -44,7 +44,7 @@ class StrategySignal(Base, TimestampMixin):
 
     # Structured context the brief was built from (referenced symbols, levels,
     # events, etc.). Shape is owned by the follow-up agent PR, not fixed here.
-    payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
         # One brief per user per trading day; a re-run regenerates in place. Its

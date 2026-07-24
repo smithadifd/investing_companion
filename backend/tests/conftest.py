@@ -2,7 +2,7 @@
 
 import hashlib
 import sys
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient

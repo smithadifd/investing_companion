@@ -4,7 +4,6 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import List, Optional
 
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,7 +27,7 @@ APPROACHING_THRESHOLD_PCT = Decimal("3")
 HIT_WINDOW = timedelta(hours=48)
 
 
-def _alert_distance(alert: Alert) -> Optional[Decimal]:
+def _alert_distance(alert: Alert) -> Decimal | None:
     """Percent move from last checked value to threshold (None for percent conditions)."""
     # Percent conditions and entry zones have no single threshold to
     # measure against (zone alerts store 0)
@@ -43,7 +42,7 @@ def _alert_distance(alert: Alert) -> Optional[Decimal]:
     return ((threshold - last) / last * 100).quantize(Decimal("0.01"))
 
 
-def derive_signal(alerts: List[Alert]) -> TriggerSignal:
+def derive_signal(alerts: list[Alert]) -> TriggerSignal:
     """Live signal for a trigger from its linked alerts."""
     if not alerts:
         return TriggerSignal.UNWATCHED
@@ -63,7 +62,7 @@ def derive_signal(alerts: List[Alert]) -> TriggerSignal:
 
 class TriggerService:
     def __init__(
-        self, db: AsyncSession, user_id: Optional[uuid.UUID] = None
+        self, db: AsyncSession, user_id: uuid.UUID | None = None
     ) -> None:
         self.db = db
         self.user_id = user_id
@@ -83,7 +82,7 @@ class TriggerService:
 
     async def list_triggers(
         self, include_retired: bool = False
-    ) -> List[TriggerResponse]:
+    ) -> list[TriggerResponse]:
         stmt = (
             select(Trigger)
             .options(
@@ -96,7 +95,7 @@ class TriggerService:
         result = await self.db.execute(self._scope(stmt))
         return [self._to_response(t) for t in result.scalars().all()]
 
-    async def get_trigger(self, trigger_id: int) -> Optional[TriggerResponse]:
+    async def get_trigger(self, trigger_id: int) -> TriggerResponse | None:
         trigger = await self._get(trigger_id)
         return self._to_response(trigger) if trigger else None
 
@@ -118,7 +117,7 @@ class TriggerService:
 
     async def update_trigger(
         self, trigger_id: int, data: TriggerUpdate
-    ) -> Optional[TriggerResponse]:
+    ) -> TriggerResponse | None:
         trigger = await self._get(trigger_id)
         if not trigger:
             return None
@@ -144,8 +143,8 @@ class TriggerService:
         return True
 
     async def execute_trigger(
-        self, trigger_id: int, note: Optional[str] = None
-    ) -> Optional[TriggerResponse]:
+        self, trigger_id: int, note: str | None = None
+    ) -> TriggerResponse | None:
         """Mark a trigger executed - the user acted on the pre-committed plan."""
         trigger = await self._get(trigger_id)
         if not trigger:
@@ -156,7 +155,7 @@ class TriggerService:
         await self.db.commit()
         return await self.get_trigger(trigger_id)
 
-    async def rearm_trigger(self, trigger_id: int) -> Optional[TriggerResponse]:
+    async def rearm_trigger(self, trigger_id: int) -> TriggerResponse | None:
         """Return an executed trigger to active.
 
         RETIRED is terminal: a retired trigger is closed history and cannot be
@@ -174,7 +173,7 @@ class TriggerService:
         await self.db.commit()
         return await self.get_trigger(trigger_id)
 
-    async def retire_trigger(self, trigger_id: int) -> Optional[TriggerResponse]:
+    async def retire_trigger(self, trigger_id: int) -> TriggerResponse | None:
         """Retire a trigger - the standing order no longer applies.
 
         Terminal lifecycle state. Retiring preserves the trigger as closed
@@ -190,7 +189,7 @@ class TriggerService:
         await self.db.commit()
         return await self.get_trigger(trigger_id)
 
-    async def _get(self, trigger_id: int) -> Optional[Trigger]:
+    async def _get(self, trigger_id: int) -> Trigger | None:
         stmt = (
             select(Trigger)
             .options(
@@ -201,7 +200,7 @@ class TriggerService:
         result = await self.db.execute(self._scope(stmt))
         return result.scalar_one_or_none()
 
-    async def _set_alert_links(self, trigger: Trigger, alert_ids: List[int]) -> None:
+    async def _set_alert_links(self, trigger: Trigger, alert_ids: list[int]) -> None:
         """Replace the trigger's alert links, validating the alerts exist."""
         if alert_ids:
             alert_stmt = select(Alert.id).where(Alert.id.in_(alert_ids))

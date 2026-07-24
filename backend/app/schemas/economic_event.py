@@ -3,7 +3,6 @@
 from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
-from typing import List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -94,13 +93,13 @@ class EconomicEventBase(BaseModel):
 
     event_type: EventType
     event_date: date
-    event_time: Optional[time] = None
+    event_time: time | None = None
     all_day: bool = True
     title: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
-    actual_value: Optional[Decimal] = None
-    forecast_value: Optional[Decimal] = None
-    previous_value: Optional[Decimal] = None
+    description: str | None = None
+    actual_value: Decimal | None = None
+    forecast_value: Decimal | None = None
+    previous_value: Decimal | None = None
     importance: EventImportance = EventImportance.MEDIUM
     is_confirmed: bool = True
 
@@ -108,7 +107,7 @@ class EconomicEventBase(BaseModel):
 class EconomicEventCreate(EconomicEventBase):
     """Schema for creating an economic event."""
 
-    equity_symbol: Optional[str] = None  # For equity events, provide symbol
+    equity_symbol: str | None = None  # For equity events, provide symbol
 
     @field_validator("event_type")
     @classmethod
@@ -120,31 +119,31 @@ class EconomicEventCreate(EconomicEventBase):
 class EconomicEventUpdate(BaseModel):
     """Schema for updating an economic event."""
 
-    event_date: Optional[date] = None
-    event_time: Optional[time] = None
-    all_day: Optional[bool] = None
-    title: Optional[str] = Field(None, min_length=1, max_length=255)
-    description: Optional[str] = None
-    actual_value: Optional[Decimal] = None
-    forecast_value: Optional[Decimal] = None
-    previous_value: Optional[Decimal] = None
-    importance: Optional[EventImportance] = None
-    is_confirmed: Optional[bool] = None
+    event_date: date | None = None
+    event_time: time | None = None
+    all_day: bool | None = None
+    title: str | None = Field(None, min_length=1, max_length=255)
+    description: str | None = None
+    actual_value: Decimal | None = None
+    forecast_value: Decimal | None = None
+    previous_value: Decimal | None = None
+    importance: EventImportance | None = None
+    is_confirmed: bool | None = None
 
 
 class EconomicEventResponse(EconomicEventBase):
     """Schema for economic event response."""
 
     id: UUID
-    equity_id: Optional[int] = None
-    user_id: Optional[UUID] = None
+    equity_id: int | None = None
+    user_id: UUID | None = None
     source: EventSource
-    recurrence_key: Optional[str] = None
+    recurrence_key: str | None = None
     created_at: datetime
     updated_at: datetime
 
     # Enriched equity info
-    equity: Optional[EquityBrief] = None
+    equity: EquityBrief | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -153,7 +152,7 @@ class CalendarDay(BaseModel):
     """Events grouped by day for calendar view."""
 
     date: date
-    events: List[EconomicEventResponse]
+    events: list[EconomicEventResponse]
     has_earnings: bool = False
     has_macro: bool = False
     event_count: int = 0
@@ -164,14 +163,14 @@ class CalendarMonth(BaseModel):
 
     year: int
     month: int
-    days: List[CalendarDay]
+    days: list[CalendarDay]
     total_events: int
 
 
 class UpcomingEventsResponse(BaseModel):
     """Response for upcoming events endpoint."""
 
-    events: List[EconomicEventResponse]
+    events: list[EconomicEventResponse]
     total: int
     days_ahead: int
 
@@ -179,13 +178,13 @@ class UpcomingEventsResponse(BaseModel):
 class EventFilters(BaseModel):
     """Filters for querying events."""
 
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
-    event_types: Optional[List[EventType]] = None
-    equity_id: Optional[int] = None
-    equity_symbol: Optional[str] = None
-    watchlist_id: Optional[int] = None
-    importance: Optional[EventImportance] = None
+    start_date: date | None = None
+    end_date: date | None = None
+    event_types: list[EventType] | None = None
+    equity_id: int | None = None
+    equity_symbol: str | None = None
+    watchlist_id: int | None = None
+    importance: EventImportance | None = None
     watchlist_only: bool = False
     include_past: bool = False
 
@@ -193,26 +192,26 @@ class EventFilters(BaseModel):
 class EarningsInfo(BaseModel):
     """Earnings-specific information from Yahoo Finance."""
 
-    earnings_date: Optional[date] = None
-    earnings_time: Optional[str] = None  # "BMO" (before market open), "AMC" (after market close)
+    earnings_date: date | None = None
+    earnings_time: str | None = None  # "BMO" (before market open), "AMC" (after market close)
     is_confirmed: bool = False
 
 
 class DividendInfo(BaseModel):
     """Dividend information from Yahoo Finance."""
 
-    ex_dividend_date: Optional[date] = None
-    dividend_date: Optional[date] = None  # Payment date
-    dividend_amount: Optional[Decimal] = None
-    dividend_yield: Optional[Decimal] = None
+    ex_dividend_date: date | None = None
+    dividend_date: date | None = None  # Payment date
+    dividend_amount: Decimal | None = None
+    dividend_yield: Decimal | None = None
 
 
 class EquityCalendarInfo(BaseModel):
     """Calendar information for an equity from Yahoo Finance."""
 
     symbol: str
-    earnings: Optional[EarningsInfo] = None
-    dividend: Optional[DividendInfo] = None
+    earnings: EarningsInfo | None = None
+    dividend: DividendInfo | None = None
 
 
 class EventStats(BaseModel):
@@ -221,5 +220,5 @@ class EventStats(BaseModel):
     total_events: int
     earnings_this_week: int
     macro_events_this_week: int
-    next_fomc_date: Optional[date] = None
+    next_fomc_date: date | None = None
     watchlist_earnings_upcoming: int

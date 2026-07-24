@@ -1,6 +1,5 @@
 """Equity service - business logic for equity operations."""
 
-from typing import List, Optional
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,7 +32,7 @@ class EquityService:
         # serve.
         self.yahoo = YahooFinanceProvider()
 
-    async def search(self, query: str, limit: int = 20) -> List[EquitySearchResult]:
+    async def search(self, query: str, limit: int = 20) -> list[EquitySearchResult]:
         """Search equities - first check DB, then external provider."""
         # Check database first (if available)
         try:
@@ -61,7 +60,7 @@ class EquityService:
         # Fall back to the resilient provider chain (Yahoo primary).
         return await self.provider.search(query, limit)
 
-    async def get_quote(self, symbol: str) -> Optional[QuoteResponse]:
+    async def get_quote(self, symbol: str) -> QuoteResponse | None:
         """Get quote with caching."""
         cache_key = cache_service.quote_key(symbol)
 
@@ -92,7 +91,7 @@ class EquityService:
         symbol: str,
         period: str = "1y",
         interval: str = "1d",
-    ) -> Optional[HistoryResponse]:
+    ) -> HistoryResponse | None:
         """Get historical data with caching."""
         cache_key = cache_service.history_key(symbol, period, interval)
 
@@ -124,7 +123,7 @@ class EquityService:
 
         return None
 
-    async def get_fundamentals(self, symbol: str) -> Optional[FundamentalsResponse]:
+    async def get_fundamentals(self, symbol: str) -> FundamentalsResponse | None:
         """Get fundamentals with caching."""
         cache_key = cache_service.fundamentals_key(symbol)
 
@@ -150,7 +149,7 @@ class EquityService:
 
         return fundamentals
 
-    async def get_or_create_equity(self, symbol: str) -> Optional[Equity]:
+    async def get_or_create_equity(self, symbol: str) -> Equity | None:
         """Get equity from DB or create from provider data."""
         import logging
         logger = logging.getLogger(__name__)
@@ -192,7 +191,7 @@ class EquityService:
             # Database not available, return None
             return None
 
-    async def get_equity_detail(self, symbol: str) -> Optional[EquityDetailResponse]:
+    async def get_equity_detail(self, symbol: str) -> EquityDetailResponse | None:
         """Get full equity details including quote and fundamentals."""
         # Try to get or create equity from database
         equity = await self.get_or_create_equity(symbol)
@@ -233,7 +232,7 @@ class EquityService:
 
         return None
 
-    async def get_peers(self, symbol: str, limit: int = 5) -> List[EquityDetailResponse]:
+    async def get_peers(self, symbol: str, limit: int = 5) -> list[EquityDetailResponse]:
         """Get peer companies in the same sector for comparison."""
         import logging
         logger = logging.getLogger(__name__)
@@ -281,7 +280,7 @@ class EquityService:
 
     async def get_sector_peers_external(
         self, symbol: str, sector: str, limit: int = 5
-    ) -> List[EquityDetailResponse]:
+    ) -> list[EquityDetailResponse]:
         """Get peer companies using external data (common sector constituents)."""
         import logging
         logger = logging.getLogger(__name__)

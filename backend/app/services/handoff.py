@@ -1,7 +1,6 @@
 """Handoff receipt service - records and lists handoff execution outcomes."""
 
 import logging
-from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -22,7 +21,7 @@ class HandoffService:
         self.db = db
 
     async def record(
-        self, data: HandoffReceiptCreate, user_id: Optional[UUID] = None
+        self, data: HandoffReceiptCreate, user_id: UUID | None = None
     ) -> HandoffReceiptResponse:
         counts = {"applied": 0, "skipped": 0, "flagged": 0}
         for action in data.actions:
@@ -46,7 +45,7 @@ class HandoffService:
         )
         return self._to_response(log)
 
-    async def recent(self, limit: int = 5) -> List[HandoffReceiptResponse]:
+    async def recent(self, limit: int = 5) -> list[HandoffReceiptResponse]:
         stmt = (
             select(HandoffLog)
             .order_by(HandoffLog.created_at.desc())

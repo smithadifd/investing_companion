@@ -1,6 +1,5 @@
 """Lesson API endpoints - the learning loop's capture and journal."""
 
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,8 +26,8 @@ def get_lesson_service(db: AsyncSession = Depends(get_db)) -> LessonService:
 
 @router.get("", response_model=ListResponse[LessonResponse])
 async def list_lessons(
-    symbol: Optional[str] = Query(None, description="Filter by equity symbol"),
-    tag: Optional[str] = Query(None, description="Filter by tag (case-insensitive)"),
+    symbol: str | None = Query(None, description="Filter by equity symbol"),
+    tag: str | None = Query(None, description="Filter by tag (case-insensitive)"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),

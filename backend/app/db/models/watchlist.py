@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
     Boolean,
@@ -33,9 +33,9 @@ class Watchlist(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
     is_default: Mapped[bool] = mapped_column(default=False, nullable=False)
-    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=True,
@@ -43,7 +43,7 @@ class Watchlist(Base, TimestampMixin):
     )
 
     # Relationships
-    items: Mapped[List["WatchlistItem"]] = relationship(
+    items: Mapped[list["WatchlistItem"]] = relationship(
         back_populates="watchlist",
         lazy="selectin",
         cascade="all, delete-orphan",
@@ -73,16 +73,16 @@ class WatchlistItem(Base):
         ForeignKey("equities.id", ondelete="CASCADE"),
         nullable=False,
     )
-    notes: Mapped[Optional[str]] = mapped_column(Text)
-    target_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2))
-    thesis: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    target_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    thesis: Mapped[str | None] = mapped_column(Text)
     # Tiered entry zones: [{"tier": "Half starter", "low": "50", "high": "52"}]
     # Bounds are decimal strings; at least one bound per zone. None = no zones.
-    entry_zones: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    entry_zones: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     # Single-catalyst cluster tags (lowercase): ["uranium restart", "carry
     # unwind"]. Drives catalyst-cluster exposure alongside theme exposure.
     # Watchlists are global (single-user install), so these tags are global too.
-    catalyst_tags: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    catalyst_tags: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     track_calendar: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     added_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

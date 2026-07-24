@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -26,41 +26,41 @@ class EquityFundamentals(Base):
     )
 
     # Valuation metrics
-    market_cap: Mapped[Optional[int]] = mapped_column(BigInteger)
-    enterprise_value: Mapped[Optional[int]] = mapped_column(BigInteger)
-    pe_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))
-    forward_pe: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))
-    peg_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))
-    price_to_book: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))
-    price_to_sales: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))
+    market_cap: Mapped[int | None] = mapped_column(BigInteger)
+    enterprise_value: Mapped[int | None] = mapped_column(BigInteger)
+    pe_ratio: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    forward_pe: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    peg_ratio: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    price_to_book: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    price_to_sales: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
 
     # Profitability
-    eps_ttm: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))
-    eps_forward: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))
-    revenue_ttm: Mapped[Optional[int]] = mapped_column(BigInteger)
-    net_income_ttm: Mapped[Optional[int]] = mapped_column(BigInteger)
-    profit_margin: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
-    operating_margin: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
-    roe: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
-    roa: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
+    eps_ttm: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    eps_forward: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    revenue_ttm: Mapped[int | None] = mapped_column(BigInteger)
+    net_income_ttm: Mapped[int | None] = mapped_column(BigInteger)
+    profit_margin: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    operating_margin: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    roe: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    roa: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
 
     # Dividends
-    dividend_yield: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
-    dividend_per_share: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 4))
-    payout_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
+    dividend_yield: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    dividend_per_share: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    payout_ratio: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
 
     # Trading
-    beta: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
-    week_52_high: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2))
-    week_52_low: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2))
-    avg_volume_10d: Mapped[Optional[int]] = mapped_column(BigInteger)
-    avg_volume_3m: Mapped[Optional[int]] = mapped_column(BigInteger)
-    shares_outstanding: Mapped[Optional[int]] = mapped_column(BigInteger)
-    float_shares: Mapped[Optional[int]] = mapped_column(BigInteger)
-    short_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
+    beta: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    week_52_high: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    week_52_low: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    avg_volume_10d: Mapped[int | None] = mapped_column(BigInteger)
+    avg_volume_3m: Mapped[int | None] = mapped_column(BigInteger)
+    shares_outstanding: Mapped[int | None] = mapped_column(BigInteger)
+    float_shares: Mapped[int | None] = mapped_column(BigInteger)
+    short_ratio: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
 
     # Metadata
-    data_source: Mapped[Optional[str]] = mapped_column(String(50))
+    data_source: Mapped[str | None] = mapped_column(String(50))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

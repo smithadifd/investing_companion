@@ -3,7 +3,6 @@
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
-from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -22,20 +21,20 @@ class NeedsAttentionItem(BaseModel):
 
     kind: NeedsAttentionKind
     title: str = Field(..., description="Alert name, or symbol for target items")
-    symbol: Optional[str] = None
-    detail: Optional[str] = Field(
+    symbol: str | None = None
+    detail: str | None = Field(
         None, description="Alert action note (first line) or watchlist name"
     )
-    distance_percent: Optional[Decimal] = Field(
+    distance_percent: Decimal | None = Field(
         None, description="Percent move to threshold/target"
     )
-    last_checked_value: Optional[Decimal] = None
-    target_price: Optional[Decimal] = None
-    last_triggered_at: Optional[datetime] = None
+    last_checked_value: Decimal | None = None
+    target_price: Decimal | None = None
+    last_triggered_at: datetime | None = None
 
 
 class NeedsAttentionResponse(BaseModel):
-    items: List[NeedsAttentionItem] = Field(default_factory=list)
+    items: list[NeedsAttentionItem] = Field(default_factory=list)
 
 
 class ReadinessPosition(BaseModel):
@@ -50,7 +49,7 @@ class ReadinessEvent(BaseModel):
     """Upcoming calendar event on an involved symbol - a caution, not a blocker."""
 
     title: str
-    symbol: Optional[str] = None
+    symbol: str | None = None
     event_date: date
     days_away: int
 
@@ -62,7 +61,7 @@ class ReadinessLesson(BaseModel):
     symbol: str
     thesis_outcome: str
     lesson: str
-    tags: List[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     recorded_at: datetime
 
 
@@ -75,7 +74,7 @@ class ReadinessCorrelation(BaseModel):
     """
 
     catalyst: str
-    held_symbols: List[str] = Field(
+    held_symbols: list[str] = Field(
         ..., description="Already-held symbols in this catalyst cluster"
     )
 
@@ -85,37 +84,37 @@ class TradeReadinessItem(BaseModel):
 
     trigger_id: int
     name: str
-    tier: Optional[str] = None
+    tier: str | None = None
     rule: str
     action: str
     signal: TriggerSignal = Field(..., description="hit or approaching")
-    distance_percent: Optional[Decimal] = Field(
+    distance_percent: Decimal | None = Field(
         None, description="Nearest active linked-alert distance to threshold"
     )
-    last_triggered_at: Optional[datetime] = Field(
+    last_triggered_at: datetime | None = Field(
         None, description="Most recent linked-alert fire (set when signal is hit)"
     )
-    symbols: List[str] = Field(default_factory=list)
-    positions: List[ReadinessPosition] = Field(default_factory=list)
-    upcoming_events: List[ReadinessEvent] = Field(default_factory=list)
+    symbols: list[str] = Field(default_factory=list)
+    positions: list[ReadinessPosition] = Field(default_factory=list)
+    upcoming_events: list[ReadinessEvent] = Field(default_factory=list)
     inactive_alert_count: int = Field(
         0, description="Linked alerts that are disabled - watching is degraded"
     )
-    lessons: List[ReadinessLesson] = Field(
+    lessons: list[ReadinessLesson] = Field(
         default_factory=list,
         description="Lessons from similar past setups, newest first (max 3)",
     )
-    correlations: List[ReadinessCorrelation] = Field(
+    correlations: list[ReadinessCorrelation] = Field(
         default_factory=list,
         description="Already-loaded catalyst clusters this trigger would concentrate",
     )
 
 
 class TradeReadinessResponse(BaseModel):
-    items: List[TradeReadinessItem] = Field(default_factory=list)
+    items: list[TradeReadinessItem] = Field(default_factory=list)
 
 
 class ExposureResponse(BaseModel):
     """Held exposure grouped by single-catalyst cluster."""
 
-    catalysts: List[CatalystCluster] = Field(default_factory=list)
+    catalysts: list[CatalystCluster] = Field(default_factory=list)

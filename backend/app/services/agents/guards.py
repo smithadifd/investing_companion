@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -73,16 +73,16 @@ class AgentGuardResult:
     """
 
     allowed: bool
-    reason: Optional[GuardReason] = None
-    api_key: Optional[str] = None
+    reason: GuardReason | None = None
+    api_key: str | None = None
 
 
 async def check_agent_preconditions(
     db: AsyncSession,
-    user_id: Optional[uuid.UUID],
+    user_id: uuid.UUID | None,
     *,
     agent_flag: AgentFlag,
-    budget: Optional[AITokenBudget] = None,
+    budget: AITokenBudget | None = None,
 ) -> AgentGuardResult:
     """Check whether an advisory agent may run for ``user_id`` right now.
 

@@ -1,18 +1,17 @@
 """Account schemas - brokerage accounts a trade can belong to."""
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class AccountBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    broker: Optional[str] = Field(None, max_length=100)
-    account_type: Optional[str] = Field(
+    broker: str | None = Field(None, max_length=100)
+    account_type: str | None = Field(
         None, max_length=50, description="roth / taxable / 401k / hsa / ..."
     )
-    risk_profile: Optional[str] = Field(
+    risk_profile: str | None = Field(
         None, max_length=50, description="aggressive / moderate / conservative / ..."
     )
     display_order: int = 0
@@ -25,11 +24,11 @@ class AccountCreate(AccountBase):
 class AccountUpdate(BaseModel):
     """Explicit null clears a nullable field (model_fields_set semantics)."""
 
-    name: Optional[str] = Field(None, min_length=1, max_length=100)
-    broker: Optional[str] = Field(None, max_length=100)
-    account_type: Optional[str] = Field(None, max_length=50)
-    risk_profile: Optional[str] = Field(None, max_length=50)
-    display_order: Optional[int] = None
+    name: str | None = Field(None, min_length=1, max_length=100)
+    broker: str | None = Field(None, max_length=100)
+    account_type: str | None = Field(None, max_length=50)
+    risk_profile: str | None = Field(None, max_length=50)
+    display_order: int | None = None
 
 
 class AccountResponse(AccountBase):
@@ -45,6 +44,6 @@ class AccountRef(BaseModel):
 
     id: int
     name: str
-    account_type: Optional[str] = None
+    account_type: str | None = None
 
     model_config = ConfigDict(from_attributes=True)

@@ -1,6 +1,5 @@
 """Account API endpoints - brokerage accounts for multi-account positions."""
 
-from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,11 +41,11 @@ def get_reconciliation_service(
     return ReconciliationService(db)
 
 
-@router.get("", response_model=DataResponse[List[AccountResponse]])
+@router.get("", response_model=DataResponse[list[AccountResponse]])
 async def list_accounts(
     current_user: User = Depends(get_current_user),
     service: AccountService = Depends(get_account_service),
-) -> DataResponse[List[AccountResponse]]:
+) -> DataResponse[list[AccountResponse]]:
     """List the user's accounts, ordered by display_order."""
     accounts = await service.list_accounts(current_user.id)
     return DataResponse(data=accounts, meta=ResponseMeta.now())
@@ -124,13 +123,13 @@ async def delete_account(
 # ---------------------------------------------------------------------------
 @router.get(
     "/{account_id}/links",
-    response_model=DataResponse[List[AccountLinkResponse]],
+    response_model=DataResponse[list[AccountLinkResponse]],
 )
 async def list_account_links(
     account_id: int,
     current_user: User = Depends(get_current_user),
     service: AccountLinkService = Depends(get_account_link_service),
-) -> DataResponse[List[AccountLinkResponse]]:
+) -> DataResponse[list[AccountLinkResponse]]:
     """List broker links (active + orphaned) for this account. Read-only."""
     links = await service.list_links(current_user.id, account_id)
     return DataResponse(data=links, meta=ResponseMeta.now())

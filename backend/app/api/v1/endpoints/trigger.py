@@ -1,7 +1,6 @@
 """Trigger playbook endpoints - standing orders with live signals."""
 
 import logging
-from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,12 +29,12 @@ def get_trigger_service(
     return TriggerService(db, current_user.id)
 
 
-@router.get("", response_model=DataResponse[List[TriggerResponse]])
+@router.get("", response_model=DataResponse[list[TriggerResponse]])
 async def list_triggers(
     include_retired: bool = Query(False),
     current_user: User = Depends(get_current_user),
     service: TriggerService = Depends(get_trigger_service),
-) -> DataResponse[List[TriggerResponse]]:
+) -> DataResponse[list[TriggerResponse]]:
     return DataResponse(data=await service.list_triggers(include_retired=include_retired))
 
 

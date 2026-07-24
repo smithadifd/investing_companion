@@ -1,7 +1,6 @@
 """Schemas for the context pack outbox (advisor bridge)."""
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -18,6 +17,6 @@ class OutboxStatusResponse(BaseModel):
     """Whether the server has an outbox configured, and the last publish."""
 
     configured: bool
-    dir: Optional[str] = None
-    last_published_at: Optional[datetime] = None
-    last_file: Optional[str] = None
+    dir: str | None = None
+    last_published_at: datetime | None = None
+    last_file: str | None = None

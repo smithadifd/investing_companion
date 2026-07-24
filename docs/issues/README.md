@@ -15,7 +15,7 @@ Tracked issues and limitations that don't block development but need future reso
 | [009](./009-calendar-event-management.md) | Calendar Event Auto-Add and Management | Open | Medium | Calendar |
 | [010](./010-mobile-responsive-fixes.md) | Mobile Responsive Design Fixes | Open | Medium | Mobile UI |
 | [011](./011-alert-crosses-detection-bug.md) | Alert "Crosses Above/Below" Detection Bug | Resolved | High | Alerts |
-| [012](./012-redis-cache-event-loop.md) | Redis Cache Client Event Loop in Celery | Open | Low | Celery/Caching |
+| [012](./012-redis-cache-event-loop.md) | Redis Cache Client Event Loop in Celery | Resolved | Low | Celery/Caching |
 | [013](./013-news-page.md) | News Page & Catalyst Integration | Planned | Low | Notifications/UI |
 | [014](./014-intelligent-agents.md) | Intelligent Product Agents | Planned | Medium | Notifications/AI/Trading |
 
@@ -35,7 +35,6 @@ Tracked issues and limitations that don't block development but need future reso
 
 ### Low Priority
 - **007**: News integration (nice to have)
-- **012**: Redis cache event loop lifecycle in Celery tasks
 - **013**: News page & catalyst notes for notification summaries
 
 ### Resolved
@@ -43,3 +42,4 @@ Tracked issues and limitations that don't block development but need future reso
 - **003**: Git sync on Synology - SSH configured
 - **005**: Daily movers notification - replaced with rich morning pulse + EOD wrap summaries
 - **011**: Alert crosses detection bug - fixed with `was_above_threshold` tracking
+- **012**: Redis cache event loop lifecycle in Celery tasks - closed by IC #192 `60075f7`, regression test `test_run_async_cache_lifecycle.py`

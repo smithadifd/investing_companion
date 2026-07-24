@@ -1,5 +1,6 @@
 """Trade service - business logic for trade operations and P&L calculation."""
 
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional, Tuple
@@ -43,6 +44,40 @@ def _fee_per_share(trade: Trade) -> Decimal:
     if not trade.quantity:
         return Decimal("0")
     return trade.fees / trade.quantity
+
+
+# Each open lot: (trade_id, remaining_qty, price, executed_at, fee_per_share) -
+# the same tuple shape _recalculate_pairs' FIFO queues carry.
+OpenLot = Tuple[int, Decimal, Decimal, datetime, Decimal]
+
+
+@dataclass
+class OpenLots:
+    """The leftover (still-open) FIFO lots for one (account, equity), as read
+    off the end of a walk cloned from ``_recalculate_pairs`` (§3).
+
+    A normal position populates exactly one side. ``ledger_inconsistent`` is
+    set when the walk saw more close quantity than the queue could match (a
+    malformed ledger claiming more shares closed than were ever opened) - in
+    that case ``basis()`` returns ``None`` rather than a number derived from a
+    walk it knows disagrees with net quantity.
+    """
+
+    long_lots: List[OpenLot] = field(default_factory=list)
+    short_lots: List[OpenLot] = field(default_factory=list)
+    ledger_inconsistent: bool = False
+
+    def basis(self) -> Optional[Decimal]:
+        """Weighted-average price of the open lots (long side if any open,
+        else short side); ``None`` when flat or the ledger is inconsistent."""
+        if self.ledger_inconsistent:
+            return None
+        lots = self.long_lots or self.short_lots
+        total_qty = sum((lot[1] for lot in lots), Decimal("0"))
+        if total_qty == 0:
+            return None
+        weighted = sum((lot[1] * lot[2] for lot in lots), Decimal("0"))
+        return weighted / total_qty
 
 
 class TradeService:
@@ -547,6 +582,91 @@ class TradeService:
                         )
 
         await self.db.commit()
+
+    async def _get_open_lots(
+        self,
+        user_id: UUID,
+        equity_id: int,
+        account_id: Optional[int],
+    ) -> OpenLots:
+        """The still-open FIFO lots for one ``(account_id, equity)`` - the same
+        walk as :meth:`_recalculate_pairs`, but READ-ONLY and returning the
+        leftover queues instead of writing pairs (§3).
+
+        STRICTLY read-only: it never deletes pairs, adds rows, or commits. Two
+        spec-pinned differences from the mutating walk:
+
+        * **Deterministic ordering** by ``(executed_at, id)`` - the mutating
+          walk orders by ``executed_at`` alone, so same-timestamp trades sort
+          unstably; the ``id`` tiebreaker makes the open-lot state reproducible.
+        * **Malformed-ledger detection** - the mutating walk silently drops a
+          SELL/COVER's unmatched quantity; here that sets
+          ``ledger_inconsistent`` so the caller reports the flag instead of a
+          basis it can't trust.
+
+        FIFO is partitioned by account, so only this account's trades matter;
+        ``account_id=None`` is the unassigned bucket.
+        """
+        conditions = [
+            Trade.user_id == user_id,
+            Trade.equity_id == equity_id,
+        ]
+        if account_id is None:
+            conditions.append(Trade.account_id.is_(None))
+        else:
+            conditions.append(Trade.account_id == account_id)
+
+        stmt = (
+            select(Trade)
+            .where(and_(*conditions))
+            .order_by(Trade.executed_at, Trade.id)
+        )
+        result = await self.db.execute(stmt)
+        trades = result.scalars().all()
+
+        long_queue: List[OpenLot] = []
+        short_queue: List[OpenLot] = []
+        ledger_inconsistent = False
+
+        for trade in trades:
+            if trade.trade_type == TradeType.BUY:
+                long_queue.append(
+                    (trade.id, trade.quantity, trade.price, trade.executed_at,
+                     _fee_per_share(trade))
+                )
+            elif trade.trade_type == TradeType.SHORT:
+                short_queue.append(
+                    (trade.id, trade.quantity, trade.price, trade.executed_at,
+                     _fee_per_share(trade))
+                )
+            elif trade.trade_type in (TradeType.SELL, TradeType.COVER):
+                queue = (
+                    long_queue if trade.trade_type == TradeType.SELL
+                    else short_queue
+                )
+                remaining = trade.quantity
+                while remaining > 0 and queue:
+                    open_id, open_qty, open_price, open_date, open_fee = queue[0]
+                    matched = min(remaining, open_qty)
+                    remaining -= matched
+                    if matched >= open_qty:
+                        queue.pop(0)
+                    else:
+                        queue[0] = (
+                            open_id, open_qty - matched, open_price, open_date,
+                            open_fee,
+                        )
+                if remaining > 0:
+                    # More closed than the queue could match: a ledger the
+                    # mutating walk would silently tolerate. Don't trust a basis
+                    # computed from it.
+                    ledger_inconsistent = True
+
+        return OpenLots(
+            long_lots=long_queue,
+            short_lots=short_queue,
+            ledger_inconsistent=ledger_inconsistent,
+        )
 
     async def _calculate_positions(
         self,

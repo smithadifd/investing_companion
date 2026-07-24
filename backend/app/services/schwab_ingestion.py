@@ -412,6 +412,38 @@ async def get_latest_complete_run(
     return await db.scalar(stmt)
 
 
+async def get_newer_failed_import_at(
+    db: AsyncSession, user_id: uuid.UUID, account_hash: str
+) -> Optional[datetime]:
+    """When the LATEST positions run is a ``failed`` one newer than the latest
+    complete run (or there is no complete run at all), its ``created_at`` -
+    else ``None``. Surfaces "your last pull attempt actually failed, don't
+    trust that this snapshot is current" (§6 / amendment 7).
+
+    Sibling of :func:`get_latest_complete_run`: same read-only, any-session
+    contract, and scoped to ``kind=POSITIONS`` so it stays coherent with
+    ``last_import_at``. A failed pull is never conflated with a complete one -
+    ``ImportStatus`` already separates them; this is just a second query.
+    """
+    latest_any = await db.scalar(
+        select(BrokerImportRun)
+        .where(
+            BrokerImportRun.user_id == user_id,
+            BrokerImportRun.account_hash == account_hash,
+            BrokerImportRun.kind == ImportKind.POSITIONS,
+        )
+        .order_by(BrokerImportRun.created_at.desc())
+        .limit(1)
+    )
+    # Only the LATEST run matters: if it's complete, the latest complete run is
+    # the newest thing there is, so nothing failed is newer. If it's failed, it
+    # is by definition newer than any complete run (or there is none) - surface
+    # it either way.
+    if latest_any is None or latest_any.status != ImportStatus.FAILED:
+        return None
+    return latest_any.created_at
+
+
 async def get_current_positions(
     db: AsyncSession, user_id: uuid.UUID, account_hash: str
 ) -> list[ImportedPosition]:

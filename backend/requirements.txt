@@ -73,5 +73,5 @@ pytest>=8.0.0
 pytest-asyncio>=0.23.0
 pytest-cov>=4.1.0
 httpx>=0.26.0  # For TestClient
-ruff>=0.2.0  # Linting
+ruff==0.16.0  # Linting; pinned + paired with backend/ruff.toml so local == CI
 mypy>=1.8.0  # Type checking

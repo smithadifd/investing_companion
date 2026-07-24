@@ -187,7 +187,14 @@ async def _closed_trade_pairs(
             Trade.executed_at >= window.start,
             Trade.executed_at < window.end,
         )
-        .order_by(Trade.executed_at)
+        # `TradePair.id` is a secondary sort key so that pairs whose closing
+        # trades share an identical `executed_at` (e.g. same-second closes)
+        # still sort deterministically - timestamp alone is not a unique
+        # key, and an unordered tie would let the narrative-prompt ordering
+        # vary across otherwise identical reruns (see sibling fix in
+        # trade.py's `_recalculate_pairs`, PR #229; note `compute_metrics`
+        # aggregates over the set and was never affected by this).
+        .order_by(Trade.executed_at, TradePair.id)
     )
     result = await db.execute(stmt)
     return list(result.scalars().all())

@@ -57,7 +57,6 @@ import re
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
@@ -167,7 +166,7 @@ def _usage_tokens(message) -> int:
     )
 
 
-def _parse_finnhub_timestamp(value) -> Optional[datetime]:
+def _parse_finnhub_timestamp(value) -> datetime | None:
     """Convert a Finnhub Unix-epoch ``datetime`` field to a tz-aware UTC value.
 
     Deliberately NOT the ``app/services/news.py:_parse_finnhub_item`` precedent
@@ -190,7 +189,7 @@ def _parse_finnhub_timestamp(value) -> Optional[datetime]:
         return None
 
 
-def _resolve_scoring_model(default_model: Optional[str]) -> str:
+def _resolve_scoring_model(default_model: str | None) -> str:
     """Resolve a Claude model id the same way ``AIService._resolve_model`` does.
 
     Never hardcodes a model id: prefers the per-user ``ai_default_model``
@@ -293,7 +292,7 @@ class NewsCatalystAgent(AdvisoryAgent):
     name = "news_catalyst"
     agent_flag = "news_agent_enabled"
 
-    def __init__(self, *, provider: Optional[FinnhubNewsProvider] = None) -> None:
+    def __init__(self, *, provider: FinnhubNewsProvider | None = None) -> None:
         self._provider = provider or FinnhubNewsProvider()
 
     # ------------------------------------------------------------------
@@ -314,7 +313,7 @@ class NewsCatalystAgent(AdvisoryAgent):
     # ------------------------------------------------------------------
     # execute() - only reached after guard() allows the run
     # ------------------------------------------------------------------
-    async def execute(self, db: AsyncSession, user_id: Optional[uuid.UUID]) -> None:
+    async def execute(self, db: AsyncSession, user_id: uuid.UUID | None) -> None:
         if not self._provider.is_configured:
             logger.info("news_catalyst: Finnhub not configured, quiet no-op")
             return
@@ -411,7 +410,7 @@ class NewsCatalystAgent(AdvisoryAgent):
         return parsed
 
     @staticmethod
-    def _parse_raw_item(raw: dict, symbol: Optional[str]) -> Optional[dict]:
+    def _parse_raw_item(raw: dict, symbol: str | None) -> dict | None:
         url = (raw.get("url") or "").strip()
         headline = (raw.get("headline") or "").strip()
         if not url or not headline:
@@ -494,7 +493,7 @@ class NewsCatalystAgent(AdvisoryAgent):
         return list(result.scalars().all())
 
     async def _score(
-        self, db: AsyncSession, user_id: Optional[uuid.UUID], items: list[NewsItem]
+        self, db: AsyncSession, user_id: uuid.UUID | None, items: list[NewsItem]
     ) -> None:
         batch = items[:MAX_ARTICLES_SCORED_PER_RUN]
         overflow = len(items) - len(batch)

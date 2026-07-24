@@ -41,15 +41,15 @@ Revises: 20260715_002
 Create Date: 2026-07-17
 
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '20260717_001'
-down_revision: Union[str, None] = '20260715_002'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = '20260715_002'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 # Tunable defaults (kept as named constants so they are easy to review / change).
 COMPRESS_AFTER = "30 days"

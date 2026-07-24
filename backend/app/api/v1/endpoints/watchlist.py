@@ -1,6 +1,5 @@
 """Watchlist API endpoints."""
 
-from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,11 +25,11 @@ from app.services.watchlist import WatchlistService
 router = APIRouter()
 
 
-@router.get("", response_model=DataResponse[List[WatchlistSummary]])
+@router.get("", response_model=DataResponse[list[WatchlistSummary]])
 async def list_watchlists(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> DataResponse[List[WatchlistSummary]]:
+) -> DataResponse[list[WatchlistSummary]]:
     """List all watchlists."""
     service = WatchlistService(db, current_user.id)
     watchlists = await service.list_watchlists()

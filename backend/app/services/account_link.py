@@ -16,7 +16,6 @@ any adoption mutation are the larger linking-UI / next-wave surfaces and are NOT
 built here.
 """
 
-from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy import and_, func, select
@@ -56,7 +55,7 @@ class AccountLinkService:
 
     async def list_links(
         self, user_id: UUID, account_id: int
-    ) -> List[AccountLinkResponse]:
+    ) -> list[AccountLinkResponse]:
         """All links (active and orphaned) for one account, newest first."""
         stmt = (
             select(AccountLink)
@@ -71,7 +70,7 @@ class AccountLinkService:
 
     async def get_active_link(
         self, user_id: UUID, account_id: int, source: str = "schwab_api"
-    ) -> Optional[AccountLink]:
+    ) -> AccountLink | None:
         """The single active link for ``(user, account, source)`` if any."""
         return await self.db.scalar(
             select(AccountLink).where(

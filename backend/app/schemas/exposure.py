@@ -1,7 +1,6 @@
 """Exposure schemas - catalyst-cluster exposure shared across surfaces."""
 
 from decimal import Decimal
-from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -15,9 +14,9 @@ class CatalystCluster(BaseModel):
     """
 
     catalyst: str
-    symbols: List[str] = Field(..., description="Held symbols carrying this catalyst")
-    value: Optional[Decimal] = Field(
+    symbols: list[str] = Field(..., description="Held symbols carrying this catalyst")
+    value: Decimal | None = Field(
         None, description="Summed current value of the held symbols (null if unpriced)"
     )
-    percent_of_portfolio: Optional[Decimal] = None
+    percent_of_portfolio: Decimal | None = None
     position_count: int = Field(..., description="Number of held positions in the cluster")

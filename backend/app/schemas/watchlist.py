@@ -2,7 +2,6 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -12,7 +11,7 @@ MAX_ENTRY_ZONES = 8
 MAX_CATALYST_TAGS = 10
 
 
-def normalize_catalyst_tags(tags: Optional[List[str]]) -> Optional[List[str]]:
+def normalize_catalyst_tags(tags: list[str] | None) -> list[str] | None:
     """Lowercase, trim, dedupe (order-preserving), drop empties.
 
     Mirrors the lessons tag normalizer so a catalyst named "Uranium Restart"
@@ -28,7 +27,7 @@ def normalize_catalyst_tags(tags: Optional[List[str]]) -> Optional[List[str]]:
     return list(seen)
 
 
-def _validate_catalyst_tags_list(tags: Optional[List[str]]) -> Optional[List[str]]:
+def _validate_catalyst_tags_list(tags: list[str] | None) -> list[str] | None:
     """Normalize/dedup, then enforce the max-count cap (checked post-dedup).
 
     Shared by every schema that accepts catalyst_tags input (CRUD + import)
@@ -48,8 +47,8 @@ class EntryZone(BaseModel):
     """
 
     tier: str = Field(..., min_length=1, max_length=40)
-    low: Optional[Decimal] = Field(None, ge=0)
-    high: Optional[Decimal] = Field(None, ge=0)
+    low: Decimal | None = Field(None, ge=0)
+    high: Decimal | None = Field(None, ge=0)
 
     @model_validator(mode="after")
     def validate_bounds(self) -> "EntryZone":
@@ -66,7 +65,7 @@ class EntryZoneStatus(EntryZone):
     status: str = Field(
         ..., description="in_zone | approaching | above | below | unknown"
     )
-    distance_percent: Optional[Decimal] = Field(
+    distance_percent: Decimal | None = Field(
         None,
         description=(
             "Percent move from the price to the zone's entry edge "
@@ -76,8 +75,8 @@ class EntryZoneStatus(EntryZone):
 
 
 def _validate_zone_list(
-    zones: Optional[List[EntryZone]],
-) -> Optional[List[EntryZone]]:
+    zones: list[EntryZone] | None,
+) -> list[EntryZone] | None:
     if zones is None:
         return None
     if len(zones) > MAX_ENTRY_ZONES:
@@ -91,27 +90,27 @@ def _validate_zone_list(
 class WatchlistItemBase(BaseModel):
     """Base fields for watchlist items."""
 
-    notes: Optional[str] = Field(None, max_length=5000)
-    target_price: Optional[Decimal] = Field(None, ge=0)
-    thesis: Optional[str] = Field(None, max_length=10000)
-    track_calendar: Optional[bool] = Field(None, description="Track events for this equity on calendar")
+    notes: str | None = Field(None, max_length=5000)
+    target_price: Decimal | None = Field(None, ge=0)
+    thesis: str | None = Field(None, max_length=10000)
+    track_calendar: bool | None = Field(None, description="Track events for this equity on calendar")
     # Explicit null (or []) clears on update; omitted leaves unchanged
-    entry_zones: Optional[List[EntryZone]] = None
+    entry_zones: list[EntryZone] | None = None
     # Single-catalyst cluster tags (e.g. "uranium restart"). Explicit null (or
     # []) clears on update; omitted leaves unchanged. The count cap is enforced
     # in the validator *after* dedup (see clean_catalyst_tags).
-    catalyst_tags: Optional[List[str]] = None
+    catalyst_tags: list[str] | None = None
 
     @field_validator("entry_zones")
     @classmethod
     def validate_entry_zones(
-        cls, v: Optional[List[EntryZone]]
-    ) -> Optional[List[EntryZone]]:
+        cls, v: list[EntryZone] | None
+    ) -> list[EntryZone] | None:
         return _validate_zone_list(v)
 
     @field_validator("catalyst_tags")
     @classmethod
-    def clean_catalyst_tags(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+    def clean_catalyst_tags(cls, v: list[str] | None) -> list[str] | None:
         # Dedup first, then cap - a list that dedupes to <= MAX must not 422.
         return _validate_catalyst_tags_list(v)
 
@@ -119,8 +118,8 @@ class WatchlistItemBase(BaseModel):
 class WatchlistItemCreate(WatchlistItemBase):
     """Schema for adding an equity to a watchlist."""
 
-    equity_id: Optional[int] = Field(None, description="ID of existing equity in database")
-    symbol: Optional[str] = Field(None, description="Symbol to look up if equity_id not provided")
+    equity_id: int | None = Field(None, description="ID of existing equity in database")
+    symbol: str | None = Field(None, description="Symbol to look up if equity_id not provided")
 
 
 class WatchlistItemUpdate(WatchlistItemBase):
@@ -135,8 +134,8 @@ class WatchlistItemEquity(BaseModel):
     id: int
     symbol: str
     name: str
-    exchange: Optional[str] = None
-    sector: Optional[str] = None
+    exchange: str | None = None
+    sector: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -147,16 +146,16 @@ class WatchlistItemResponse(BaseModel):
     id: int
     watchlist_id: int
     equity_id: int
-    notes: Optional[str] = None
-    target_price: Optional[Decimal] = None
-    thesis: Optional[str] = None
+    notes: str | None = None
+    target_price: Decimal | None = None
+    thesis: str | None = None
     track_calendar: bool = True
-    entry_zones: List[EntryZone] = []
-    zone_statuses: List[EntryZoneStatus] = []
-    catalyst_tags: List[str] = []
+    entry_zones: list[EntryZone] = []
+    zone_statuses: list[EntryZoneStatus] = []
+    catalyst_tags: list[str] = []
     added_at: datetime
     equity: WatchlistItemEquity
-    quote: Optional[QuoteResponse] = None
+    quote: QuoteResponse | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -165,7 +164,7 @@ class WatchlistBase(BaseModel):
     """Base fields for watchlists."""
 
     name: str = Field(..., min_length=1, max_length=100)
-    description: Optional[str] = Field(None, max_length=1000)
+    description: str | None = Field(None, max_length=1000)
 
 
 class WatchlistCreate(WatchlistBase):
@@ -177,9 +176,9 @@ class WatchlistCreate(WatchlistBase):
 class WatchlistUpdate(BaseModel):
     """Schema for updating a watchlist."""
 
-    name: Optional[str] = Field(None, min_length=1, max_length=100)
-    description: Optional[str] = Field(None, max_length=1000)
-    is_default: Optional[bool] = None
+    name: str | None = Field(None, min_length=1, max_length=100)
+    description: str | None = Field(None, max_length=1000)
+    is_default: bool | None = None
 
 
 class WatchlistSummary(BaseModel):
@@ -187,7 +186,7 @@ class WatchlistSummary(BaseModel):
 
     id: int
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     is_default: bool
     item_count: int = 0
     created_at: datetime
@@ -201,7 +200,7 @@ class WatchlistResponse(WatchlistBase):
 
     id: int
     is_default: bool
-    items: List[WatchlistItemResponse] = []
+    items: list[WatchlistItemResponse] = []
     created_at: datetime
     updated_at: datetime
 
@@ -213,12 +212,12 @@ class WatchlistExportItem(BaseModel):
 
     symbol: str
     name: str
-    notes: Optional[str] = None
-    target_price: Optional[Decimal] = None
-    thesis: Optional[str] = None
-    entry_zones: Optional[List[EntryZone]] = None
-    catalyst_tags: Optional[List[str]] = None
-    track_calendar: Optional[bool] = None
+    notes: str | None = None
+    target_price: Decimal | None = None
+    thesis: str | None = None
+    entry_zones: list[EntryZone] | None = None
+    catalyst_tags: list[str] | None = None
+    track_calendar: bool | None = None
     added_at: datetime
 
 
@@ -226,32 +225,32 @@ class WatchlistExport(BaseModel):
     """Watchlist export format."""
 
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     exported_at: datetime
-    items: List[WatchlistExportItem]
+    items: list[WatchlistExportItem]
 
 
 class WatchlistImportItem(BaseModel):
     """Watchlist item format for import."""
 
     symbol: str
-    notes: Optional[str] = None
-    target_price: Optional[Decimal] = Field(None, ge=0)
-    thesis: Optional[str] = None
-    entry_zones: Optional[List[EntryZone]] = None
-    catalyst_tags: Optional[List[str]] = None
-    track_calendar: Optional[bool] = None
+    notes: str | None = None
+    target_price: Decimal | None = Field(None, ge=0)
+    thesis: str | None = None
+    entry_zones: list[EntryZone] | None = None
+    catalyst_tags: list[str] | None = None
+    track_calendar: bool | None = None
 
     @field_validator("entry_zones")
     @classmethod
     def validate_entry_zones(
-        cls, v: Optional[List[EntryZone]]
-    ) -> Optional[List[EntryZone]]:
+        cls, v: list[EntryZone] | None
+    ) -> list[EntryZone] | None:
         return _validate_zone_list(v)
 
     @field_validator("catalyst_tags")
     @classmethod
-    def validate_catalyst_tags(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+    def validate_catalyst_tags(cls, v: list[str] | None) -> list[str] | None:
         return _validate_catalyst_tags_list(v)
 
 
@@ -259,8 +258,8 @@ class WatchlistImport(BaseModel):
     """Schema for importing a watchlist."""
 
     name: str = Field(..., min_length=1, max_length=100)
-    description: Optional[str] = Field(None, max_length=1000)
-    items: List[WatchlistImportItem] = []
+    description: str | None = Field(None, max_length=1000)
+    items: list[WatchlistImportItem] = []
 
 
 class MoverItem(BaseModel):
@@ -278,7 +277,7 @@ class MoverItem(BaseModel):
 class AllWatchlistMovers(BaseModel):
     """Aggregated movers across all watchlists."""
 
-    gainers: List[MoverItem] = []
-    losers: List[MoverItem] = []
+    gainers: list[MoverItem] = []
+    losers: list[MoverItem] = []
     total_items: int = 0
     watchlist_count: int = 0

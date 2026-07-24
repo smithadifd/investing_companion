@@ -11,7 +11,6 @@ global (the single-user-install convention).
 """
 
 from decimal import Decimal
-from typing import Dict, List, Optional, Set
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +20,7 @@ from app.db.models.watchlist import WatchlistItem
 from app.schemas.exposure import CatalystCluster
 
 
-async def catalyst_symbol_map(db: AsyncSession) -> Dict[str, Set[str]]:
+async def catalyst_symbol_map(db: AsyncSession) -> dict[str, set[str]]:
     """Map each catalyst tag (lowercase) to the set of symbols carrying it.
 
     A symbol carries a catalyst if any watchlist item for its equity is tagged
@@ -33,7 +32,7 @@ async def catalyst_symbol_map(db: AsyncSession) -> Dict[str, Set[str]]:
         .where(WatchlistItem.catalyst_tags.is_not(None))
     )
     result = await db.execute(stmt)
-    mapping: Dict[str, Set[str]] = {}
+    mapping: dict[str, set[str]] = {}
     for symbol, tags in result.all():
         for tag in tags or []:
             mapping.setdefault(tag, set()).add(symbol)
@@ -41,17 +40,17 @@ async def catalyst_symbol_map(db: AsyncSession) -> Dict[str, Set[str]]:
 
 
 def build_catalyst_clusters(
-    catalyst_map: Dict[str, Set[str]],
-    value_by_symbol: Dict[str, Optional[Decimal]],
-    portfolio_value: Optional[Decimal],
-) -> List[CatalystCluster]:
+    catalyst_map: dict[str, set[str]],
+    value_by_symbol: dict[str, Decimal | None],
+    portfolio_value: Decimal | None,
+) -> list[CatalystCluster]:
     """Per-catalyst exposure across currently-held symbols.
 
     ``value_by_symbol`` is keyed by held symbol -> its current value (or None
     when unpriced). A cluster is emitted only if at least one of its symbols is
     held, so empty catalysts never clutter the output.
     """
-    clusters: List[CatalystCluster] = []
+    clusters: list[CatalystCluster] = []
     for catalyst, symbols in sorted(catalyst_map.items()):
         held = sorted(s for s in symbols if s in value_by_symbol)
         if not held:

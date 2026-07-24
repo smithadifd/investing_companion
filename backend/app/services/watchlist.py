@@ -3,7 +3,6 @@
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import List, Optional
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -33,7 +32,7 @@ from app.services.entry_zones import build_zone_statuses, parse_zones
 from app.services.equity import EquityService
 
 
-def _zones_to_json(zones: Optional[List[EntryZone]]) -> Optional[list]:
+def _zones_to_json(zones: list[EntryZone] | None) -> list | None:
     """Serialize zones for JSONB storage (Decimal bounds become strings)."""
     if not zones:
         return None
@@ -43,7 +42,7 @@ def _zones_to_json(zones: Optional[List[EntryZone]]) -> Optional[list]:
 def _item_response(
     item: WatchlistItem,
     equity: Equity,
-    quote: Optional[QuoteResponse],
+    quote: QuoteResponse | None,
 ) -> WatchlistItemResponse:
     """Build an item response with zone statuses from the quote price."""
     zones = parse_zones(item.entry_zones)
@@ -73,7 +72,7 @@ class WatchlistService:
     """Service for watchlist-related operations."""
 
     def __init__(
-        self, db: AsyncSession, user_id: Optional[uuid.UUID] = None
+        self, db: AsyncSession, user_id: uuid.UUID | None = None
     ) -> None:
         self.db = db
         self.user_id = user_id
@@ -96,7 +95,7 @@ class WatchlistService:
         predicate = self._owned()
         return stmt if predicate is None else stmt.where(predicate)
 
-    async def list_watchlists(self) -> List[WatchlistSummary]:
+    async def list_watchlists(self) -> list[WatchlistSummary]:
         """List all watchlists with item counts."""
         stmt = (
             select(
@@ -126,7 +125,7 @@ class WatchlistService:
 
     async def get_watchlist(
         self, watchlist_id: int, include_quotes: bool = True
-    ) -> Optional[WatchlistResponse]:
+    ) -> WatchlistResponse | None:
         """Get a watchlist with all items and optionally current quotes."""
         stmt = (
             select(Watchlist)
@@ -185,7 +184,7 @@ class WatchlistService:
 
     async def update_watchlist(
         self, watchlist_id: int, data: WatchlistUpdate
-    ) -> Optional[WatchlistResponse]:
+    ) -> WatchlistResponse | None:
         """Update a watchlist."""
         stmt = select(Watchlist).where(Watchlist.id == watchlist_id)
         result = await self.db.execute(self._scope(stmt))
@@ -223,7 +222,7 @@ class WatchlistService:
 
     async def add_item(
         self, watchlist_id: int, data: WatchlistItemCreate
-    ) -> Optional[WatchlistItemResponse]:
+    ) -> WatchlistItemResponse | None:
         """Add an equity to a watchlist."""
         # Verify watchlist exists and is owned by the caller
         stmt = select(Watchlist).where(Watchlist.id == watchlist_id)
@@ -270,7 +269,7 @@ class WatchlistService:
 
     async def update_item(
         self, watchlist_id: int, item_id: int, data: WatchlistItemUpdate
-    ) -> Optional[WatchlistItemResponse]:
+    ) -> WatchlistItemResponse | None:
         """Update a watchlist item's notes, target price, or thesis."""
         # Enforce ownership of the parent watchlist before touching its items
         if not await self.db.scalar(
@@ -335,7 +334,7 @@ class WatchlistService:
         await self.db.commit()
         return True
 
-    async def export_watchlist(self, watchlist_id: int) -> Optional[WatchlistExport]:
+    async def export_watchlist(self, watchlist_id: int) -> WatchlistExport | None:
         """Export a watchlist to a portable format."""
         stmt = (
             select(Watchlist)

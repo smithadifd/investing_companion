@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Numeric, PrimaryKeyConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -34,8 +34,8 @@ class PriceHistory(Base):
     high: Mapped[Decimal] = mapped_column(Numeric(16, 6), nullable=False)
     low: Mapped[Decimal] = mapped_column(Numeric(16, 6), nullable=False)
     close: Mapped[Decimal] = mapped_column(Numeric(16, 6), nullable=False)
-    adj_close: Mapped[Optional[Decimal]] = mapped_column(Numeric(16, 6))
-    volume: Mapped[Optional[int]] = mapped_column(BigInteger)
+    adj_close: Mapped[Decimal | None] = mapped_column(Numeric(16, 6))
+    volume: Mapped[int | None] = mapped_column(BigInteger)
 
     # Relationship
     equity: Mapped["Equity"] = relationship(back_populates="price_history")

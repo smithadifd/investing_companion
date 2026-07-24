@@ -85,14 +85,14 @@ class EconomicEvent(Base, TimestampMixin):
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
 
     # Optional link to equity (for earnings, dividends, splits)
-    equity_id: Mapped[Optional[int]] = mapped_column(
+    equity_id: Mapped[int | None] = mapped_column(
         ForeignKey("equities.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )
 
     # Optional link to user (for custom events)
-    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=True,
@@ -101,21 +101,21 @@ class EconomicEvent(Base, TimestampMixin):
 
     # Timing
     event_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
-    event_time: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
+    event_time: Mapped[time | None] = mapped_column(Time, nullable=True)
     all_day: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     # Event details
     title: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # For economic releases (actual/forecast/previous values)
-    actual_value: Mapped[Optional[float]] = mapped_column(
+    actual_value: Mapped[float | None] = mapped_column(
         Numeric(precision=20, scale=4), nullable=True
     )
-    forecast_value: Mapped[Optional[float]] = mapped_column(
+    forecast_value: Mapped[float | None] = mapped_column(
         Numeric(precision=20, scale=4), nullable=True
     )
-    previous_value: Mapped[Optional[float]] = mapped_column(
+    previous_value: Mapped[float | None] = mapped_column(
         Numeric(precision=20, scale=4), nullable=True
     )
 
@@ -129,7 +129,7 @@ class EconomicEvent(Base, TimestampMixin):
     is_confirmed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     # For recurring events, store the recurrence pattern
-    recurrence_key: Mapped[Optional[str]] = mapped_column(
+    recurrence_key: Mapped[str | None] = mapped_column(
         String(100), nullable=True
     )  # e.g., "fomc_2025_01", "earnings_AAPL_2025Q1"
 

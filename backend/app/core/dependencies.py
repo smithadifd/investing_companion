@@ -2,7 +2,6 @@
 
 import ipaddress
 import logging
-from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -20,7 +19,7 @@ security = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """Get the current authenticated user from JWT token.
@@ -63,9 +62,9 @@ async def get_current_user(
 
 
 async def get_current_user_optional(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
-) -> Optional[User]:
+) -> User | None:
     """Get the current user if authenticated, None otherwise.
 
     Does not raise exceptions - returns None for unauthenticated requests.
@@ -105,7 +104,7 @@ async def get_current_admin_user(
 
 def require_auth_for_detailed_health(
     detailed: bool = False,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ) -> None:
     """Gate the detailed health report behind a valid bearer token.
 
@@ -132,7 +131,7 @@ def require_auth_for_detailed_health(
         )
 
 
-def _is_trusted_proxy(ip: Optional[str]) -> bool:
+def _is_trusted_proxy(ip: str | None) -> bool:
     """True if ``ip`` is inside one of the configured TRUSTED_PROXIES nets."""
     if not ip:
         return False
@@ -149,7 +148,7 @@ def _is_trusted_proxy(ip: Optional[str]) -> bool:
     return False
 
 
-def get_client_ip(request: Request) -> Optional[str]:
+def get_client_ip(request: Request) -> str | None:
     """Resolve the client IP for identity (rate-limiting, logging).
 
     X-Forwarded-For is spoofable by anyone talking to the server directly, so it
@@ -176,7 +175,7 @@ def get_client_ip(request: Request) -> Optional[str]:
     return peer
 
 
-def get_user_agent(request: Request) -> Optional[str]:
+def get_user_agent(request: Request) -> str | None:
     """Extract user agent from request."""
     return request.headers.get("User-Agent")
 

@@ -55,7 +55,6 @@ import argparse
 import asyncio
 import re
 from datetime import date, time
-from typing import List, Tuple
 
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -97,7 +96,7 @@ from app.services.economic_event import EconomicEventService
 
 # FOMC meetings are typically 2-day events (Tue-Wed or Wed-Thu)
 # Statement released at 2:00 PM ET on the second day
-FOMC_DATES_2025: List[Tuple[date, date]] = [
+FOMC_DATES_2025: list[tuple[date, date]] = [
     (date(2025, 1, 28), date(2025, 1, 29)),   # Jan 28-29
     (date(2025, 3, 18), date(2025, 3, 19)),   # Mar 18-19 (SEP*)
     (date(2025, 5, 6), date(2025, 5, 7)),     # May 6-7
@@ -109,7 +108,7 @@ FOMC_DATES_2025: List[Tuple[date, date]] = [
 ]
 # * = Summary of Economic Projections meeting
 
-FOMC_DATES_2026: List[Tuple[date, date]] = [
+FOMC_DATES_2026: list[tuple[date, date]] = [
     # Fed's confirmed published 2026 calendar (see source note above).
     (date(2026, 1, 27), date(2026, 1, 28)),   # Jan 27-28
     (date(2026, 3, 17), date(2026, 3, 18)),   # Mar 17-18 (SEP*)
@@ -172,7 +171,7 @@ FOMC_DATES_2026: List[Tuple[date, date]] = [
 #   - Nov-2026 data: Dec 9 -> Dec 10, 2026 (routine guess)
 # ============================================================================
 
-CPI_DATES_2025: List[date] = [
+CPI_DATES_2025: list[date] = [
     date(2025, 1, 15),   # Dec 2024 data
     date(2025, 2, 12),   # Jan 2025 data
     date(2025, 3, 12),   # Feb
@@ -188,7 +187,7 @@ CPI_DATES_2025: List[date] = [
     date(2025, 12, 18),  # Nov -- CORRECTED (was Dec 10; shutdown-delayed)
 ]
 
-CPI_DATES_2026: List[date] = [
+CPI_DATES_2026: list[date] = [
     date(2026, 1, 13),   # Dec 2025 data -- CORRECTED (was Jan 14)
     date(2026, 2, 13),   # Jan 2026 data -- CORRECTED (was Feb 11; second lapse)
     date(2026, 3, 11),   # Feb
@@ -242,7 +241,7 @@ CPI_DATES_2026: List[date] = [
 #   - Jan-2026 data: Feb 6 -> Feb 11, 2026 (second lapse)
 # ============================================================================
 
-NFP_DATES_2025: List[date] = [
+NFP_DATES_2025: list[date] = [
     date(2025, 1, 10),   # Dec 2024 data
     date(2025, 2, 7),    # Jan
     date(2025, 3, 7),    # Feb
@@ -259,7 +258,7 @@ NFP_DATES_2025: List[date] = [
     date(2025, 12, 16),  # Nov -- CORRECTED (was Dec 5; shutdown-delayed)
 ]
 
-NFP_DATES_2026: List[date] = [
+NFP_DATES_2026: list[date] = [
     date(2026, 1, 9),    # Dec 2025 data
     date(2026, 2, 11),   # Jan 2026 data -- CORRECTED (was Feb 6; second lapse)
     date(2026, 3, 6),    # Feb
@@ -316,7 +315,7 @@ NFP_DATES_2026: List[date] = [
 #   Apr 30, 2026 Q1-2026 Advance -- https://www.bea.gov/news/2026/gdp-advance-estimate-1st-quarter-2026
 # ============================================================================
 
-GDP_DATES_2025: List[Tuple[date, str]] = [
+GDP_DATES_2025: list[tuple[date, str]] = [
     (date(2025, 1, 30), "Q4 2024 Advance"),
     (date(2025, 2, 27), "Q4 2024 Second"),
     (date(2025, 3, 27), "Q4 2024 Third"),
@@ -332,7 +331,7 @@ GDP_DATES_2025: List[Tuple[date, str]] = [
     (date(2025, 12, 23), "Q3 2025 Initial Estimate"),  # CORRECTED label (was "Q3 2025 Third"); date unchanged
 ]
 
-GDP_DATES_2026: List[Tuple[date, str]] = [
+GDP_DATES_2026: list[tuple[date, str]] = [
     (date(2026, 1, 22), "Q3 2025 Updated Estimate"),  # NEW -- replaces the would-be Dec 19, 2025 Third estimate
     (date(2026, 2, 20), "Q4 2025 Advance"),   # CORRECTED -- moved from Jan 29, 2026 (shutdown)
     (date(2026, 3, 13), "Q4 2025 Second"),    # CORRECTED -- moved from Feb 26, 2026 (shutdown)
@@ -355,7 +354,7 @@ GDP_DATES_2026: List[Tuple[date, str]] = [
 # Usually released ~1 week after CPI
 # ============================================================================
 
-PCE_DATES_2025: List[date] = [
+PCE_DATES_2025: list[date] = [
     date(2025, 1, 31),
     date(2025, 2, 28),
     date(2025, 3, 28),
@@ -400,10 +399,10 @@ _PCE_META = dict(
 )
 
 
-def _fomc_specs(year: int) -> List[MacroEventSpec]:
+def _fomc_specs(year: int) -> list[MacroEventSpec]:
     """FOMC meeting specs (always seeded — not a FRED release)."""
     dates = FOMC_DATES_2025 if year == 2025 else FOMC_DATES_2026
-    specs: List[MacroEventSpec] = []
+    specs: list[MacroEventSpec] = []
     for _day1, day2 in dates:
         # The statement lands on day 2.
         specs.append(
@@ -424,8 +423,8 @@ def _fomc_specs(year: int) -> List[MacroEventSpec]:
 
 
 def _monthly_specs(
-    event_type: EventType, dates: List[date], meta: dict
-) -> List[MacroEventSpec]:
+    event_type: EventType, dates: list[date], meta: dict
+) -> list[MacroEventSpec]:
     """Build specs for a monthly release from a flat date list."""
     return [
         MacroEventSpec(
@@ -441,7 +440,7 @@ def _monthly_specs(
 # Ordered longest/most-specific first so "Initial Estimate" / "Updated
 # Estimate" (the shutdown-relabeled variants) are matched before a looser
 # "Third" / "Second" substring inside them could apply instead.
-_GDP_ORDINAL_TOKENS: List[Tuple[str, str]] = [
+_GDP_ORDINAL_TOKENS: list[tuple[str, str]] = [
     ("initial estimate", "initial_estimate"),
     ("updated estimate", "updated_estimate"),
     ("advance", "advance"),
@@ -483,7 +482,7 @@ def _is_advance_equivalent(label: str) -> bool:
     return "Advance" in label or "Initial Estimate" in label
 
 
-def _gdp_specs(year: int) -> List[MacroEventSpec]:
+def _gdp_specs(year: int) -> list[MacroEventSpec]:
     """GDP specs — month+ordinal-keyed (one row per BEA estimate), self-healing."""
     dates = GDP_DATES_2025 if year == 2025 else GDP_DATES_2026
     return [
@@ -502,9 +501,9 @@ def _gdp_specs(year: int) -> List[MacroEventSpec]:
     ]
 
 
-def seed_statistical_specs(year: int) -> List[MacroEventSpec]:
+def seed_statistical_specs(year: int) -> list[MacroEventSpec]:
     """Hand-maintained CPI/NFP/GDP/PCE specs — the fallback when FRED is off."""
-    specs: List[MacroEventSpec] = []
+    specs: list[MacroEventSpec] = []
     specs += _monthly_specs(
         EventType.CPI, CPI_DATES_2025 if year == 2025 else CPI_DATES_2026, _CPI_META
     )
@@ -533,7 +532,7 @@ def seed_statistical_specs(year: int) -> List[MacroEventSpec]:
 # just whichever --year this invocation is seeding -- a single-year run must
 # never treat the OTHER year's still-valid rows as orphaned just because this
 # run didn't happen to touch them.
-SEED_SPEC_YEARS: Tuple[int, ...] = (2025, 2026)
+SEED_SPEC_YEARS: tuple[int, ...] = (2025, 2026)
 
 # The event types the hand-maintained seed lists cover. Orphan retirement is
 # scoped to exactly these -- a SEED-source row of some unrelated event type
@@ -543,7 +542,7 @@ SEED_SPEC_YEARS: Tuple[int, ...] = (2025, 2026)
 # entirely different GDP key scheme -- this scoping is what keeps this
 # pipeline's retirement pass from ever being able to reach those rows even if
 # it were ever pointed at the same database.)
-MACRO_SEED_EVENT_TYPES: List[str] = [
+MACRO_SEED_EVENT_TYPES: list[str] = [
     EventType.FOMC.value,
     EventType.CPI.value,
     EventType.NFP.value,
@@ -570,7 +569,7 @@ def current_seed_keys() -> set:
 
 async def resolve_macro_specs(
     provider: FredCalendarProvider, year: int, use_live: bool = True
-) -> List[Tuple[List[MacroEventSpec], str]]:
+) -> list[tuple[list[MacroEventSpec], str]]:
     """Decide the source for each event group and build its specs.
 
     Returns ``[(specs, source), ...]`` batches:
@@ -578,11 +577,11 @@ async def resolve_macro_specs(
       * CPI/NFP/GDP/PCE come from the live FRED feed when configured and it
         returns data; otherwise they gracefully fall back to the seed lists.
     """
-    batches: List[Tuple[List[MacroEventSpec], str]] = [
+    batches: list[tuple[list[MacroEventSpec], str]] = [
         (_fomc_specs(year), EventSource.SEED.value)
     ]
 
-    live_specs: List[MacroEventSpec] = []
+    live_specs: list[MacroEventSpec] = []
     if use_live and provider.is_configured:
         live_specs = await provider.get_macro_events(year)
 

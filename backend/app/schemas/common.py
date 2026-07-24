@@ -1,7 +1,7 @@
 """Common response schemas."""
 
 from datetime import datetime
-from typing import Any, Generic, List, Optional, TypeVar
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -12,7 +12,7 @@ class ResponseMeta(BaseModel):
     """Metadata included in all responses."""
 
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    request_id: Optional[str] = None
+    request_id: str | None = None
 
     @classmethod
     def now(cls) -> "ResponseMeta":
@@ -38,7 +38,7 @@ class PaginatedMeta(ResponseMeta):
 class ListResponse(BaseModel, Generic[T]):
     """Standard response wrapper for lists."""
 
-    data: List[T]
+    data: list[T]
     meta: PaginatedMeta
 
 
@@ -47,7 +47,7 @@ class ErrorDetail(BaseModel):
 
     code: str
     message: str
-    details: Optional[dict[str, Any]] = None
+    details: dict[str, Any] | None = None
 
 
 class ErrorResponse(BaseModel):

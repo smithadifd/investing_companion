@@ -2,7 +2,6 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -13,7 +12,7 @@ class RatioBase(BaseModel):
     name: str
     numerator_symbol: str
     denominator_symbol: str
-    description: Optional[str] = None
+    description: str | None = None
     category: str = "custom"
 
 
@@ -26,9 +25,9 @@ class RatioCreate(RatioBase):
 class RatioUpdate(BaseModel):
     """Schema for updating a ratio."""
 
-    name: Optional[str] = None
-    description: Optional[str] = None
-    is_favorite: Optional[bool] = None
+    name: str | None = None
+    description: str | None = None
+    is_favorite: bool | None = None
 
 
 class RatioResponse(RatioBase):
@@ -56,11 +55,11 @@ class RatioHistoryResponse(BaseModel):
     """Response containing ratio history data."""
 
     ratio: RatioResponse
-    history: List[RatioDataPoint]
-    current_value: Optional[Decimal] = None
-    change_1d: Optional[Decimal] = None
-    change_1w: Optional[Decimal] = None
-    change_1m: Optional[Decimal] = None
+    history: list[RatioDataPoint]
+    current_value: Decimal | None = None
+    change_1d: Decimal | None = None
+    change_1w: Decimal | None = None
+    change_1m: Decimal | None = None
 
 
 class RatioQuoteResponse(BaseModel):
@@ -71,6 +70,6 @@ class RatioQuoteResponse(BaseModel):
     numerator_symbol: str
     denominator_symbol: str
     current_value: Decimal
-    change_1d: Optional[Decimal] = None
-    change_percent_1d: Optional[Decimal] = None
+    change_1d: Decimal | None = None
+    change_percent_1d: Decimal | None = None
     timestamp: datetime

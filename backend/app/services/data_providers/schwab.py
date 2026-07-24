@@ -22,7 +22,6 @@ import logging
 import re
 import time
 from datetime import datetime, time as dt_time
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -102,7 +101,7 @@ def is_schwab_configured() -> bool:
     )
 
 
-def token_age_days(wrapped_token: dict) -> Optional[float]:
+def token_age_days(wrapped_token: dict) -> float | None:
     """Age in days of a wrapped schwab-py token, from its creation timestamp."""
     created = wrapped_token.get("creation_timestamp")
     if not isinstance(created, (int, float)):
@@ -118,7 +117,7 @@ def token_is_expired(wrapped_token: dict) -> bool:
     return age >= SCHWAB_TOKEN_LIFETIME_DAYS
 
 
-def parse_wrapped_token(raw: Optional[str]) -> Optional[dict]:
+def parse_wrapped_token(raw: str | None) -> dict | None:
     """Parse a stored token blob; None if missing or not schwab-py's format."""
     if not raw:
         return None
@@ -151,7 +150,7 @@ def _current_extended_session(now_et: datetime) -> str:
     return "closed"
 
 
-def _safe_float(value) -> Optional[float]:
+def _safe_float(value) -> float | None:
     if value is None:
         return None
     try:
@@ -163,7 +162,7 @@ def _safe_float(value) -> Optional[float]:
     return f
 
 
-def _parse_schwab_quote(data: dict, session: str, now_et: datetime) -> Optional[dict]:
+def _parse_schwab_quote(data: dict, session: str, now_et: datetime) -> dict | None:
     """Map a Schwab per-symbol quote object to {price, change_percent, session}.
 
     Mirrors the Yahoo provider's honesty rules: change_percent is measured
@@ -268,7 +267,7 @@ class SchwabProvider:
         self._wrapped_token = wrapped_token
         self._fallback = fallback
         self._client = None
-        self._refreshed_token: Optional[dict] = None
+        self._refreshed_token: dict | None = None
 
     # -- token plumbing (schwab-py bridge) ----------------------------------
 
@@ -326,7 +325,7 @@ class SchwabProvider:
 
     # -- quotes --------------------------------------------------------------
 
-    async def get_extended_quote(self, symbol: str) -> Optional[dict]:
+    async def get_extended_quote(self, symbol: str) -> dict | None:
         """Extended-hours quote {price, change_percent, session} via Schwab,
         delegating unsupported symbols and any failure to the fallback."""
         schwab_symbol = symbol.strip().upper()
@@ -487,7 +486,7 @@ class SchwabProvider:
         account_hash: str,
         start_date: datetime,
         end_date: datetime,
-        transaction_types: Optional[list] = None,
+        transaction_types: list | None = None,
     ) -> list[dict]:
         """Raw transactions for one account in the given date range, with
         the plaintext account number stripped from every entry. Schwab's own

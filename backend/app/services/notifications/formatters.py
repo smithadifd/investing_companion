@@ -3,7 +3,6 @@
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, time
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
@@ -97,7 +96,7 @@ class MorningData:
     # chars), e.g. "DOE announced new uranium reserve program." None/empty
     # (the default) must render byte-identical to before this field existed -
     # see tests/test_services/test_briefing_formatters.py's catalyst-absent case.
-    catalysts: Optional[dict[str, str]] = None
+    catalysts: dict[str, str] | None = None
     # Section names that failed to assemble this run, from OUTSIDE the
     # formatter (e.g. the catalysts DB query in alerts.py's assembly step).
     # Seeds the same "Some data unavailable" footer the formatter's own
@@ -348,7 +347,7 @@ class AlertTrigger:
     triggered_value: float = 0.0
     # The alert's notes carry the pre-committed action ("trim VOO", "run the
     # checklist") - surfacing them attaches the decision to the trigger
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 @dataclass
@@ -379,7 +378,7 @@ class EODData:
     # "DOE announced new uranium reserve program." None/empty (the default)
     # must render byte-identical to before this field existed - see
     # tests/test_services/test_briefing_formatters.py's catalyst-absent case.
-    catalysts: Optional[dict[str, str]] = None
+    catalysts: dict[str, str] | None = None
     # Section names that failed to assemble this run, from OUTSIDE the
     # formatter (e.g. the catalysts DB query in alerts.py's assembly step).
     # Seeds the same "Some data unavailable" footer the formatter's own

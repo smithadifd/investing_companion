@@ -7,7 +7,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, List, Optional
+from typing import Any
 
 import yfinance as yf
 
@@ -39,7 +39,7 @@ EXTENDED_QUOTE_CACHE_TTL = 300  # 5 minutes for extended-hours quotes
 
 # Thread pool for running synchronous yfinance calls
 # Limited to 4 workers to avoid overwhelming Yahoo Finance
-_executor: Optional[ThreadPoolExecutor] = None
+_executor: ThreadPoolExecutor | None = None
 
 
 def _get_executor() -> ThreadPoolExecutor:
@@ -113,7 +113,7 @@ def normalize_symbol(symbol: str) -> str:
     return symbol
 
 
-def _parse_extended_quote(info: dict) -> Optional[dict]:
+def _parse_extended_quote(info: dict) -> dict | None:
     """Parse an extended-hours quote from a Yahoo ticker info dict.
 
     Returns {price, change_percent, session} where session is
@@ -133,7 +133,7 @@ def _parse_extended_quote(info: dict) -> Optional[dict]:
 
     state = str(info.get("marketState") or "").upper()
 
-    def _result(price: Decimal, change_percent: Optional[Decimal], session: str) -> dict:
+    def _result(price: Decimal, change_percent: Decimal | None, session: str) -> dict:
         return {
             "price": float(price),
             "change_percent": float(change_percent) if change_percent is not None else 0.0,
@@ -172,7 +172,7 @@ def _parse_extended_quote(info: dict) -> Optional[dict]:
     )
 
 
-def _safe_decimal(value: Any) -> Optional[Decimal]:
+def _safe_decimal(value: Any) -> Decimal | None:
     """Safely convert value to Decimal."""
     if value is None or value != value:  # NaN check
         return None
@@ -182,7 +182,7 @@ def _safe_decimal(value: Any) -> Optional[Decimal]:
         return None
 
 
-def _safe_int(value: Any) -> Optional[int]:
+def _safe_int(value: Any) -> int | None:
     """Safely convert value to int."""
     if value is None or value != value:  # NaN check
         return None
@@ -196,7 +196,7 @@ def _normalize_dividend_yield(
     value: Any,
     dividend_rate: Any = None,
     price: Any = None,
-) -> Optional[Decimal]:
+) -> Decimal | None:
     """Normalize yfinance's ``dividendYield`` to a FRACTION (the canonical scale).
 
     yfinance is inconsistent across versions: older releases report the yield as
@@ -265,7 +265,7 @@ class YahooFinanceProvider(MarketDataProvider):
         }
     )
 
-    async def get_quote(self, symbol: str) -> Optional[QuoteResponse]:
+    async def get_quote(self, symbol: str) -> QuoteResponse | None:
         """Fetch current quote for a symbol. Uses 5-minute cache."""
         cache_key = cache_service.quote_key(symbol)
 
@@ -337,7 +337,7 @@ class YahooFinanceProvider(MarketDataProvider):
 
         return quote
 
-    async def get_extended_quote(self, symbol: str) -> Optional[dict]:
+    async def get_extended_quote(self, symbol: str) -> dict | None:
         """Fetch an extended-hours quote: {price, change_percent, session}.
 
         session is 'pre' | 'regular' | 'post' | 'closed' (from Yahoo's
@@ -358,7 +358,7 @@ class YahooFinanceProvider(MarketDataProvider):
 
         yahoo_symbol = normalize_symbol(symbol)
 
-        def _fetch_info() -> Optional[dict]:
+        def _fetch_info() -> dict | None:
             ticker = yf.Ticker(yahoo_symbol)
             info = ticker.info
             if not info or "regularMarketPrice" not in info:
@@ -385,7 +385,7 @@ class YahooFinanceProvider(MarketDataProvider):
         symbol: str,
         period: str = "1y",
         interval: str = "1d",
-    ) -> List[OHLCVData]:
+    ) -> list[OHLCVData]:
         """Fetch historical OHLCV data."""
 
         yahoo_symbol = normalize_symbol(symbol)
@@ -419,14 +419,14 @@ class YahooFinanceProvider(MarketDataProvider):
             for item in data
         ]
 
-    async def search(self, query: str, limit: int = 20) -> List[EquitySearchResult]:
+    async def search(self, query: str, limit: int = 20) -> list[EquitySearchResult]:
         """Search for equities by name or symbol.
 
         Note: yfinance doesn't have native search, so we do a direct lookup.
         For better search, consider Alpha Vantage SYMBOL_SEARCH in Phase 2.
         """
 
-        def _search() -> Optional[dict]:
+        def _search() -> dict | None:
             ticker = yf.Ticker(query.upper())
             info = ticker.info
             if info and info.get("symbol"):
@@ -446,10 +446,10 @@ class YahooFinanceProvider(MarketDataProvider):
             ]
         return []
 
-    async def get_info(self, symbol: str) -> Optional[dict]:
+    async def get_info(self, symbol: str) -> dict | None:
         """Get full ticker info."""
 
-        def _fetch_info() -> Optional[dict]:
+        def _fetch_info() -> dict | None:
             ticker = yf.Ticker(symbol)
             info = ticker.info
             if info and info.get("symbol"):
@@ -458,7 +458,7 @@ class YahooFinanceProvider(MarketDataProvider):
 
         return await run_in_executor(_fetch_info)
 
-    async def get_fundamentals(self, symbol: str) -> Optional[FundamentalsResponse]:
+    async def get_fundamentals(self, symbol: str) -> FundamentalsResponse | None:
         """Get fundamental data for a symbol. Uses 1-hour cache."""
         cache_key = cache_service.fundamentals_key(symbol)
 
@@ -506,7 +506,7 @@ class YahooFinanceProvider(MarketDataProvider):
 
         return fundamentals
 
-    async def get_calendar(self, symbol: str) -> Optional[EquityCalendarInfo]:
+    async def get_calendar(self, symbol: str) -> EquityCalendarInfo | None:
         """Get calendar info (earnings, dividends) for a symbol.
 
         Returns earnings date and dividend information from Yahoo Finance.
@@ -609,8 +609,8 @@ class YahooFinanceProvider(MarketDataProvider):
         )
 
     async def get_calendar_batch(
-        self, symbols: List[str]
-    ) -> dict[str, Optional[EquityCalendarInfo]]:
+        self, symbols: list[str]
+    ) -> dict[str, EquityCalendarInfo | None]:
         """Get calendar info for multiple symbols.
 
         More efficient than individual calls for bulk updates.
@@ -625,7 +625,7 @@ class YahooFinanceProvider(MarketDataProvider):
         return results
 
 
-def _parse_date(value: Any) -> Optional[date]:
+def _parse_date(value: Any) -> date | None:
     """Parse a date from various formats."""
     if value is None:
         return None
@@ -653,7 +653,7 @@ def _parse_date(value: Any) -> Optional[date]:
     return None
 
 
-def _parse_timestamp(value: Any) -> Optional[date]:
+def _parse_timestamp(value: Any) -> date | None:
     """Parse a Unix timestamp to date."""
     if value is None or value != value:  # NaN check
         return None

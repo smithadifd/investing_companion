@@ -12,7 +12,6 @@ Trade-provenance columns or the adoption endpoint.
 """
 
 from decimal import Decimal
-from typing import Dict, Optional
 from uuid import UUID
 
 from app.db.models.broker_import import ImportedPosition
@@ -35,7 +34,7 @@ class ReconciliationService:
 
     async def build(
         self, user_id: UUID, account_id: int, source: str = "schwab_api"
-    ) -> Optional[ReconciliationResponse]:
+    ) -> ReconciliationResponse | None:
         """The §6 envelope for ``account_id``, or ``None`` when the account has
         no active link (the caller maps that to 409).
 
@@ -63,7 +62,7 @@ class ReconciliationService:
         schwab_rows = await schwab_ingestion.get_current_positions(
             self.db, user_id, account_hash
         )
-        schwab_by_symbol: Dict[str, ImportedPosition] = {
+        schwab_by_symbol: dict[str, ImportedPosition] = {
             row.symbol: row for row in schwab_rows
         }
 
@@ -97,7 +96,7 @@ class ReconciliationService:
             )
 
             schwab_basis = sp.average_price if sp is not None else None
-            ic_basis: Optional[Decimal] = None
+            ic_basis: Decimal | None = None
             ledger_inconsistent = False
             if ip is not None:
                 open_lots = await self.trades._get_open_lots(

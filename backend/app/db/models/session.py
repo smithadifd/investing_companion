@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import UUID
@@ -31,8 +31,8 @@ class Session(Base):
         index=True,
     )
     refresh_token_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    user_agent: Mapped[Optional[str]] = mapped_column(String(500))
-    ip_address: Mapped[Optional[str]] = mapped_column(String(45))
+    user_agent: Mapped[str | None] = mapped_column(String(500))
+    ip_address: Mapped[str | None] = mapped_column(String(45))
     expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -42,7 +42,7 @@ class Session(Base):
         server_default=func.now(),
         nullable=False,
     )
-    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Relationships
     user: Mapped["User"] = relationship(back_populates="sessions")

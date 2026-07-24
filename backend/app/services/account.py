@@ -5,7 +5,6 @@ globally-shared watchlists. Deleting an account leaves its trades unassigned
 (the FK is SET NULL on the trade side), never destroying trade history.
 """
 
-from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy import and_, select
@@ -22,7 +21,7 @@ class AccountService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def list_accounts(self, user_id: UUID) -> List[AccountResponse]:
+    async def list_accounts(self, user_id: UUID) -> list[AccountResponse]:
         stmt = (
             select(Account)
             .where(Account.user_id == user_id)
@@ -33,7 +32,7 @@ class AccountService:
 
     async def get_account(
         self, account_id: int, user_id: UUID
-    ) -> Optional[AccountResponse]:
+    ) -> AccountResponse | None:
         account = await self._get(account_id, user_id)
         return AccountResponse.model_validate(account) if account else None
 
@@ -59,7 +58,7 @@ class AccountService:
 
     async def update_account(
         self, account_id: int, user_id: UUID, data: AccountUpdate
-    ) -> Optional[AccountResponse]:
+    ) -> AccountResponse | None:
         account = await self._get(account_id, user_id)
         if not account:
             return None
@@ -93,7 +92,7 @@ class AccountService:
         await self.db.commit()
         return True
 
-    async def _get(self, account_id: int, user_id: UUID) -> Optional[Account]:
+    async def _get(self, account_id: int, user_id: UUID) -> Account | None:
         return await self.db.scalar(
             select(Account).where(
                 and_(Account.id == account_id, Account.user_id == user_id)

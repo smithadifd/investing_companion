@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
     DateTime,
@@ -75,14 +75,14 @@ class Trade(Base, TimestampMixin):
         DateTime(timezone=True),
         nullable=False,
     )
-    notes: Mapped[Optional[str]] = mapped_column(Text)
-    watchlist_item_id: Mapped[Optional[int]] = mapped_column(
+    notes: Mapped[str | None] = mapped_column(Text)
+    watchlist_item_id: Mapped[int | None] = mapped_column(
         ForeignKey("watchlist_items.id", ondelete="SET NULL"),
         nullable=True,
     )
     # NULL = unassigned. SET NULL so deleting an account keeps the trade
     # (it just falls back to the unassigned position bucket).
-    account_id: Mapped[Optional[int]] = mapped_column(
+    account_id: Mapped[int | None] = mapped_column(
         ForeignKey("accounts.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
@@ -97,13 +97,13 @@ class Trade(Base, TimestampMixin):
     )
 
     # Trade pairs where this is the opening trade
-    opening_pairs: Mapped[List["TradePair"]] = relationship(
+    opening_pairs: Mapped[list["TradePair"]] = relationship(
         back_populates="open_trade",
         foreign_keys="TradePair.open_trade_id",
         lazy="dynamic",
     )
     # Trade pairs where this is the closing trade
-    closing_pairs: Mapped[List["TradePair"]] = relationship(
+    closing_pairs: Mapped[list["TradePair"]] = relationship(
         back_populates="close_trade",
         foreign_keys="TradePair.close_trade_id",
         lazy="dynamic",
@@ -159,7 +159,7 @@ class TradePair(Base):
     )
     # The account both paired trades belong to (FIFO matches within an
     # account). NULL = the unassigned bucket. SET NULL mirrors trades.
-    account_id: Mapped[Optional[int]] = mapped_column(
+    account_id: Mapped[int | None] = mapped_column(
         ForeignKey("accounts.id", ondelete="SET NULL"),
         nullable=True,
     )

@@ -1,7 +1,6 @@
 """Economic event API endpoints."""
 
 from datetime import date
-from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
@@ -37,23 +36,23 @@ def get_event_service(db: AsyncSession = Depends(get_db)) -> EconomicEventServic
 # -----------------------------------------------------------------------------
 
 
-@router.get("", response_model=DataResponse[List[EconomicEventResponse]])
+@router.get("", response_model=DataResponse[list[EconomicEventResponse]])
 async def list_events(
-    start_date: Optional[date] = Query(None, description="Filter events from this date"),
-    end_date: Optional[date] = Query(None, description="Filter events until this date"),
-    event_types: Optional[List[EventType]] = Query(
+    start_date: date | None = Query(None, description="Filter events from this date"),
+    end_date: date | None = Query(None, description="Filter events until this date"),
+    event_types: list[EventType] | None = Query(
         None, description="Filter by event types"
     ),
-    equity_symbol: Optional[str] = Query(None, description="Filter by equity symbol"),
-    watchlist_id: Optional[int] = Query(None, description="Filter by watchlist"),
+    equity_symbol: str | None = Query(None, description="Filter by equity symbol"),
+    watchlist_id: int | None = Query(None, description="Filter by watchlist"),
     watchlist_only: bool = Query(False, description="Only show watchlist equity events"),
-    importance: Optional[EventImportance] = Query(None, description="Filter by importance"),
+    importance: EventImportance | None = Query(None, description="Filter by importance"),
     include_past: bool = Query(False, description="Include past events"),
     limit: int = Query(100, ge=1, le=500, description="Max results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
     service: EconomicEventService = Depends(get_event_service),
-) -> DataResponse[List[EconomicEventResponse]]:
+) -> DataResponse[list[EconomicEventResponse]]:
     """
     List economic events with filtering.
 
@@ -90,10 +89,10 @@ async def list_events(
 @router.get("/upcoming", response_model=DataResponse[UpcomingEventsResponse])
 async def get_upcoming_events(
     days: int = Query(7, ge=1, le=90, description="Days ahead to look"),
-    event_types: Optional[List[EventType]] = Query(None, description="Filter by types"),
+    event_types: list[EventType] | None = Query(None, description="Filter by types"),
     watchlist_only: bool = Query(False, description="Only watchlist equities"),
     limit: int = Query(20, ge=1, le=100, description="Max events"),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
     service: EconomicEventService = Depends(get_event_service),
 ) -> DataResponse[UpcomingEventsResponse]:
     """
@@ -120,9 +119,9 @@ async def get_upcoming_events(
 async def get_calendar_month(
     year: int = Path(..., ge=2020, le=2100, description="Calendar year"),
     month: int = Path(..., ge=1, le=12, description="Calendar month (1-12)"),
-    event_types: Optional[List[EventType]] = Query(None, description="Filter by types"),
+    event_types: list[EventType] | None = Query(None, description="Filter by types"),
     watchlist_only: bool = Query(False, description="Only watchlist equities"),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
     service: EconomicEventService = Depends(get_event_service),
 ) -> DataResponse[CalendarMonth]:
     """
@@ -146,13 +145,13 @@ async def get_calendar_month(
     return DataResponse(data=result, meta=ResponseMeta.now())
 
 
-@router.get("/watchlist", response_model=DataResponse[List[EconomicEventResponse]])
+@router.get("/watchlist", response_model=DataResponse[list[EconomicEventResponse]])
 async def get_watchlist_events(
-    watchlist_id: Optional[int] = Query(None, description="Specific watchlist ID"),
+    watchlist_id: int | None = Query(None, description="Specific watchlist ID"),
     days: int = Query(14, ge=1, le=90, description="Days ahead"),
     current_user: User = Depends(get_current_user),
     service: EconomicEventService = Depends(get_event_service),
-) -> DataResponse[List[EconomicEventResponse]]:
+) -> DataResponse[list[EconomicEventResponse]]:
     """
     Get upcoming events for watchlist equities.
 
@@ -170,7 +169,7 @@ async def get_watchlist_events(
 
 @router.get("/stats", response_model=DataResponse[EventStats])
 async def get_event_stats(
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
     service: EconomicEventService = Depends(get_event_service),
 ) -> DataResponse[EventStats]:
     """
@@ -192,7 +191,7 @@ async def get_event_stats(
 @router.get("/{event_id}", response_model=DataResponse[EconomicEventResponse])
 async def get_event(
     event_id: UUID,
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
     service: EconomicEventService = Depends(get_event_service),
 ) -> DataResponse[EconomicEventResponse]:
     """Get a single event by ID."""
@@ -298,13 +297,13 @@ async def delete_equity_events(
 # -----------------------------------------------------------------------------
 
 
-@router.post("/refresh/{symbol}", response_model=DataResponse[List[EconomicEventResponse]])
+@router.post("/refresh/{symbol}", response_model=DataResponse[list[EconomicEventResponse]])
 async def refresh_equity_events(
     symbol: str,
     _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     service: EconomicEventService = Depends(get_event_service),
-) -> DataResponse[List[EconomicEventResponse]]:
+) -> DataResponse[list[EconomicEventResponse]]:
     """
     Refresh events for a specific equity from Yahoo Finance.
 
@@ -316,7 +315,7 @@ async def refresh_equity_events(
 
 @router.post("/refresh/watchlist", response_model=DataResponse[dict])
 async def refresh_watchlist_events(
-    watchlist_id: Optional[int] = Query(None, description="Specific watchlist to refresh"),
+    watchlist_id: int | None = Query(None, description="Specific watchlist to refresh"),
     _demo_guard: None = Depends(require_not_demo),
     current_user: User = Depends(get_current_user),
     service: EconomicEventService = Depends(get_event_service),

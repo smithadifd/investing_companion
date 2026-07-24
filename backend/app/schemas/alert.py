@@ -3,7 +3,6 @@
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -35,19 +34,19 @@ class AlertBase(BaseModel):
     """Base alert schema with shared fields."""
 
     name: str
-    notes: Optional[str] = None
+    notes: str | None = None
     condition_type: AlertConditionType
     # Required for every condition except entry_zone (which evaluates the
     # linked watchlist item's zones and stores 0 here)
-    threshold_value: Optional[Decimal] = None
-    comparison_period: Optional[str] = None  # For percent conditions: see VALID_COMPARISON_PERIODS
+    threshold_value: Decimal | None = None
+    comparison_period: str | None = None  # For percent conditions: see VALID_COMPARISON_PERIODS
     cooldown_minutes: int = 60
     # Crossing conditions only: hold for N consecutive checks before firing
-    confirm_checks: Optional[int] = None
+    confirm_checks: int | None = None
 
     @field_validator("confirm_checks")
     @classmethod
-    def validate_confirm_checks(cls, v: Optional[int]) -> Optional[int]:
+    def validate_confirm_checks(cls, v: int | None) -> int | None:
         """Validate the sustained-confirmation count is reasonable."""
         if v is not None and not 1 <= v <= 30:
             raise ValueError("confirm_checks must be between 1 and 30")
@@ -55,7 +54,7 @@ class AlertBase(BaseModel):
 
     @field_validator("comparison_period")
     @classmethod
-    def validate_comparison_period(cls, v: Optional[str], info) -> Optional[str]:
+    def validate_comparison_period(cls, v: str | None, info) -> str | None:
         """Validate comparison_period for percent change conditions."""
         if v is not None and v not in VALID_COMPARISON_PERIODS:
             raise ValueError(
@@ -79,9 +78,9 @@ class AlertCreate(AlertBase):
 
     # Target - provide either equity_symbol or ratio_id
     # (entry_zone alerts target a watchlist item instead)
-    equity_symbol: Optional[str] = None
-    ratio_id: Optional[int] = None
-    watchlist_item_id: Optional[int] = None
+    equity_symbol: str | None = None
+    ratio_id: int | None = None
+    watchlist_item_id: int | None = None
     is_active: bool = True
 
     @model_validator(mode="after")
@@ -154,21 +153,21 @@ class AlertUpdate(BaseModel):
     alert instead) - the service enforces the "from" direction.
     """
 
-    name: Optional[str] = None
-    notes: Optional[str] = None
-    condition_type: Optional[AlertConditionType] = None
-    threshold_value: Optional[Decimal] = None
-    comparison_period: Optional[str] = None
-    cooldown_minutes: Optional[int] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    notes: str | None = None
+    condition_type: AlertConditionType | None = None
+    threshold_value: Decimal | None = None
+    comparison_period: str | None = None
+    cooldown_minutes: int | None = None
+    is_active: bool | None = None
     # Explicit null clears (exclude_unset semantics in the service)
-    confirm_checks: Optional[int] = None
+    confirm_checks: int | None = None
 
     @field_validator("condition_type")
     @classmethod
     def reject_entry_zone(
-        cls, v: Optional[AlertConditionType]
-    ) -> Optional[AlertConditionType]:
+        cls, v: AlertConditionType | None
+    ) -> AlertConditionType | None:
         """Existing alerts cannot become entry_zone alerts."""
         if v == AlertConditionType.ENTRY_ZONE:
             raise ValueError(
@@ -179,7 +178,7 @@ class AlertUpdate(BaseModel):
 
     @field_validator("confirm_checks")
     @classmethod
-    def validate_confirm_checks(cls, v: Optional[int]) -> Optional[int]:
+    def validate_confirm_checks(cls, v: int | None) -> int | None:
         """Validate the sustained-confirmation count is reasonable."""
         if v is not None and not 1 <= v <= 30:
             raise ValueError("confirm_checks must be between 1 and 30")
@@ -209,7 +208,7 @@ class AlertUpdate(BaseModel):
 
     @field_validator("comparison_period")
     @classmethod
-    def validate_comparison_period(cls, v: Optional[str]) -> Optional[str]:
+    def validate_comparison_period(cls, v: str | None) -> str | None:
         """Validate comparison_period for percent change conditions."""
         if v is not None and v not in VALID_COMPARISON_PERIODS:
             raise ValueError(
@@ -219,7 +218,7 @@ class AlertUpdate(BaseModel):
 
     @field_validator("cooldown_minutes")
     @classmethod
-    def validate_cooldown(cls, v: Optional[int]) -> Optional[int]:
+    def validate_cooldown(cls, v: int | None) -> int | None:
         """Validate cooldown is reasonable."""
         if v is not None:
             if v < 1:
@@ -242,20 +241,20 @@ class AlertResponse(AlertBase):
     """Schema for alert response."""
 
     id: int
-    equity_id: Optional[int] = None
-    ratio_id: Optional[int] = None
-    watchlist_item_id: Optional[int] = None
+    equity_id: int | None = None
+    ratio_id: int | None = None
+    watchlist_item_id: int | None = None
     # entry_zone alerts: per-tier dedup state {tier: {armed, last_fired_at}}
-    zone_state: Optional[dict] = None
+    zone_state: dict | None = None
     is_active: bool
-    last_triggered_at: Optional[datetime] = None
-    last_checked_value: Optional[Decimal] = None
+    last_triggered_at: datetime | None = None
+    last_checked_value: Decimal | None = None
     consecutive_met_count: int = 0
     created_at: datetime
     updated_at: datetime
 
     # Enriched target info
-    target: Optional[AlertTargetInfo] = None
+    target: AlertTargetInfo | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -269,8 +268,8 @@ class AlertHistoryResponse(BaseModel):
     triggered_value: Decimal
     threshold_value: Decimal
     notification_sent: bool
-    notification_channel: Optional[str] = None
-    notification_error: Optional[str] = None
+    notification_channel: str | None = None
+    notification_error: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -278,7 +277,7 @@ class AlertHistoryResponse(BaseModel):
 class AlertWithHistoryResponse(AlertResponse):
     """Alert response with recent history included."""
 
-    recent_history: List[AlertHistoryResponse] = []
+    recent_history: list[AlertHistoryResponse] = []
 
 
 class AlertCheckResult(BaseModel):
@@ -314,5 +313,5 @@ class AlertDeliveryHealth(BaseModel):
     pending: int
     delivered: int
     failed: int
-    last_delivered_at: Optional[datetime] = None
-    oldest_pending_at: Optional[datetime] = None
+    last_delivered_at: datetime | None = None
+    oldest_pending_at: datetime | None = None

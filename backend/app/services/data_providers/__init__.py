@@ -1,7 +1,6 @@
 """Data providers package."""
 
 import logging
-from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,7 +30,7 @@ __all__ = [
 
 # Process-level singleton so circuit-breaker state (failure counts, open/closed)
 # persists across requests instead of resetting every time a service is built.
-_quote_provider: Optional[FailoverQuoteProvider] = None
+_quote_provider: FailoverQuoteProvider | None = None
 
 
 def get_quote_provider() -> FailoverQuoteProvider:

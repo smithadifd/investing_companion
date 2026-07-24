@@ -67,7 +67,6 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
@@ -130,7 +129,7 @@ class JournalWindow:
     end: datetime
 
 
-def compute_review_window(now: Optional[datetime] = None) -> JournalWindow:
+def compute_review_window(now: datetime | None = None) -> JournalWindow:
     """The ``[Monday 00:00 ET, next Monday 00:00 ET)`` window for the most
     recently COMPLETED ET week as of ``now`` - never the week still in
     progress.
@@ -194,7 +193,7 @@ async def _closed_trade_pairs(
     return list(result.scalars().all())
 
 
-def _weighted_avg_hold_days(pairs: list[TradePair]) -> Optional[float]:
+def _weighted_avg_hold_days(pairs: list[TradePair]) -> float | None:
     """Quantity-weighted average holding period, or ``None`` when ``pairs`` is empty."""
     total_qty = sum((p.quantity_matched for p in pairs), Decimal("0"))
     if total_qty == 0:
@@ -360,7 +359,7 @@ def _build_discord_message(window: JournalWindow, summary: str) -> str:
 
 async def _get_existing_entry(
     db: AsyncSession, user_id: uuid.UUID, window: JournalWindow
-) -> Optional[TradeJournalEntry]:
+) -> TradeJournalEntry | None:
     stmt = select(TradeJournalEntry).where(
         TradeJournalEntry.user_id == user_id,
         TradeJournalEntry.window_start == window.start,
@@ -405,7 +404,7 @@ class TradeJournalAgent(AdvisoryAgent):
     name = "trade_journal"
     agent_flag: AgentFlag = "trade_journal_agent_enabled"
 
-    async def execute(self, db: AsyncSession, user_id: Optional[uuid.UUID]) -> None:
+    async def execute(self, db: AsyncSession, user_id: uuid.UUID | None) -> None:
         """Compute the review, upsert it, and send Discord if metrics changed.
 
         Assumes the caller has already run :meth:`guard` and only calls this

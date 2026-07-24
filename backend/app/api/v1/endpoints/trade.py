@@ -1,7 +1,6 @@
 """Trade API endpoints."""
 
 from datetime import datetime
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,11 +38,11 @@ def get_trade_service(db: AsyncSession = Depends(get_db)) -> TradeService:
 
 @router.get("", response_model=ListResponse[TradeResponse])
 async def list_trades(
-    equity_id: Optional[int] = Query(None, description="Filter by equity ID"),
-    trade_type: Optional[TradeType] = Query(None, description="Filter by trade type"),
-    start_date: Optional[datetime] = Query(None, description="Filter trades after this date"),
-    end_date: Optional[datetime] = Query(None, description="Filter trades before this date"),
-    account_id: Optional[int] = Query(None, description="Filter by account ID"),
+    equity_id: int | None = Query(None, description="Filter by equity ID"),
+    trade_type: TradeType | None = Query(None, description="Filter by trade type"),
+    start_date: datetime | None = Query(None, description="Filter trades after this date"),
+    end_date: datetime | None = Query(None, description="Filter trades before this date"),
+    account_id: int | None = Query(None, description="Filter by account ID"),
     unassigned: bool = Query(False, description="Only trades with no account"),
     limit: int = Query(100, ge=1, le=500, description="Max results to return"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
@@ -129,8 +128,8 @@ async def get_portfolio(
 
 @router.get("/performance", response_model=DataResponse[PerformanceReport])
 async def get_performance(
-    start_date: Optional[datetime] = Query(None, description="Start of performance period"),
-    end_date: Optional[datetime] = Query(None, description="End of performance period"),
+    start_date: datetime | None = Query(None, description="Start of performance period"),
+    end_date: datetime | None = Query(None, description="End of performance period"),
     current_user: User = Depends(get_current_user),
     service: TradeService = Depends(get_trade_service),
 ) -> DataResponse[PerformanceReport]:
@@ -148,13 +147,13 @@ async def get_performance(
     return DataResponse(data=report, meta=ResponseMeta.now())
 
 
-@router.get("/pairs", response_model=DataResponse[List[TradePairResponse]])
+@router.get("/pairs", response_model=DataResponse[list[TradePairResponse]])
 async def get_trade_pairs(
-    equity_id: Optional[int] = Query(None, description="Filter by equity ID"),
+    equity_id: int | None = Query(None, description="Filter by equity ID"),
     limit: int = Query(100, ge=1, le=500, description="Max results to return"),
     current_user: User = Depends(get_current_user),
     service: TradeService = Depends(get_trade_service),
-) -> DataResponse[List[TradePairResponse]]:
+) -> DataResponse[list[TradePairResponse]]:
     """
     Get trade pairs (matched open/close trades).
 

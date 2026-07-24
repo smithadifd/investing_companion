@@ -5,7 +5,7 @@ import logging
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,7 +42,7 @@ SETTING_CUSTOM_INSTRUCTIONS = "ai_custom_instructions"
 MAX_TOKENS = 2048
 
 
-def _decimal_to_float(value) -> Optional[float]:
+def _decimal_to_float(value) -> float | None:
     """Convert Decimal to float safely."""
     if value is None:
         return None
@@ -57,7 +57,7 @@ class AIService:
     def __init__(
         self,
         db: AsyncSession,
-        user_id: Optional[uuid.UUID] = None,
+        user_id: uuid.UUID | None = None,
         *,
         cache=None,
         budget=None,
@@ -69,7 +69,7 @@ class AIService:
         self._budget = budget if budget is not None else token_budget
         self._settings_service = SettingsService(db)
 
-    async def get_api_key(self) -> Optional[str]:
+    async def get_api_key(self) -> str | None:
         """Get the Claude API key through the shared encrypted accessor.
 
         Reads ``CLAUDE_API_KEY`` via SettingsService, which decrypts values in
@@ -141,7 +141,7 @@ class AIService:
         await self.db.commit()
         return await self.get_settings()
 
-    async def _get_setting_row(self, key: str) -> Optional[UserSetting]:
+    async def _get_setting_row(self, key: str) -> UserSetting | None:
         """Look up a (non-secret) AI setting row for this user.
 
         Legacy-row disposition (R8 reconciliation, tracked for a supervised §3
@@ -191,7 +191,7 @@ class AIService:
             self.db.add(setting)
 
     def _resolve_model(
-        self, request: AIAnalysisRequest, default_model: Optional[str] = None
+        self, request: AIAnalysisRequest, default_model: str | None = None
     ) -> AIModel:
         """Resolve the model to use.
 
@@ -215,7 +215,7 @@ class AIService:
                 logger.warning("Ignoring unknown AI model id: %s", candidate)
         return AIModel.CLAUDE_SONNET
 
-    async def _get_equity_context(self, symbol: str) -> Optional[EquityContext]:
+    async def _get_equity_context(self, symbol: str) -> EquityContext | None:
         """Build context for equity analysis."""
         equity_service = EquityService(self.db)
         detail = await equity_service.get_equity_detail(symbol)
@@ -256,7 +256,7 @@ class AIService:
             industry=detail.industry,
         )
 
-    async def _get_ratio_context(self, ratio_id: int) -> Optional[RatioContext]:
+    async def _get_ratio_context(self, ratio_id: int) -> RatioContext | None:
         """Build context for ratio analysis."""
         ratio_service = RatioService(self.db, self.user_id)
         history = await ratio_service.get_ratio_history(ratio_id, "1mo")
@@ -276,7 +276,7 @@ class AIService:
 
     async def _get_watchlist_context(
         self, watchlist_id: int
-    ) -> Optional[WatchlistContext]:
+    ) -> WatchlistContext | None:
         """Build context for watchlist analysis."""
         watchlist_service = WatchlistService(self.db, self.user_id)
         watchlist = await watchlist_service.get_watchlist(watchlist_id)
@@ -304,7 +304,7 @@ class AIService:
             holdings=holdings,
         )
 
-    def _build_system_prompt(self, custom_instructions: Optional[str] = None) -> str:
+    def _build_system_prompt(self, custom_instructions: str | None = None) -> str:
         """Build the system prompt for Claude."""
         base_prompt = """You are an expert financial analyst assistant. Your role is to provide
 insightful, balanced analysis of equities, ratios, and market data.
@@ -444,7 +444,7 @@ Please provide analysis across this watchlist addressing the user's question."""
 
     async def _build_prompt_and_context(
         self, request: AIAnalysisRequest
-    ) -> tuple[str, Optional[str]]:
+    ) -> tuple[str, str | None]:
         """Resolve the rendered user prompt and a short context summary.
 
         Handles all four analysis types explicitly. EQUITY/RATIO/WATCHLIST fetch
@@ -452,7 +452,7 @@ Please provide analysis across this watchlist addressing the user's question."""
         sends the raw prompt. No type falls through silently.
         """
         user_prompt = request.prompt
-        context_summary: Optional[str] = None
+        context_summary: str | None = None
 
         if not request.include_context:
             return user_prompt, context_summary
@@ -644,7 +644,7 @@ Please provide analysis across this watchlist addressing the user's question."""
         )
         await self._cache_set(cache_key, response)
 
-    async def _cache_get(self, key: str) -> Optional[dict]:
+    async def _cache_get(self, key: str) -> dict | None:
         """Read a cached response; degrade gracefully on cache errors."""
         if settings.AI_RESPONSE_CACHE_TTL <= 0:
             return None

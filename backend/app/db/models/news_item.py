@@ -16,7 +16,6 @@ symbol at all.
 """
 
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import DateTime, Float, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -32,7 +31,7 @@ class NewsItem(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
 
     # NULL = general market news, not tied to one symbol.
-    symbol: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    symbol: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     headline: Mapped[str] = mapped_column(String(500), nullable=False)
     url: Mapped[str] = mapped_column(String(2048), nullable=False)
@@ -41,12 +40,12 @@ class NewsItem(Base, TimestampMixin):
         DateTime(timezone=True),
         nullable=False,
     )
-    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Agent-assigned relevance score in [0.0, 1.0]; NULL until the News &
     # Catalyst agent scores it. Deliberately a plain float, not Numeric — this
     # is a heuristic ranking signal, not a value requiring exact precision.
-    relevance: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    relevance: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     __table_args__ = (
         Index("idx_news_items_symbol_published", "symbol", "published_at"),

@@ -4,7 +4,6 @@ import hashlib
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple
 
 import argon2
 import jwt
@@ -50,7 +49,7 @@ class AuthService:
         """Hash a token for storage using SHA-256."""
         return hashlib.sha256(token.encode()).hexdigest()
 
-    def _create_access_token(self, user_id: uuid.UUID) -> Tuple[str, datetime]:
+    def _create_access_token(self, user_id: uuid.UUID) -> tuple[str, datetime]:
         """Create a JWT access token."""
         expires_at = datetime.now(timezone.utc) + timedelta(
             minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
@@ -68,7 +67,7 @@ class AuthService:
         """Create a secure random refresh token."""
         return secrets.token_urlsafe(32)
 
-    def decode_access_token(self, token: str) -> Optional[uuid.UUID]:
+    def decode_access_token(self, token: str) -> uuid.UUID | None:
         """Decode and validate a JWT access token, returning user_id if valid."""
         try:
             payload = jwt.decode(
@@ -87,13 +86,13 @@ class AuthService:
         except jwt.InvalidTokenError:
             return None
 
-    async def get_user_by_email(self, email: str) -> Optional[User]:
+    async def get_user_by_email(self, email: str) -> User | None:
         """Get a user by email address."""
         stmt = select(User).where(User.email == email.lower())
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_user_by_id(self, user_id: uuid.UUID) -> Optional[User]:
+    async def get_user_by_id(self, user_id: uuid.UUID) -> User | None:
         """Get a user by ID."""
         stmt = select(User).where(User.id == user_id)
         result = await self.db.execute(stmt)
@@ -111,7 +110,7 @@ class AuthService:
         await self.db.refresh(user)
         return user
 
-    async def authenticate(self, email: str, password: str) -> Optional[User]:
+    async def authenticate(self, email: str, password: str) -> User | None:
         """Authenticate a user by email and password."""
         user = await self.get_user_by_email(email)
         if not user:
@@ -131,8 +130,8 @@ class AuthService:
     async def create_session(
         self,
         user: User,
-        user_agent: Optional[str] = None,
-        ip_address: Optional[str] = None,
+        user_agent: str | None = None,
+        ip_address: str | None = None,
     ) -> TokenResponse:
         """Create a new session with access and refresh tokens."""
         # Create tokens
@@ -169,9 +168,9 @@ class AuthService:
     async def refresh_tokens(
         self,
         refresh_token: str,
-        user_agent: Optional[str] = None,
-        ip_address: Optional[str] = None,
-    ) -> Optional[TokenResponse]:
+        user_agent: str | None = None,
+        ip_address: str | None = None,
+    ) -> TokenResponse | None:
         """Refresh tokens using a valid refresh token."""
         refresh_token_hash = self._hash_token(refresh_token)
 

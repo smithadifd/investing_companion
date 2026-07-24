@@ -11,7 +11,6 @@ it finds no coverage for a symbol.
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple
 
 from sqlalchemy import distinct, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -54,7 +53,7 @@ class PriceHistoryService:
     """Fetches daily OHLCV bars and upserts them into price_history."""
 
     def __init__(
-        self, db: AsyncSession, provider: Optional[YahooFinanceProvider] = None
+        self, db: AsyncSession, provider: YahooFinanceProvider | None = None
     ) -> None:
         self.db = db
         self.provider = provider or YahooFinanceProvider()
@@ -139,7 +138,7 @@ class PriceHistoryService:
             await self.db.flush()
         return len(rows)
 
-    async def _tracked_equities(self) -> List[Tuple[int, str]]:
+    async def _tracked_equities(self) -> list[tuple[int, str]]:
         """Equities referenced by active alerts, watchlist items, or trades.
 
         Ratio alerts store symbols rather than equity ids; their components

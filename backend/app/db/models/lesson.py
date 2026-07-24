@@ -45,7 +45,7 @@ class Lesson(Base, TimestampMixin):
     )
     # The closing trade this lesson was captured from. SET NULL so deleting
     # a trade never destroys the knowledge derived from it.
-    trade_id: Mapped[Optional[int]] = mapped_column(
+    trade_id: Mapped[int | None] = mapped_column(
         ForeignKey("trades.id", ondelete="SET NULL"),
         nullable=True,
     )
@@ -59,7 +59,7 @@ class Lesson(Base, TimestampMixin):
     lesson: Mapped[str] = mapped_column(Text, nullable=False)
     # Free-form lowercase tags: symbols, theme names, setup types
     # (e.g. ["natgas", "entry-zone", "earnings-hold"]). None = no tags.
-    tags: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    tags: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     user: Mapped["User"] = relationship()
     trade: Mapped[Optional["Trade"]] = relationship(lazy="selectin")

@@ -23,7 +23,7 @@ import logging
 import random
 import time
 from enum import Enum
-from typing import Callable, List, Optional, Sequence
+from collections.abc import Callable, Sequence
 
 from app.schemas.equity import (
     EquitySearchResult,
@@ -77,7 +77,7 @@ class CircuitBreaker:
         self._clock = clock
         self._state = CircuitState.CLOSED
         self._failures = 0
-        self._opened_at: Optional[float] = None
+        self._opened_at: float | None = None
         # True while a half-open probe is admitted but not yet resolved.
         self._probe_in_flight = False
 
@@ -157,7 +157,7 @@ class ResilientProvider(MarketDataProvider):
         max_retries: int = 2,
         base_delay: float = 0.5,
         max_delay: float = 8.0,
-        breaker: Optional[CircuitBreaker] = None,
+        breaker: CircuitBreaker | None = None,
         failure_threshold: int = 5,
         recovery_timeout: float = 30.0,
         jitter: bool = True,
@@ -190,7 +190,7 @@ class ResilientProvider(MarketDataProvider):
             )
 
         method = getattr(self._provider, method_name)
-        last_exc: Optional[Exception] = None
+        last_exc: Exception | None = None
 
         for attempt in range(self.max_retries + 1):
             try:
@@ -221,18 +221,18 @@ class ResilientProvider(MarketDataProvider):
             f"{self.max_retries + 1} attempts"
         ) from last_exc
 
-    async def get_quote(self, symbol: str) -> Optional[QuoteResponse]:
+    async def get_quote(self, symbol: str) -> QuoteResponse | None:
         return await self._call("get_quote", symbol)
 
     async def get_history(
         self, symbol: str, period: str = "1y", interval: str = "1d"
-    ) -> List[OHLCVData]:
+    ) -> list[OHLCVData]:
         return await self._call("get_history", symbol, period, interval)
 
-    async def get_fundamentals(self, symbol: str) -> Optional[FundamentalsResponse]:
+    async def get_fundamentals(self, symbol: str) -> FundamentalsResponse | None:
         return await self._call("get_fundamentals", symbol)
 
-    async def search(self, query: str, limit: int = 20) -> List[EquitySearchResult]:
+    async def search(self, query: str, limit: int = 20) -> list[EquitySearchResult]:
         return await self._call("search", query, limit)
 
 
@@ -259,7 +259,7 @@ class FailoverQuoteProvider(MarketDataProvider):
     def __init__(self, providers: Sequence[MarketDataProvider]) -> None:
         if not providers:
             raise ValueError("FailoverQuoteProvider needs at least one provider")
-        self.providers: List[MarketDataProvider] = list(providers)
+        self.providers: list[MarketDataProvider] = list(providers)
         self.capabilities = frozenset().union(
             *(getattr(p, "capabilities", frozenset()) for p in self.providers)
         )
@@ -269,7 +269,7 @@ class FailoverQuoteProvider(MarketDataProvider):
             if provider.supports(capability):
                 yield index, provider
 
-    async def get_quote(self, symbol: str) -> Optional[QuoteResponse]:
+    async def get_quote(self, symbol: str) -> QuoteResponse | None:
         for index, provider in self._candidates(ProviderCapability.QUOTE):
             try:
                 quote = await provider.get_quote(symbol)
@@ -285,7 +285,7 @@ class FailoverQuoteProvider(MarketDataProvider):
 
     async def get_history(
         self, symbol: str, period: str = "1y", interval: str = "1d"
-    ) -> List[OHLCVData]:
+    ) -> list[OHLCVData]:
         for _index, provider in self._candidates(ProviderCapability.HISTORY):
             try:
                 history = await provider.get_history(symbol, period, interval)
@@ -299,7 +299,7 @@ class FailoverQuoteProvider(MarketDataProvider):
                 return history
         return []
 
-    async def get_fundamentals(self, symbol: str) -> Optional[FundamentalsResponse]:
+    async def get_fundamentals(self, symbol: str) -> FundamentalsResponse | None:
         for _index, provider in self._candidates(ProviderCapability.FUNDAMENTALS):
             try:
                 fundamentals = await provider.get_fundamentals(symbol)
@@ -317,7 +317,7 @@ class FailoverQuoteProvider(MarketDataProvider):
                 return fundamentals
         return None
 
-    async def search(self, query: str, limit: int = 20) -> List[EquitySearchResult]:
+    async def search(self, query: str, limit: int = 20) -> list[EquitySearchResult]:
         for _index, provider in self._candidates(ProviderCapability.SEARCH):
             try:
                 results = await provider.search(query, limit)

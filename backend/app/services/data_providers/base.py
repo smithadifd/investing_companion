@@ -13,7 +13,6 @@ unaware of one another — this module only defines the shared shape.
 
 from abc import ABC
 from enum import Enum
-from typing import List, Optional
 
 from app.schemas.equity import (
     EquitySearchResult,
@@ -63,7 +62,7 @@ class MarketDataProvider(ABC):
         """True when this provider declares it can serve ``capability``."""
         return capability in self.capabilities
 
-    async def get_quote(self, symbol: str) -> Optional[QuoteResponse]:
+    async def get_quote(self, symbol: str) -> QuoteResponse | None:
         """Current quote, or ``None`` when the symbol can't be quoted."""
         return None
 
@@ -72,14 +71,14 @@ class MarketDataProvider(ABC):
         symbol: str,
         period: str = "1y",
         interval: str = "1d",
-    ) -> List[OHLCVData]:
+    ) -> list[OHLCVData]:
         """Historical OHLCV bars (possibly empty)."""
         return []
 
-    async def get_fundamentals(self, symbol: str) -> Optional[FundamentalsResponse]:
+    async def get_fundamentals(self, symbol: str) -> FundamentalsResponse | None:
         """Fundamental metrics, or ``None`` when unavailable."""
         return None
 
-    async def search(self, query: str, limit: int = 20) -> List[EquitySearchResult]:
+    async def search(self, query: str, limit: int = 20) -> list[EquitySearchResult]:
         """Symbol search results (possibly empty)."""
         return []

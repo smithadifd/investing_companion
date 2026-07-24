@@ -2,7 +2,6 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -17,8 +16,8 @@ class TradeEquity(BaseModel):
     id: int
     symbol: str
     name: str
-    exchange: Optional[str] = None
-    sector: Optional[str] = None
+    exchange: str | None = None
+    sector: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -31,16 +30,16 @@ class TradeBase(BaseModel):
     price: Decimal = Field(..., gt=0, description="Price per share/unit")
     fees: Decimal = Field(default=Decimal("0"), ge=0, description="Transaction fees")
     executed_at: datetime = Field(..., description="When the trade was executed")
-    notes: Optional[str] = Field(None, max_length=5000)
+    notes: str | None = Field(None, max_length=5000)
 
 
 class TradeCreate(TradeBase):
     """Schema for creating a trade."""
 
-    equity_id: Optional[int] = Field(None, description="ID of existing equity")
-    symbol: Optional[str] = Field(None, description="Symbol to look up if equity_id not provided")
-    watchlist_item_id: Optional[int] = Field(None, description="Link to watchlist thesis")
-    account_id: Optional[int] = Field(
+    equity_id: int | None = Field(None, description="ID of existing equity")
+    symbol: str | None = Field(None, description="Symbol to look up if equity_id not provided")
+    watchlist_item_id: int | None = Field(None, description="Link to watchlist thesis")
+    account_id: int | None = Field(
         None, description="Account this trade belongs to (null = unassigned)"
     )
 
@@ -55,14 +54,14 @@ class TradeCreate(TradeBase):
 class TradeUpdate(BaseModel):
     """Schema for updating a trade."""
 
-    trade_type: Optional[TradeType] = None
-    quantity: Optional[Decimal] = Field(None, gt=0)
-    price: Optional[Decimal] = Field(None, gt=0)
-    fees: Optional[Decimal] = Field(None, ge=0)
-    executed_at: Optional[datetime] = None
-    notes: Optional[str] = Field(None, max_length=5000)
-    watchlist_item_id: Optional[int] = None
-    account_id: Optional[int] = Field(
+    trade_type: TradeType | None = None
+    quantity: Decimal | None = Field(None, gt=0)
+    price: Decimal | None = Field(None, gt=0)
+    fees: Decimal | None = Field(None, ge=0)
+    executed_at: datetime | None = None
+    notes: str | None = Field(None, max_length=5000)
+    watchlist_item_id: int | None = None
+    account_id: int | None = Field(
         None, description="Reassign to an account (explicit null unassigns)"
     )
 
@@ -73,9 +72,9 @@ class TradeResponse(TradeBase):
     id: int
     user_id: UUID
     equity_id: int
-    watchlist_item_id: Optional[int] = None
-    account_id: Optional[int] = None
-    account: Optional[AccountRef] = None
+    watchlist_item_id: int | None = None
+    account_id: int | None = None
+    account: AccountRef | None = None
     equity: TradeEquity
     total_value: Decimal
     total_cost: Decimal
@@ -113,19 +112,19 @@ class PositionSummary(BaseModel):
 
     equity_id: int
     equity: TradeEquity
-    account_id: Optional[int] = Field(
+    account_id: int | None = Field(
         None, description="Set on per-account positions; null = aggregate or unassigned"
     )
-    account: Optional[AccountRef] = Field(
+    account: AccountRef | None = Field(
         None, description="Account context on per-account positions"
     )
     quantity: Decimal = Field(..., description="Net shares held (can be negative for short)")
     avg_cost_basis: Decimal = Field(..., description="Average cost per share")
     total_cost: Decimal = Field(..., description="Total invested")
-    current_price: Optional[Decimal] = Field(None, description="Latest price")
-    current_value: Optional[Decimal] = Field(None, description="Current market value")
-    unrealized_pnl: Optional[Decimal] = Field(None, description="Unrealized P&L")
-    unrealized_pnl_percent: Optional[Decimal] = Field(None, description="Unrealized P&L %")
+    current_price: Decimal | None = Field(None, description="Latest price")
+    current_value: Decimal | None = Field(None, description="Current market value")
+    unrealized_pnl: Decimal | None = Field(None, description="Unrealized P&L")
+    unrealized_pnl_percent: Decimal | None = Field(None, description="Unrealized P&L %")
     realized_pnl: Decimal = Field(default=Decimal("0"), description="Realized P&L from closed trades")
     first_trade_at: datetime
     last_trade_at: datetime
@@ -135,10 +134,10 @@ class PortfolioSummary(BaseModel):
     """Overall portfolio summary."""
 
     total_invested: Decimal
-    current_value: Optional[Decimal] = None
-    total_unrealized_pnl: Optional[Decimal] = None
+    current_value: Decimal | None = None
+    total_unrealized_pnl: Decimal | None = None
     total_realized_pnl: Decimal
-    positions: List[PositionSummary]
+    positions: list[PositionSummary]
     position_count: int
     total_trades: int
 
@@ -151,12 +150,12 @@ class PerformanceMetrics(BaseModel):
     losing_trades: int
     win_rate: Decimal = Field(..., description="Win rate as decimal (0.55 = 55%)")
     total_realized_pnl: Decimal
-    average_win: Optional[Decimal] = None
-    average_loss: Optional[Decimal] = None
-    largest_win: Optional[Decimal] = None
-    largest_loss: Optional[Decimal] = None
-    profit_factor: Optional[Decimal] = Field(None, description="Gross profit / Gross loss")
-    average_holding_days: Optional[Decimal] = None
+    average_win: Decimal | None = None
+    average_loss: Decimal | None = None
+    largest_win: Decimal | None = None
+    largest_loss: Decimal | None = None
+    profit_factor: Decimal | None = Field(None, description="Gross profit / Gross loss")
+    average_holding_days: Decimal | None = None
     current_streak: int = Field(..., description="Positive = winning streak, negative = losing")
     longest_winning_streak: int
     longest_losing_streak: int
@@ -175,10 +174,10 @@ class PerformanceReport(BaseModel):
     """Complete performance report."""
 
     metrics: PerformanceMetrics
-    by_sector: List[PerformanceByCategory]
-    by_equity: List[PerformanceByCategory]
-    period_start: Optional[datetime] = None
-    period_end: Optional[datetime] = None
+    by_sector: list[PerformanceByCategory]
+    by_equity: list[PerformanceByCategory]
+    period_start: datetime | None = None
+    period_end: datetime | None = None
 
 
 class PositionSizeRequest(BaseModel):
@@ -199,16 +198,16 @@ class PositionSizeResponse(BaseModel):
     risk_amount: Decimal = Field(..., description="Dollar amount at risk")
     risk_per_share: Decimal = Field(..., description="Risk per share")
     method: str
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class TradeListFilters(BaseModel):
     """Filters for trade list queries."""
 
-    equity_id: Optional[int] = None
-    symbol: Optional[str] = None
-    trade_type: Optional[TradeType] = None
-    start_date: Optional[datetime] = None
-    end_date: Optional[datetime] = None
-    min_value: Optional[Decimal] = None
-    max_value: Optional[Decimal] = None
+    equity_id: int | None = None
+    symbol: str | None = None
+    trade_type: TradeType | None = None
+    start_date: datetime | None = None
+    end_date: datetime | None = None
+    min_value: Decimal | None = None
+    max_value: Decimal | None = None

@@ -3,7 +3,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy import and_, func, select
@@ -48,7 +47,7 @@ def _fee_per_share(trade: Trade) -> Decimal:
 
 # Each open lot: (trade_id, remaining_qty, price, executed_at, fee_per_share) -
 # the same tuple shape _recalculate_pairs' FIFO queues carry.
-OpenLot = Tuple[int, Decimal, Decimal, datetime, Decimal]
+OpenLot = tuple[int, Decimal, Decimal, datetime, Decimal]
 
 
 @dataclass
@@ -63,11 +62,11 @@ class OpenLots:
     walk it knows disagrees with net quantity.
     """
 
-    long_lots: List[OpenLot] = field(default_factory=list)
-    short_lots: List[OpenLot] = field(default_factory=list)
+    long_lots: list[OpenLot] = field(default_factory=list)
+    short_lots: list[OpenLot] = field(default_factory=list)
     ledger_inconsistent: bool = False
 
-    def basis(self) -> Optional[Decimal]:
+    def basis(self) -> Decimal | None:
         """Weighted-average price of the open lots (long side if any open,
         else short side); ``None`` when flat or the ledger is inconsistent."""
         if self.ledger_inconsistent:
@@ -90,15 +89,15 @@ class TradeService:
     async def list_trades(
         self,
         user_id: UUID,
-        equity_id: Optional[int] = None,
-        trade_type: Optional[TradeType] = None,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
-        account_id: Optional[int] = None,
+        equity_id: int | None = None,
+        trade_type: TradeType | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        account_id: int | None = None,
         unassigned: bool = False,
         limit: int = 100,
         offset: int = 0,
-    ) -> Tuple[List[TradeResponse], int]:
+    ) -> tuple[list[TradeResponse], int]:
         """List trades with optional filters.
 
         ``account_id`` filters to one account; ``unassigned=True`` filters to
@@ -138,7 +137,7 @@ class TradeService:
 
         return [self._trade_to_response(t) for t in trades], total
 
-    async def get_trade(self, trade_id: int, user_id: UUID) -> Optional[TradeResponse]:
+    async def get_trade(self, trade_id: int, user_id: UUID) -> TradeResponse | None:
         """Get a single trade by ID."""
         stmt = (
             select(Trade)
@@ -153,7 +152,7 @@ class TradeService:
 
         return self._trade_to_response(trade)
 
-    async def create_trade(self, user_id: UUID, data: TradeCreate) -> Optional[TradeResponse]:
+    async def create_trade(self, user_id: UUID, data: TradeCreate) -> TradeResponse | None:
         """Create a new trade and recalculate P&L pairs."""
         # Resolve equity
         equity = None
@@ -219,7 +218,7 @@ class TradeService:
 
     async def update_trade(
         self, trade_id: int, user_id: UUID, data: TradeUpdate
-    ) -> Optional[TradeResponse]:
+    ) -> TradeResponse | None:
         """Update a trade and recalculate P&L pairs."""
         stmt = (
             select(Trade)
@@ -290,14 +289,14 @@ class TradeService:
 
         return True
 
-    async def get_position(self, user_id: UUID, equity_id: int) -> Optional[PositionSummary]:
+    async def get_position(self, user_id: UUID, equity_id: int) -> PositionSummary | None:
         """Get current position for a single equity."""
         positions = await self._calculate_positions(user_id, equity_id=equity_id)
         return positions[0] if positions else None
 
     async def get_open_positions(
         self, user_id: UUID, by_account: bool = False
-    ) -> List[PositionSummary]:
+    ) -> list[PositionSummary]:
         """Open positions without quote lookups - DB-only context for dashboard surfaces."""
         positions = await self._calculate_positions(
             user_id, with_quotes=False, by_account=by_account
@@ -338,8 +337,8 @@ class TradeService:
     async def get_performance(
         self,
         user_id: UUID,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> PerformanceReport:
         """Calculate trading performance metrics."""
         conditions = [TradePair.user_id == user_id]
@@ -382,9 +381,9 @@ class TradeService:
     async def get_trade_pairs(
         self,
         user_id: UUID,
-        equity_id: Optional[int] = None,
+        equity_id: int | None = None,
         limit: int = 100,
-    ) -> List[TradePairResponse]:
+    ) -> list[TradePairResponse]:
         """Get trade pairs (matched open/close trades)."""
         conditions = [TradePair.user_id == user_id]
         if equity_id:
@@ -490,8 +489,8 @@ class TradeService:
         # Each entry: (trade_id, remaining_quantity, price, executed_at,
         # open_fee_per_share) - the per-share opening fee rides along so a close
         # can net its matched share of it out of realized P&L.
-        long_queues: dict[Optional[int], List[Tuple[int, Decimal, Decimal, datetime, Decimal]]] = {}
-        short_queues: dict[Optional[int], List[Tuple[int, Decimal, Decimal, datetime, Decimal]]] = {}
+        long_queues: dict[int | None, list[tuple[int, Decimal, Decimal, datetime, Decimal]]] = {}
+        short_queues: dict[int | None, list[tuple[int, Decimal, Decimal, datetime, Decimal]]] = {}
 
         for trade in trades:
             acct = trade.account_id
@@ -591,7 +590,7 @@ class TradeService:
         self,
         user_id: UUID,
         equity_id: int,
-        account_id: Optional[int],
+        account_id: int | None,
     ) -> OpenLots:
         """The still-open FIFO lots for one ``(account_id, equity)`` - the same
         walk as :meth:`_recalculate_pairs`, but READ-ONLY and returning the
@@ -628,8 +627,8 @@ class TradeService:
         result = await self.db.execute(stmt)
         trades = result.scalars().all()
 
-        long_queue: List[OpenLot] = []
-        short_queue: List[OpenLot] = []
+        long_queue: list[OpenLot] = []
+        short_queue: list[OpenLot] = []
         ledger_inconsistent = False
 
         for trade in trades:
@@ -675,10 +674,10 @@ class TradeService:
     async def _calculate_positions(
         self,
         user_id: UUID,
-        equity_id: Optional[int] = None,
+        equity_id: int | None = None,
         with_quotes: bool = True,
         by_account: bool = False,
-    ) -> List[PositionSummary]:
+    ) -> list[PositionSummary]:
         """Calculate current positions from trades.
 
         By default positions are aggregated per equity (existing behaviour -
@@ -792,7 +791,7 @@ class TradeService:
 
         return positions
 
-    def _calculate_metrics(self, pairs: List[TradePair]) -> PerformanceMetrics:
+    def _calculate_metrics(self, pairs: list[TradePair]) -> PerformanceMetrics:
         """Calculate performance metrics from trade pairs."""
         if not pairs:
             return PerformanceMetrics(
@@ -869,8 +868,8 @@ class TradeService:
         )
 
     def _group_by_category(
-        self, pairs: List[TradePair], key_func
-    ) -> List[PerformanceByCategory]:
+        self, pairs: list[TradePair], key_func
+    ) -> list[PerformanceByCategory]:
         """Group trade pairs by a category and calculate stats."""
         from collections import defaultdict
 

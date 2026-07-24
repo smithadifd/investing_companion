@@ -1,7 +1,6 @@
 """Rate limiting utilities using Redis."""
 
 import hashlib
-from typing import Optional
 
 import redis.asyncio as redis
 from fastapi import HTTPException, Request, status
@@ -73,7 +72,7 @@ class RateLimiter:
 
 
 # Singleton rate limiter instance
-_rate_limiter: Optional[RateLimiter] = None
+_rate_limiter: RateLimiter | None = None
 
 
 async def get_rate_limiter() -> RateLimiter:
@@ -87,7 +86,7 @@ async def get_rate_limiter() -> RateLimiter:
 
 async def check_login_rate_limit(
     request: Request,
-    email: Optional[str] = None,
+    email: str | None = None,
 ) -> None:
     """Check rate limit for login attempts.
 

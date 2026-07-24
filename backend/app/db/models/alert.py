@@ -57,13 +57,13 @@ class Alert(Base, TimestampMixin):
 
     # Name and description
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Alert target - either equity or ratio (mutually exclusive)
-    equity_id: Mapped[Optional[int]] = mapped_column(
+    equity_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("equities.id", ondelete="CASCADE"), nullable=True
     )
-    ratio_id: Mapped[Optional[int]] = mapped_column(
+    ratio_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("ratios.id", ondelete="CASCADE"), nullable=True
     )
 
@@ -74,7 +74,7 @@ class Alert(Base, TimestampMixin):
     threshold_value: Mapped[float] = mapped_column(
         Numeric(precision=18, scale=6), nullable=False
     )
-    comparison_period: Mapped[Optional[str]] = mapped_column(
+    comparison_period: Mapped[str | None] = mapped_column(
         String(10), nullable=True
     )  # For percent change: "1d", "1w", "1m"
 
@@ -83,24 +83,24 @@ class Alert(Base, TimestampMixin):
     cooldown_minutes: Mapped[int] = mapped_column(
         Integer, default=60, nullable=False
     )  # Min time between triggers
-    last_triggered_at: Mapped[Optional[datetime]] = mapped_column(
+    last_triggered_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 
     # For cross alerts, store the last known value to detect crossings
-    last_checked_value: Mapped[Optional[float]] = mapped_column(
+    last_checked_value: Mapped[float | None] = mapped_column(
         Numeric(precision=18, scale=6), nullable=True
     )
 
     # For cross alerts, track whether price was above threshold at last check
     # None = not yet established, True = was above, False = was below
-    was_above_threshold: Mapped[Optional[bool]] = mapped_column(
+    was_above_threshold: Mapped[bool | None] = mapped_column(
         Boolean, nullable=True, default=None
     )
 
     # Entry-zone alerts: the watchlist item whose entry_zones are evaluated.
     # The equity_id is copied from the item at creation for target display.
-    watchlist_item_id: Mapped[Optional[int]] = mapped_column(
+    watchlist_item_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey("watchlist_items.id", ondelete="CASCADE"),
         nullable=True,
@@ -108,12 +108,12 @@ class Alert(Base, TimestampMixin):
     # Per-tier dedup state: {tier: {"armed": bool, "last_fired_at": iso|null}}.
     # A tier fires once on entry, disarms, and re-arms only when price exits
     # out the entry side - so a deeper tier firing never re-fires this one.
-    zone_state: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    zone_state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # Sustained confirmation for crossing alerts: require the condition to
     # hold for N consecutive checks before firing ("sustained sub-$60").
     # None = fire on the cross (default behavior).
-    confirm_checks: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    confirm_checks: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # State for confirm_checks: consecutive checks the condition has held
     consecutive_met_count: Mapped[int] = mapped_column(
         Integer, default=0, server_default="0", nullable=False
@@ -170,10 +170,10 @@ class AlertHistory(Base):
 
     # Notification tracking
     notification_sent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    notification_channel: Mapped[Optional[str]] = mapped_column(
+    notification_channel: Mapped[str | None] = mapped_column(
         String(50), nullable=True
     )  # "discord", "email", etc.
-    notification_error: Mapped[Optional[str]] = mapped_column(
+    notification_error: Mapped[str | None] = mapped_column(
         Text, nullable=True
     )  # Error message if notification failed
 
@@ -232,7 +232,7 @@ class AlertDelivery(Base, TimestampMixin):
     )
     # The history row this delivery corresponds to (nullable so a delivery can
     # outlive history pruning; ON DELETE SET NULL keeps the audit row).
-    alert_history_id: Mapped[Optional[int]] = mapped_column(
+    alert_history_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("alert_history.id", ondelete="SET NULL"), nullable=True
     )
     # Denormalized owner so the health view is a cheap single-table count.
@@ -268,11 +268,11 @@ class AlertDelivery(Base, TimestampMixin):
     )
     # Set when a worker claims the row; the row is only re-claimable once this
     # lease expires, so a crashed sender can't wedge a notification forever.
-    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    delivered_at: Mapped[Optional[datetime]] = mapped_column(
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 

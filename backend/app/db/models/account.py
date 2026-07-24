@@ -8,7 +8,7 @@ user-scoped (the lessons convention), unlike the globally-shared watchlists.
 """
 
 import uuid
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
@@ -34,18 +34,18 @@ class Account(Base, TimestampMixin):
         index=True,
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    broker: Mapped[Optional[str]] = mapped_column(String(100))
+    broker: Mapped[str | None] = mapped_column(String(100))
     # Open vocabulary (roth / taxable / 401k / hsa / ...). Not a DB enum so
     # the user can name an account type we never anticipated.
-    account_type: Mapped[Optional[str]] = mapped_column(String(50))
+    account_type: Mapped[str | None] = mapped_column(String(50))
     # Free-form (aggressive / moderate / conservative / income / ...).
-    risk_profile: Mapped[Optional[str]] = mapped_column(String(50))
+    risk_profile: Mapped[str | None] = mapped_column(String(50))
     display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="accounts")
     # SET NULL on the trade side, not here: deleting an account leaves its
     # trades unassigned rather than destroying trade history.
-    trades: Mapped[List["Trade"]] = relationship(
+    trades: Mapped[list["Trade"]] = relationship(
         back_populates="account",
         lazy="dynamic",
     )

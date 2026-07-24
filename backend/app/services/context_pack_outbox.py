@@ -15,7 +15,6 @@ import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -49,9 +48,9 @@ class OutboxResult:
 @dataclass
 class OutboxStatus:
     configured: bool
-    dir: Optional[str]
-    last_published_at: Optional[datetime]
-    last_file: Optional[str]
+    dir: str | None
+    last_published_at: datetime | None
+    last_file: str | None
 
 
 class ContextPackOutboxService:
@@ -62,7 +61,7 @@ class ContextPackOutboxService:
         self.pack_service = ContextPackService(db)
 
     @staticmethod
-    def _outbox_dir() -> Optional[Path]:
+    def _outbox_dir() -> Path | None:
         raw = settings.CONTEXT_PACK_OUTBOX_DIR.strip()
         return Path(raw) if raw else None
 
@@ -78,8 +77,8 @@ class ContextPackOutboxService:
                 configured=False, dir=None, last_published_at=None, last_file=None
             )
         latest = outbox / "latest.md"
-        last_published_at: Optional[datetime] = None
-        last_file: Optional[str] = None
+        last_published_at: datetime | None = None
+        last_file: str | None = None
         if latest.exists():
             last_published_at = datetime.fromtimestamp(
                 latest.stat().st_mtime, tz=timezone.utc

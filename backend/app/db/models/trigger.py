@@ -10,7 +10,7 @@ linked alerts; the lifecycle (active / executed / retired) is the user's.
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     DateTime,
@@ -44,7 +44,7 @@ class Trigger(Base, TimestampMixin):
     __tablename__ = "triggers"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=True,
@@ -54,17 +54,17 @@ class Trigger(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     rule: Mapped[str] = mapped_column(Text, nullable=False)  # "if X"
     action: Mapped[str] = mapped_column(Text, nullable=False)  # "then I do Y"
-    tier: Mapped[Optional[str]] = mapped_column(
+    tier: Mapped[str | None] = mapped_column(
         String(20), nullable=True
     )  # e.g. yellow / orange / red
 
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=TriggerLifecycle.ACTIVE.value
     )
-    executed_at: Mapped[Optional[datetime]] = mapped_column(
+    executed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    execution_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    execution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     alert_links: Mapped[list["TriggerAlertLink"]] = relationship(

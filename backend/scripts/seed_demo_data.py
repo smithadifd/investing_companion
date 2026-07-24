@@ -21,7 +21,6 @@ Usage:
 import argparse
 import asyncio
 from datetime import date, time
-from typing import List
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -399,7 +398,7 @@ async def seed_events(db: AsyncSession, year: int) -> dict:
     }
 
 
-async def seed_all(years: List[int] = None) -> None:
+async def seed_all(years: list[int] = None) -> None:
     """Seed all production data."""
     if years is None:
         years = [2025, 2026]

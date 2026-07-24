@@ -1,6 +1,5 @@
 """Equity API endpoints."""
 
-from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,13 +22,13 @@ from app.services.technical import TechnicalAnalysisService
 router = APIRouter()
 
 
-@router.get("/search", response_model=DataResponse[List[EquitySearchResult]])
+@router.get("/search", response_model=DataResponse[list[EquitySearchResult]])
 async def search_equities(
     q: str = Query(..., min_length=1, description="Search query"),
     limit: int = Query(20, ge=1, le=100, description="Maximum results"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> DataResponse[List[EquitySearchResult]]:
+) -> DataResponse[list[EquitySearchResult]]:
     """Search for equities by symbol or name."""
     service = EquityService(db)
     results = await service.search(q, limit)
@@ -152,13 +151,13 @@ async def get_technicals_summary(
     return DataResponse(data=summary, meta=ResponseMeta.now())
 
 
-@router.get("/{symbol}/peers", response_model=DataResponse[List[EquityDetailResponse]])
+@router.get("/{symbol}/peers", response_model=DataResponse[list[EquityDetailResponse]])
 async def get_peers(
     symbol: str,
     limit: int = Query(5, ge=1, le=10, description="Maximum number of peers"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> DataResponse[List[EquityDetailResponse]]:
+) -> DataResponse[list[EquityDetailResponse]]:
     """Get peer companies in the same sector for comparison."""
     service = EquityService(db)
     peers = await service.get_peers(symbol, limit)
@@ -166,14 +165,14 @@ async def get_peers(
     return DataResponse(data=peers, meta=ResponseMeta.now())
 
 
-@router.get("/{symbol}/events", response_model=DataResponse[List[EconomicEventResponse]])
+@router.get("/{symbol}/events", response_model=DataResponse[list[EconomicEventResponse]])
 async def get_equity_events(
     symbol: str,
     include_past: bool = Query(False, description="Include past events"),
     limit: int = Query(10, ge=1, le=50, description="Maximum events"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> DataResponse[List[EconomicEventResponse]]:
+) -> DataResponse[list[EconomicEventResponse]]:
     """Get calendar events for an equity (earnings, dividends, splits)."""
     service = EconomicEventService(db)
     events = await service.get_events_for_symbol(

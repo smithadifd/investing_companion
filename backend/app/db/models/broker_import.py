@@ -19,7 +19,7 @@ import enum
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     DateTime,
@@ -109,14 +109,14 @@ class BrokerImportRun(Base, TimestampMixin):
     )
     # Transactions only: the [start, end) window this pull requested (its
     # own cursor/audit trail). Positions pulls leave these null.
-    window_start: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    window_end: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    item_count: Mapped[Optional[int]] = mapped_column(Integer)
+    window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    item_count: Mapped[int | None] = mapped_column(Integer)
     # Sanitized failure reason: the exception type name, plus (only for our
     # own first-party exceptions, whose messages are fixed strings we wrote
     # ourselves) its message. Never a third-party exception's raw text -
     # see schwab_ingestion._safe_error_reason.
-    error_message: Mapped[Optional[str]] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
     # Loud, structured caveats on a COMPLETE run - today: the HISTORY GAP
     # note written when a transactions pull's requested window start
     # predated Schwab's 60-day history boundary and had to be clamped (the
@@ -124,7 +124,7 @@ class BrokerImportRun(Base, TimestampMixin):
     # 3, is the recovery path). See schwab_ingestion._history_gap_note.
     # Kept separate from error_message so a completed-with-caveat run is
     # never mistaken for a failed one.
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
     user: Mapped["User"] = relationship()
 
@@ -172,7 +172,7 @@ class ImportedPosition(Base, TimestampMixin):
     # Raw Schwab instrument.assetType (EQUITY, OPTION, MUTUAL_FUND, ...).
     # Unrecognized/future values are stored as-is, never dropped.
     asset_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    cusip: Mapped[Optional[str]] = mapped_column(String(20))
+    cusip: Mapped[str | None] = mapped_column(String(20))
 
     # Signed net quantity (long positive, short negative) = longQuantity -
     # shortQuantity - the field sub-PR 2's reconciliation compares against
@@ -185,9 +185,9 @@ class ImportedPosition(Base, TimestampMixin):
     short_quantity: Mapped[Decimal] = mapped_column(
         Numeric(18, 8), nullable=False, default=Decimal("0")
     )
-    average_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 8))
-    market_value: Mapped[Optional[Decimal]] = mapped_column(Numeric(16, 2))
-    current_day_profit_loss: Mapped[Optional[Decimal]] = mapped_column(Numeric(16, 2))
+    average_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 8))
+    market_value: Mapped[Decimal | None] = mapped_column(Numeric(16, 2))
+    current_day_profit_loss: Mapped[Decimal | None] = mapped_column(Numeric(16, 2))
 
     # Sanitized (account-number-redacted) raw position payload, for fields
     # not yet normalized into columns above (forward-compat with schema
@@ -224,7 +224,7 @@ class ImportedTransaction(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     # SET NULL (not CASCADE): pruning old run audit rows must never delete
     # transaction history.
-    import_run_id: Mapped[Optional[int]] = mapped_column(
+    import_run_id: Mapped[int | None] = mapped_column(
         ForeignKey("broker_import_runs.id", ondelete="SET NULL")
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -242,18 +242,18 @@ class ImportedTransaction(Base, TimestampMixin):
     external_transaction_id: Mapped[str] = mapped_column(String(64), nullable=False)
 
     transaction_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    status: Mapped[Optional[str]] = mapped_column(String(20))
-    sub_account: Mapped[Optional[str]] = mapped_column(String(20))
+    status: Mapped[str | None] = mapped_column(String(20))
+    sub_account: Mapped[str | None] = mapped_column(String(20))
     # The primary (trade-relevant) leg's instrument, when this transaction
     # has one - see schwab_ingestion._primary_transfer_item. Null for
     # transaction types with no tradeable-instrument leg (ACH, WIRE, ...).
-    symbol: Mapped[Optional[str]] = mapped_column(String(32))
-    asset_type: Mapped[Optional[str]] = mapped_column(String(50))
-    quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 8))
-    price: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 8))
-    net_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(16, 2))
-    position_effect: Mapped[Optional[str]] = mapped_column(String(20))
-    order_id: Mapped[Optional[str]] = mapped_column(String(64))
+    symbol: Mapped[str | None] = mapped_column(String(32))
+    asset_type: Mapped[str | None] = mapped_column(String(50))
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 8))
+    price: Mapped[Decimal | None] = mapped_column(Numeric(18, 8))
+    net_amount: Mapped[Decimal | None] = mapped_column(Numeric(16, 2))
+    position_effect: Mapped[str | None] = mapped_column(String(20))
+    order_id: Mapped[str | None] = mapped_column(String(64))
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

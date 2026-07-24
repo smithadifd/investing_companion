@@ -1,7 +1,6 @@
 """Technical analysis service - calculate technical indicators from price data."""
 
 from decimal import Decimal
-from typing import List, Optional
 
 from app.schemas.equity import OHLCVData
 
@@ -19,7 +18,7 @@ class TechnicalIndicators:
     """Calculate technical indicators from OHLCV data."""
 
     @staticmethod
-    def sma(closes: List[float], period: int) -> List[Optional[float]]:
+    def sma(closes: list[float], period: int) -> list[float | None]:
         """Calculate Simple Moving Average."""
         result = []
         for i in range(len(closes)):
@@ -31,7 +30,7 @@ class TechnicalIndicators:
         return result
 
     @staticmethod
-    def ema(closes: List[float], period: int) -> List[Optional[float]]:
+    def ema(closes: list[float], period: int) -> list[float | None]:
         """Calculate Exponential Moving Average."""
         result = []
         multiplier = 2 / (period + 1)
@@ -53,7 +52,7 @@ class TechnicalIndicators:
         return result
 
     @staticmethod
-    def rsi(closes: List[float], period: int = 14) -> List[Optional[float]]:
+    def rsi(closes: list[float], period: int = 14) -> list[float | None]:
         """Calculate Relative Strength Index."""
         if len(closes) < period + 1:
             return [None] * len(closes)
@@ -97,7 +96,7 @@ class TechnicalIndicators:
 
     @staticmethod
     def macd(
-        closes: List[float],
+        closes: list[float],
         fast_period: int = 12,
         slow_period: int = 26,
         signal_period: int = 9,
@@ -136,7 +135,7 @@ class TechnicalIndicators:
 
     @staticmethod
     def bollinger_bands(
-        closes: List[float], period: int = 20, std_dev: float = 2.0
+        closes: list[float], period: int = 20, std_dev: float = 2.0
     ) -> dict:
         """Calculate Bollinger Bands."""
         import math
@@ -177,7 +176,7 @@ class TechnicalAnalysisService:
         self.indicators = TechnicalIndicators()
 
     def calculate_all(
-        self, history: List[OHLCVData]
+        self, history: list[OHLCVData]
     ) -> dict:
         """Calculate all technical indicators for the given history."""
         if not history:
@@ -213,7 +212,7 @@ class TechnicalAnalysisService:
             "bb_lower": bb_data["lower"],
         }
 
-    def get_summary(self, history: List[OHLCVData]) -> dict:
+    def get_summary(self, history: list[OHLCVData]) -> dict:
         """Get a summary of current technical indicator values."""
         if not history or len(history) < 2:
             return {}

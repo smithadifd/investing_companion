@@ -75,7 +75,7 @@ class AccountLink(Base, TimestampMixin):
     # Nullable FK to accounts.id, SET NULL - mirrors Trade.account_id exactly
     # (deleting an account leaves the link's provenance rather than destroying
     # it). A link with account_id NULL is a discovered-but-unlinked hash.
-    account_id: Mapped[Optional[int]] = mapped_column(
+    account_id: Mapped[int | None] = mapped_column(
         ForeignKey("accounts.id", ondelete="SET NULL"),
         nullable=True,
     )

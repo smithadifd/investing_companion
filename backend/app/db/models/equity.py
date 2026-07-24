@@ -1,6 +1,6 @@
 """Equity model - core entity for stocks, ETFs, and other securities."""
 
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import Boolean, Index, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -20,10 +20,10 @@ class Equity(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     symbol: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    exchange: Mapped[Optional[str]] = mapped_column(String(50))
+    exchange: Mapped[str | None] = mapped_column(String(50))
     asset_type: Mapped[str] = mapped_column(String(20), default="stock", nullable=False)
-    sector: Mapped[Optional[str]] = mapped_column(String(100))
-    industry: Mapped[Optional[str]] = mapped_column(String(100))
+    sector: Mapped[str | None] = mapped_column(String(100))
+    industry: Mapped[str | None] = mapped_column(String(100))
     country: Mapped[str] = mapped_column(String(50), default="US", nullable=False)
     currency: Mapped[str] = mapped_column(String(10), default="USD", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -34,7 +34,7 @@ class Equity(Base, TimestampMixin):
         uselist=False,
         lazy="selectin",
     )
-    price_history: Mapped[List["PriceHistory"]] = relationship(
+    price_history: Mapped[list["PriceHistory"]] = relationship(
         back_populates="equity",
         lazy="dynamic",
     )

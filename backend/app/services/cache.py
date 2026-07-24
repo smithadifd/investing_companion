@@ -3,7 +3,7 @@
 import json
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any
 
 import redis.asyncio as redis
 
@@ -25,7 +25,7 @@ class CacheService:
     """Redis caching service for market data."""
 
     def __init__(self) -> None:
-        self._redis: Optional[redis.Redis] = None
+        self._redis: redis.Redis | None = None
 
     async def _get_redis(self) -> redis.Redis:
         """Get or create Redis connection."""
@@ -37,7 +37,7 @@ class CacheService:
             )
         return self._redis
 
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(self, key: str) -> Any | None:
         """Get value from cache."""
         client = await self._get_redis()
         value = await client.get(key)

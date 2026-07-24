@@ -1,6 +1,5 @@
 """Authentication API endpoints."""
 
-from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
@@ -218,12 +217,12 @@ async def change_password(
         )
 
 
-@router.get("/me/sessions", response_model=DataResponse[List[SessionInfo]])
+@router.get("/me/sessions", response_model=DataResponse[list[SessionInfo]])
 async def get_my_sessions(
     request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> DataResponse[List[SessionInfo]]:
+) -> DataResponse[list[SessionInfo]]:
     """Get all active sessions for current user."""
     auth_service = AuthService(db)
     sessions = await auth_service.get_user_sessions(current_user.id)

@@ -6,7 +6,6 @@ drift apart. format_needs_attention_lines() reproduces the pulse's historic
 plain-text lines from the structured items.
 """
 
-from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,15 +18,15 @@ NOTE_PREVIEW_CHARS = 90
 
 
 async def build_needs_attention(
-    db: AsyncSession, user_id: Optional[UUID] = None
-) -> List[NeedsAttentionItem]:
+    db: AsyncSession, user_id: UUID | None = None
+) -> list[NeedsAttentionItem]:
     """Decisions first: recently-triggered alerts, approaching alerts, near targets.
 
     Scoped to ``user_id`` for the per-user dashboard; the background morning
     pulse passes None (owner-only on a single-user install).
     """
     cp = ContextPackService(db)
-    items: List[NeedsAttentionItem] = []
+    items: list[NeedsAttentionItem] = []
 
     for a in await cp.active_alerts(user_id):
         if a.status == "triggered_recently":
@@ -69,9 +68,9 @@ async def build_needs_attention(
     return items
 
 
-def format_needs_attention_lines(items: List[NeedsAttentionItem]) -> List[str]:
+def format_needs_attention_lines(items: list[NeedsAttentionItem]) -> list[str]:
     """Pre-formatted lines for the Discord morning pulse (output kept identical)."""
-    lines: List[str] = []
+    lines: list[str] = []
     for item in items:
         if item.kind == NeedsAttentionKind.ALERT_TRIGGERED:
             line = f"🔔 {item.title} triggered"

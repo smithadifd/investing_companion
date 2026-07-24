@@ -8,7 +8,6 @@ performance, in a stable versioned shape that an external advisor (the
 
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -29,16 +28,16 @@ class PackPosition(BaseModel):
     """One open position, computed from the trade log (per account)."""
 
     symbol: str
-    name: Optional[str] = None
-    account: Optional[str] = Field(
+    name: str | None = None
+    account: str | None = Field(
         None, description="Account name; null = unassigned (no account)"
     )
     quantity: Decimal
     avg_cost_basis: Decimal
-    current_price: Optional[Decimal] = None
-    current_value: Optional[Decimal] = None
-    unrealized_pnl: Optional[Decimal] = None
-    unrealized_pnl_percent: Optional[Decimal] = None
+    current_price: Decimal | None = None
+    current_value: Decimal | None = None
+    unrealized_pnl: Decimal | None = None
+    unrealized_pnl_percent: Decimal | None = None
     realized_pnl: Decimal = Decimal("0")
 
 
@@ -50,9 +49,9 @@ class PackExposure(BaseModel):
     """
 
     theme: str
-    symbols: List[str]
-    value: Optional[Decimal] = None
-    percent_of_portfolio: Optional[Decimal] = None
+    symbols: list[str]
+    value: Decimal | None = None
+    percent_of_portfolio: Decimal | None = None
 
 
 class PackAlert(BaseModel):
@@ -62,11 +61,11 @@ class PackAlert(BaseModel):
     symbol: str
     condition_type: str
     threshold_value: Decimal
-    comparison_period: Optional[str] = None
-    last_checked_value: Optional[Decimal] = Field(
+    comparison_period: str | None = None
+    last_checked_value: Decimal | None = Field(
         None, description="Value at the most recent 5-minute check cycle"
     )
-    distance_percent: Optional[Decimal] = Field(
+    distance_percent: Decimal | None = Field(
         None,
         description=(
             "Percent move required to hit the threshold from the last checked "
@@ -74,15 +73,15 @@ class PackAlert(BaseModel):
         ),
     )
     status: str = Field(..., description="armed | approaching | triggered_recently")
-    last_triggered_at: Optional[datetime] = None
-    notes: Optional[str] = None
+    last_triggered_at: datetime | None = None
+    notes: str | None = None
 
 
 class PackTrigger(BaseModel):
     """A recent alert trigger."""
 
     alert_name: str
-    symbol: Optional[str] = None
+    symbol: str | None = None
     triggered_at: datetime
     triggered_value: Decimal
     threshold_value: Decimal
@@ -93,12 +92,12 @@ class PackWatchlistItem(BaseModel):
 
     symbol: str
     watchlist: str
-    target_price: Optional[Decimal] = None
-    latest_close: Optional[Decimal] = None
-    percent_to_target: Optional[Decimal] = Field(
+    target_price: Decimal | None = None
+    latest_close: Decimal | None = None
+    percent_to_target: Decimal | None = Field(
         None, description="Percent move from latest close to the target (negative = target below)"
     )
-    entry_zones: List[EntryZoneStatus] = Field(
+    entry_zones: list[EntryZoneStatus] = Field(
         default_factory=list,
         description=(
             "Tiered entry zones with live status vs the latest close: "
@@ -106,7 +105,7 @@ class PackWatchlistItem(BaseModel):
             "below | unknown (no stored close)"
         ),
     )
-    thesis: Optional[str] = None
+    thesis: str | None = None
 
 
 class PackEvent(BaseModel):
@@ -115,9 +114,9 @@ class PackEvent(BaseModel):
     title: str
     event_type: str
     event_date: date
-    event_time: Optional[time] = None
+    event_time: time | None = None
     importance: str
-    symbol: Optional[str] = None
+    symbol: str | None = None
     days_away: int
 
 
@@ -125,10 +124,10 @@ class PackTradeSummary(BaseModel):
     """Trade-log performance snapshot."""
 
     total_trades: int
-    win_rate: Optional[Decimal] = None
-    profit_factor: Optional[Decimal] = None
+    win_rate: Decimal | None = None
+    profit_factor: Decimal | None = None
     total_realized_pnl: Decimal
-    total_unrealized_pnl: Optional[Decimal] = None
+    total_unrealized_pnl: Decimal | None = None
 
 
 class PackPlaybookTrigger(BaseModel):
@@ -137,10 +136,10 @@ class PackPlaybookTrigger(BaseModel):
     name: str
     rule: str
     action: str
-    tier: Optional[str] = None
+    tier: str | None = None
     status: str
     signal: str
-    executed_at: Optional[datetime] = None
+    executed_at: datetime | None = None
 
 
 class PackLesson(BaseModel):
@@ -151,7 +150,7 @@ class PackLesson(BaseModel):
         ..., description="played_out | partial | wrong | unclear"
     )
     lesson: str
-    tags: List[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     recorded_at: datetime
 
 
@@ -176,31 +175,31 @@ class ContextPack(BaseModel):
         "advisor-actions.md, same tolerate-minor logic as schema_version",
     )
     generated_at: datetime
-    positions: List[PackPosition]
-    portfolio_value: Optional[Decimal] = None
+    positions: list[PackPosition]
+    portfolio_value: Decimal | None = None
     total_invested: Decimal
-    exposures: List[PackExposure]
-    catalyst_exposures: List[CatalystCluster] = Field(
+    exposures: list[PackExposure]
+    catalyst_exposures: list[CatalystCluster] = Field(
         default_factory=list,
         description="Held exposure grouped by single-catalyst cluster (overlapping)",
     )
-    active_alerts: List[PackAlert]
-    recent_triggers: List[PackTrigger]
-    watchlist_targets: List[PackWatchlistItem]
-    upcoming_events: List[PackEvent]
+    active_alerts: list[PackAlert]
+    recent_triggers: list[PackTrigger]
+    watchlist_targets: list[PackWatchlistItem]
+    upcoming_events: list[PackEvent]
     trade_summary: PackTradeSummary
-    triggers: List[PackPlaybookTrigger] = Field(
+    triggers: list[PackPlaybookTrigger] = Field(
         default_factory=list,
         description="The trigger playbook: pre-committed if-X-then-Y decisions",
     )
-    recent_handoffs: List[PackHandoff] = Field(
+    recent_handoffs: list[PackHandoff] = Field(
         default_factory=list,
         description="Execution receipts for recent advisor handoff blocks",
     )
-    lessons: List[PackLesson] = Field(
+    lessons: list[PackLesson] = Field(
         default_factory=list,
         description="Recent lessons from closed trades (the learning loop)",
     )
-    unsupported_features: List[str] = Field(
+    unsupported_features: list[str] = Field(
         ..., description="Capabilities an advisor must not emit handoff actions for"
     )

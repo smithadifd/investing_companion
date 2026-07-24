@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.dialects.postgresql import UUID
@@ -37,30 +37,30 @@ class User(Base, TimestampMixin):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Relationships
-    sessions: Mapped[List["Session"]] = relationship(
+    sessions: Mapped[list["Session"]] = relationship(
         back_populates="user",
         lazy="dynamic",
         cascade="all, delete-orphan",
     )
-    watchlists: Mapped[List["Watchlist"]] = relationship(
+    watchlists: Mapped[list["Watchlist"]] = relationship(
         back_populates="user",
         lazy="dynamic",
         cascade="all, delete-orphan",
     )
-    alerts: Mapped[List["Alert"]] = relationship(
+    alerts: Mapped[list["Alert"]] = relationship(
         back_populates="user",
         lazy="dynamic",
         cascade="all, delete-orphan",
     )
-    trades: Mapped[List["Trade"]] = relationship(
+    trades: Mapped[list["Trade"]] = relationship(
         back_populates="user",
         lazy="dynamic",
         cascade="all, delete-orphan",
     )
-    accounts: Mapped[List["Account"]] = relationship(
+    accounts: Mapped[list["Account"]] = relationship(
         back_populates="user",
         lazy="dynamic",
         cascade="all, delete-orphan",

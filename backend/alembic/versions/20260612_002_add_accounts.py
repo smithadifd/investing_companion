@@ -9,7 +9,7 @@ account is created: NULL = the unassigned position bucket, which keeps the
 position math simple (same ticker in two accounts = two positions; unassigned
 is its own group).
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 import sqlalchemy as sa
@@ -18,9 +18,9 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = '20260612_002'
-down_revision: Union[str, None] = '20260612_001'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = '20260612_001'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

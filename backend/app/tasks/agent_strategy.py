@@ -7,7 +7,6 @@ fixed UTC crontab, timed to land before the pulse's 08:00 ET default.
 """
 
 import logging
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _run_for_owner(
-    session: AsyncSession, agent: Optional[StrategyBriefAgent] = None
+    session: AsyncSession, agent: StrategyBriefAgent | None = None
 ) -> dict:
     """Resolve the install owner, guard, then dispatch to the agent.
 
@@ -32,7 +31,7 @@ async def _run_for_owner(
     """
     agent = agent if agent is not None else StrategyBriefAgent()
 
-    owner_id: Optional[UUID] = await SettingsService(session).get_owner_user_id()
+    owner_id: UUID | None = await SettingsService(session).get_owner_user_id()
     if owner_id is None:
         logger.info("agents.strategy_brief_run: no resolvable owner user; skipping")
         return {"skipped": "no_owner"}

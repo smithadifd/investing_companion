@@ -2,7 +2,6 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -26,8 +25,8 @@ class SectorPerformance(BaseModel):
     sector: str
     symbol: str  # ETF symbol representing the sector
     change_percent: Decimal
-    price: Optional[Decimal] = None
-    volume: Optional[int] = None
+    price: Decimal | None = None
+    volume: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -40,7 +39,7 @@ class MarketMover(BaseModel):
     price: Decimal
     change: Decimal
     change_percent: Decimal
-    volume: Optional[int] = None
+    volume: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -61,11 +60,11 @@ class CurrencyCommodity(BaseModel):
 class MarketOverviewResponse(BaseModel):
     """Complete market overview data."""
 
-    indices: List[IndexQuote]
-    sectors: List[SectorPerformance]
-    gainers: List[MarketMover]
-    losers: List[MarketMover]
-    currencies_commodities: List[CurrencyCommodity]
+    indices: list[IndexQuote]
+    sectors: list[SectorPerformance]
+    gainers: list[MarketMover]
+    losers: list[MarketMover]
+    currencies_commodities: list[CurrencyCommodity]
     timestamp: datetime
 
     model_config = ConfigDict(from_attributes=True)

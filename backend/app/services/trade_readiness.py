@@ -12,7 +12,6 @@ own derivation, events come from the persisted calendar.
 
 from datetime import date
 from decimal import Decimal
-from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -40,7 +39,7 @@ EVENT_WINDOW_DAYS = 7
 
 async def build_trade_readiness(
     db: AsyncSession, user_id: UUID
-) -> List[TradeReadinessItem]:
+) -> list[TradeReadinessItem]:
     """Actionable triggers (hit/approaching) with position and event context."""
     stmt = (
         select(Trigger)
@@ -55,7 +54,7 @@ async def build_trade_readiness(
     result = await db.execute(stmt)
     triggers = result.scalars().all()
 
-    actionable: List[tuple[Trigger, List[Alert], TriggerSignal]] = []
+    actionable: list[tuple[Trigger, list[Alert], TriggerSignal]] = []
     for trigger in triggers:
         alerts = [link.alert for link in trigger.alert_links if link.alert]
         # derive_signal counts a recent fire from a since-disabled alert as HIT
@@ -89,7 +88,7 @@ async def build_trade_readiness(
         days_ahead=EVENT_WINDOW_DAYS, user_id=user_id, limit=50
     )
     today = date.today()
-    events_by_symbol: dict[str, List[ReadinessEvent]] = {}
+    events_by_symbol: dict[str, list[ReadinessEvent]] = {}
     for e in events_response.events:
         symbol = e.equity.symbol if e.equity else None
         if symbol is not None and symbol in involved_symbols:
@@ -104,7 +103,7 @@ async def build_trade_readiness(
 
     lesson_service = LessonService(db)
 
-    items: List[TradeReadinessItem] = []
+    items: list[TradeReadinessItem] = []
     for trigger, alerts, signal in actionable:
         symbols = list(dict.fromkeys(a.equity.symbol for a in alerts if a.equity))
 
@@ -127,7 +126,7 @@ async def build_trade_readiness(
             for a in alerts
             if a.is_active and (d := _alert_distance(a)) is not None
         ]
-        distance: Optional[Decimal] = min(distances, key=abs) if distances else None
+        distance: Decimal | None = min(distances, key=abs) if distances else None
 
         fired = [a.last_triggered_at for a in alerts if a.last_triggered_at]
         last_triggered_at = max(fired) if fired else None

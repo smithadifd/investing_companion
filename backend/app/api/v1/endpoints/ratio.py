@@ -1,6 +1,5 @@
 """Ratio endpoints."""
 
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,13 +28,13 @@ def get_ratio_service(
     return RatioService(db, current_user.id)
 
 
-@router.get("", response_model=DataResponse[List[RatioResponse]])
+@router.get("", response_model=DataResponse[list[RatioResponse]])
 async def list_ratios(
     favorites_only: bool = False,
-    category: Optional[str] = None,
+    category: str | None = None,
     current_user: User = Depends(get_current_user),
     service: RatioService = Depends(get_ratio_service),
-) -> DataResponse[List[RatioResponse]]:
+) -> DataResponse[list[RatioResponse]]:
     """
     List all ratios.
 
@@ -60,11 +59,11 @@ async def create_ratio(
     return DataResponse(data=ratio)
 
 
-@router.get("/quotes", response_model=DataResponse[List[RatioQuoteResponse]])
+@router.get("/quotes", response_model=DataResponse[list[RatioQuoteResponse]])
 async def get_all_ratio_quotes(
     current_user: User = Depends(get_current_user),
     service: RatioService = Depends(get_ratio_service),
-) -> DataResponse[List[RatioQuoteResponse]]:
+) -> DataResponse[list[RatioQuoteResponse]]:
     """
     Get current quotes for all ratios.
     """

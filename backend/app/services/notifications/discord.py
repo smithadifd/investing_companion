@@ -3,7 +3,6 @@
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
 import httpx
 
@@ -15,18 +14,18 @@ logger = logging.getLogger(__name__)
 class DiscordNotificationService:
     """Service for sending notifications via Discord webhooks."""
 
-    def __init__(self, webhook_url: Optional[str] = None):
+    def __init__(self, webhook_url: str | None = None):
         """Initialize the Discord notification service.
 
         Args:
             webhook_url: Discord webhook URL. Falls back to settings if not provided.
         """
         self._env_webhook_url = webhook_url or settings.DISCORD_WEBHOOK_URL
-        self._client: Optional[httpx.AsyncClient] = None
-        self._cached_db_url: Optional[str] = None
+        self._client: httpx.AsyncClient | None = None
+        self._cached_db_url: str | None = None
         self._cache_checked: bool = False
 
-    async def _get_webhook_url(self) -> Optional[str]:
+    async def _get_webhook_url(self) -> str | None:
         """Get webhook URL, checking database if not in environment."""
         # If we have an environment URL, use it (takes precedence)
         if self._env_webhook_url:
@@ -144,7 +143,7 @@ class DiscordNotificationService:
         self,
         condition_type: str,
         threshold: Decimal | float,
-        comparison_period: Optional[str] = None,
+        comparison_period: str | None = None,
     ) -> str:
         """Get human-readable condition description."""
         threshold_str = self._format_price(threshold) if condition_type not in (
@@ -171,11 +170,11 @@ class DiscordNotificationService:
         condition_type: str,
         threshold_value: Decimal | float,
         current_value: Decimal | float,
-        comparison_period: Optional[str] = None,
+        comparison_period: str | None = None,
         is_ratio: bool = False,
-        notes: Optional[str] = None,
-        condition_override: Optional[str] = None,
-    ) -> tuple[bool, Optional[str]]:
+        notes: str | None = None,
+        condition_override: str | None = None,
+    ) -> tuple[bool, str | None]:
         """Send an alert notification to Discord.
 
         Args:
@@ -281,7 +280,7 @@ class DiscordNotificationService:
             logger.error(error, exc_info=True)
             return False, error
 
-    async def send_test_notification(self) -> tuple[bool, Optional[str]]:
+    async def send_test_notification(self) -> tuple[bool, str | None]:
         """Send a test notification to verify webhook configuration.
 
         Returns:
@@ -330,7 +329,7 @@ class DiscordNotificationService:
     async def send_plain_text(
         self,
         message: str,
-    ) -> tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """Send a plain-text message to Discord (not an embed).
 
         Args:
@@ -372,7 +371,7 @@ class DiscordNotificationService:
         threshold_percent: float,
         total_items: int,
         watchlist_count: int,
-    ) -> tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """Send a daily movers summary to Discord.
 
         Args:
@@ -463,7 +462,7 @@ class DiscordNotificationService:
         self,
         events: list[dict],
         days_label: str = "Today & Tomorrow",
-    ) -> tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """Send an upcoming events notification to Discord.
 
         Args:
@@ -568,7 +567,7 @@ class DiscordNotificationService:
         alerts_triggered: int,
         active_alerts: int,
         top_triggers: list[dict],
-    ) -> tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """Send combined end-of-day summary: movers + alert activity.
 
         Returns:

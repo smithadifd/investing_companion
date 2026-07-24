@@ -3,7 +3,6 @@
 import asyncio
 import logging
 from datetime import datetime
-from typing import List, Optional, Tuple
 
 from app.schemas.market import (
     CurrencyCommodity,
@@ -70,7 +69,7 @@ class MarketService:
     def __init__(self) -> None:
         self.yahoo = YahooFinanceProvider()
 
-    async def _fetch_quote_data(self, symbol: str) -> Optional[dict]:
+    async def _fetch_quote_data(self, symbol: str) -> dict | None:
         """Fetch quote data for a symbol, returning raw dict."""
         try:
             quote = await self.yahoo.get_quote(symbol)
@@ -87,7 +86,7 @@ class MarketService:
             logger.warning(f"Failed to fetch quote for {symbol}: {e}")
         return None
 
-    async def get_indices(self) -> List[IndexQuote]:
+    async def get_indices(self) -> list[IndexQuote]:
         """Fetch major market indices."""
         tasks = [self._fetch_quote_data(symbol) for symbol, _ in MARKET_INDICES]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -108,7 +107,7 @@ class MarketService:
 
         return indices
 
-    async def get_sectors(self) -> List[SectorPerformance]:
+    async def get_sectors(self) -> list[SectorPerformance]:
         """Fetch sector performance via sector ETFs."""
         tasks = [self._fetch_quote_data(symbol) for symbol, _ in SECTOR_ETFS]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -132,7 +131,7 @@ class MarketService:
 
     async def get_movers(
         self, limit: int = 5
-    ) -> Tuple[List[MarketMover], List[MarketMover]]:
+    ) -> tuple[list[MarketMover], list[MarketMover]]:
         """Fetch top gainers and losers from popular stocks."""
         tasks = []
         for symbol in POPULAR_STOCKS:
@@ -162,7 +161,7 @@ class MarketService:
 
         return gainers, losers
 
-    async def _fetch_with_name(self, symbol: str) -> Optional[dict]:
+    async def _fetch_with_name(self, symbol: str) -> dict | None:
         """Fetch quote with name info."""
         try:
             quote = await self.yahoo.get_quote(symbol)
@@ -180,7 +179,7 @@ class MarketService:
             logger.warning(f"Failed to fetch {symbol}: {e}")
         return None
 
-    async def get_currencies_commodities(self) -> List[CurrencyCommodity]:
+    async def get_currencies_commodities(self) -> list[CurrencyCommodity]:
         """Fetch currencies and commodities data."""
         tasks = [self._fetch_quote_data(symbol) for symbol, _, _ in CURRENCIES_COMMODITIES]
         results = await asyncio.gather(*tasks, return_exceptions=True)

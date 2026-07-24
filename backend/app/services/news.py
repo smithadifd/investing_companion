@@ -3,7 +3,6 @@
 import hashlib
 import logging
 from datetime import datetime
-from typing import List, Optional
 
 from app.schemas.news import NewsItem, NewsResponse
 from app.services.cache import cache_service
@@ -16,7 +15,7 @@ SYMBOL_NEWS_CACHE_TTL = 1800  # 30 minutes
 MARKET_NEWS_CACHE_TTL = 3600  # 1 hour
 
 
-def _parse_finnhub_item(raw: dict) -> Optional[NewsItem]:
+def _parse_finnhub_item(raw: dict) -> NewsItem | None:
     """Parse a raw Finnhub news item into a NewsItem schema."""
     try:
         # Finnhub returns Unix timestamp in 'datetime' field
@@ -162,11 +161,11 @@ class NewsService:
         return response
 
     async def get_watchlist_news(
-        self, symbols: List[str], limit: int = 20
+        self, symbols: list[str], limit: int = 20
     ) -> NewsResponse:
         """Get aggregated news for multiple symbols, deduplicated by ID."""
         seen_ids: set[str] = set()
-        all_items: List[NewsItem] = []
+        all_items: list[NewsItem] = []
 
         for symbol in symbols:
             response = await self.get_symbol_news(symbol, limit=10)
@@ -184,7 +183,7 @@ class NewsService:
             cached_at=datetime.utcnow(),
         )
 
-    async def get_catalyst_summary(self, symbol: str) -> Optional[str]:
+    async def get_catalyst_summary(self, symbol: str) -> str | None:
         """Get the most recent headline for a symbol, truncated for use as a catalyst note."""
         response = await self.get_symbol_news(symbol, limit=1)
         if response.items:

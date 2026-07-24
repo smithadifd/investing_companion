@@ -25,7 +25,6 @@ import uuid
 from datetime import date as date_
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
@@ -94,7 +93,7 @@ only (short bold section labels, "-" bullets) - no headers larger than bold text
 no disclaimers, no preamble like "Here is your brief"."""
 
 
-def _today_et(now_utc: Optional[datetime] = None) -> date_:
+def _today_et(now_utc: datetime | None = None) -> date_:
     """The current trading day in US/Eastern.
 
     Accepts an optional ``now_utc`` for deterministic testing around the
@@ -139,7 +138,7 @@ def _sanitize_discord_mentions(text: str) -> str:
     return text
 
 
-def _float(value) -> Optional[float]:
+def _float(value) -> float | None:
     """JSON-safe float conversion; ``None`` passes through."""
     if value is None:
         return None
@@ -150,7 +149,7 @@ def _float(value) -> Optional[float]:
 # Context collectors - each is independently try/except-wrapped by the caller
 # (_assemble_context) so one failing source degrades only its own section.
 # ---------------------------------------------------------------------------
-async def _collect_watchlist_items(db: AsyncSession, user_id: Optional[uuid.UUID]) -> list[dict]:
+async def _collect_watchlist_items(db: AsyncSession, user_id: uuid.UUID | None) -> list[dict]:
     """One dict per watchlist item: symbol, its parsed entry zones, watchlist name.
 
     ``include_quotes=False`` - this agent fetches its own bounded, extended
@@ -200,7 +199,7 @@ async def _fetch_quotes(
     try:
         semaphore = asyncio.Semaphore(QUOTE_CONCURRENCY)
 
-        async def _one(symbol: str) -> tuple[str, Optional[dict]]:
+        async def _one(symbol: str) -> tuple[str, dict | None]:
             async with semaphore:
                 try:
                     quote = await asyncio.wait_for(
@@ -231,7 +230,7 @@ async def _fetch_quotes(
 
 def _nearest_boundary_distance(
     price: Decimal, zone: EntryZone
-) -> tuple[str, Optional[Decimal]]:
+) -> tuple[str, Decimal | None]:
     """Status + signed percent distance to the zone's NEAREST bound.
 
     Binding near-zone rule: "in_zone" when the price is within the zone's
@@ -281,7 +280,7 @@ def _compute_zone_proximity(watchlist_items: list[dict], quotes: dict[str, dict]
     return proximity
 
 
-async def _collect_alerts(db: AsyncSession, user_id: Optional[uuid.UUID]) -> list[dict]:
+async def _collect_alerts(db: AsyncSession, user_id: uuid.UUID | None) -> list[dict]:
     """Active alerts, reusing ContextPackService (shared with the dashboard/EOD wrap)."""
     alerts = await ContextPackService(db).active_alerts(user_id)
     return [
@@ -316,7 +315,7 @@ async def _collect_events(db: AsyncSession) -> list[dict]:
     ]
 
 
-async def _collect_needs_attention(db: AsyncSession, user_id: Optional[uuid.UUID]) -> list[str]:
+async def _collect_needs_attention(db: AsyncSession, user_id: uuid.UUID | None) -> list[str]:
     """Pre-formatted needs-attention lines, shared with the dashboard/morning pulse."""
     items = await build_needs_attention(db, user_id)
     return format_needs_attention_lines(items)
@@ -345,7 +344,7 @@ async def _collect_news(db: AsyncSession) -> list[dict]:
 
 
 async def _assemble_context(
-    db: AsyncSession, user_id: Optional[uuid.UUID], signal_date: date_
+    db: AsyncSession, user_id: uuid.UUID | None, signal_date: date_
 ) -> dict:
     """Build the compact structured context dict (also the persisted payload).
 
@@ -533,7 +532,7 @@ def _build_prompt(context: dict) -> str:
     )
 
 
-def _resolve_model(default_model: Optional[str]) -> str:
+def _resolve_model(default_model: str | None) -> str:
     """Resolve the Claude model id, mirroring AIService._resolve_model's precedence.
 
     Explicit per-user default -> app-level AI_DEFAULT_MODEL -> Sonnet. Any
@@ -559,7 +558,7 @@ def _usage_tokens(message) -> int:
     return int(getattr(usage, "input_tokens", 0) or 0) + int(getattr(usage, "output_tokens", 0) or 0)
 
 
-def _extract_text(message) -> Optional[str]:
+def _extract_text(message) -> str | None:
     """The first content block's text, or None on any unexpected response shape.
 
     ``message.content`` is a list of content blocks; a well-formed narrative
@@ -579,12 +578,12 @@ def _extract_text(message) -> Optional[str]:
 
 async def _compose_brief(
     db: AsyncSession,
-    user_id: Optional[uuid.UUID],
+    user_id: uuid.UUID | None,
     api_key: str,
     context: dict,
     *,
-    budget: Optional[AITokenBudget] = None,
-) -> Optional[str]:
+    budget: AITokenBudget | None = None,
+) -> str | None:
     """One LLM call that narrates the brief. Returns None on ANY failure.
 
     No row is written and nothing is posted to Discord when this returns
@@ -747,13 +746,13 @@ class StrategyBriefAgent(AdvisoryAgent):
     def __init__(
         self,
         *,
-        budget: Optional[AITokenBudget] = None,
-        discord: Optional[DiscordNotificationService] = None,
+        budget: AITokenBudget | None = None,
+        discord: DiscordNotificationService | None = None,
     ) -> None:
         self._budget = budget if budget is not None else _default_token_budget
         self._discord = discord if discord is not None else discord_service
 
-    async def execute(self, db: AsyncSession, user_id: Optional[uuid.UUID]) -> None:
+    async def execute(self, db: AsyncSession, user_id: uuid.UUID | None) -> None:
         if user_id is None:
             logger.warning("strategy_brief: execute() called without a user_id; aborting")
             return

@@ -2,7 +2,6 @@
 
 import uuid
 from datetime import datetime
-from typing import Optional
 
 import re
 
@@ -62,7 +61,7 @@ class UserResponse(UserBase):
     is_active: bool
     is_admin: bool
     created_at: datetime
-    last_login_at: Optional[datetime] = None
+    last_login_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -70,7 +69,7 @@ class UserResponse(UserBase):
 class UserUpdate(BaseModel):
     """Schema for updating user profile."""
 
-    email: Optional[EmailStr] = None
+    email: EmailStr | None = None
 
 
 class PasswordChange(BaseModel):
@@ -112,8 +111,8 @@ class SessionInfo(BaseModel):
     """Information about an active session."""
 
     id: uuid.UUID
-    user_agent: Optional[str] = None
-    ip_address: Optional[str] = None
+    user_agent: str | None = None
+    ip_address: str | None = None
     created_at: datetime
     expires_at: datetime
     is_current: bool = False
@@ -125,9 +124,9 @@ class UserSettingCreate(BaseModel):
     """Schema for creating/updating a user setting."""
 
     key: str = Field(..., max_length=100)
-    value: Optional[str] = None
+    value: str | None = None
     is_encrypted: bool = False
-    description: Optional[str] = Field(None, max_length=255)
+    description: str | None = Field(None, max_length=255)
 
 
 class UserSettingResponse(BaseModel):
@@ -135,9 +134,9 @@ class UserSettingResponse(BaseModel):
 
     id: int
     key: str
-    value: Optional[str] = None
+    value: str | None = None
     is_encrypted: bool
-    description: Optional[str] = None
+    description: str | None = None
     updated_at: datetime
 
     model_config = {"from_attributes": True}
@@ -146,18 +145,18 @@ class UserSettingResponse(BaseModel):
 class UserSettingUpdate(BaseModel):
     """Schema for updating a user setting."""
 
-    value: Optional[str] = None
-    description: Optional[str] = Field(None, max_length=255)
+    value: str | None = None
+    description: str | None = Field(None, max_length=255)
 
 
 class AppSettings(BaseModel):
     """Aggregated application settings for the settings page."""
 
-    claude_api_key: Optional[str] = None
-    alpha_vantage_api_key: Optional[str] = None
-    polygon_api_key: Optional[str] = None
-    discord_webhook_url: Optional[str] = None
-    default_watchlist_id: Optional[int] = None
+    claude_api_key: str | None = None
+    alpha_vantage_api_key: str | None = None
+    polygon_api_key: str | None = None
+    discord_webhook_url: str | None = None
+    default_watchlist_id: int | None = None
     theme: str = "dark"
     morning_notification_time: str = "08:00"
     eod_notification_time: str = "16:30"
@@ -171,21 +170,21 @@ class AppSettings(BaseModel):
 class AppSettingsUpdate(BaseModel):
     """Schema for updating application settings."""
 
-    claude_api_key: Optional[str] = None
-    alpha_vantage_api_key: Optional[str] = None
-    polygon_api_key: Optional[str] = None
-    discord_webhook_url: Optional[str] = None
-    default_watchlist_id: Optional[int] = None
-    theme: Optional[str] = None
-    morning_notification_time: Optional[str] = None
-    eod_notification_time: Optional[str] = None
-    news_agent_enabled: Optional[bool] = None
-    trade_journal_agent_enabled: Optional[bool] = None
-    strategy_agent_enabled: Optional[bool] = None
+    claude_api_key: str | None = None
+    alpha_vantage_api_key: str | None = None
+    polygon_api_key: str | None = None
+    discord_webhook_url: str | None = None
+    default_watchlist_id: int | None = None
+    theme: str | None = None
+    morning_notification_time: str | None = None
+    eod_notification_time: str | None = None
+    news_agent_enabled: bool | None = None
+    trade_journal_agent_enabled: bool | None = None
+    strategy_agent_enabled: bool | None = None
 
 
 class RegistrationStatus(BaseModel):
     """Status of registration availability."""
 
     enabled: bool
-    message: Optional[str] = None
+    message: str | None = None

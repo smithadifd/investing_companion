@@ -1,7 +1,7 @@
 """Handoff receipt schemas - the conversation->app execution record."""
 
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -14,7 +14,7 @@ class HandoffActionResult(BaseModel):
     action: str = Field(..., description="Action type, e.g. ADD_ALERT, UPDATE_WATCHLIST_ITEM")
     target: str = Field(..., description="Symbol, watchlist, or resource the action addressed")
     result: HandoffResult
-    detail: Optional[str] = Field(
+    detail: str | None = Field(
         None, description="Why it was skipped/flagged, or what was created (ids, values)"
     )
 
@@ -23,7 +23,7 @@ class HandoffReceiptCreate(BaseModel):
     """Receipt posted after executing a handoff block."""
 
     summary: str = Field(..., max_length=2000, description="One-paragraph description of the block")
-    actions: List[HandoffActionResult]
+    actions: list[HandoffActionResult]
     source: str = Field(default="investing_hub", max_length=50)
 
 
@@ -35,7 +35,7 @@ class HandoffReceiptResponse(BaseModel):
     id: int
     source: str
     summary: str
-    actions: List[HandoffActionResult]
+    actions: list[HandoffActionResult]
     applied_count: int
     skipped_count: int
     flagged_count: int

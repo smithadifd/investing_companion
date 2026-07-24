@@ -3,7 +3,6 @@
 import base64
 import logging
 import uuid
-from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from cryptography.hazmat.primitives import hashes
@@ -202,8 +201,8 @@ class SettingsService:
     async def get_setting(
         self,
         key: str,
-        user_id: Optional[uuid.UUID] = None,
-    ) -> Optional[str]:
+        user_id: uuid.UUID | None = None,
+    ) -> str | None:
         """Get a single setting value."""
         stmt = select(UserSetting).where(
             UserSetting.key == key,
@@ -222,7 +221,7 @@ class SettingsService:
                 return None
         return setting.value
 
-    async def get_owner_user_id(self) -> Optional[uuid.UUID]:
+    async def get_owner_user_id(self) -> uuid.UUID | None:
         """Resolve the install owner deterministically.
 
         Replaces the old implicit "first/oldest active user" behavior:
@@ -241,7 +240,7 @@ class SettingsService:
         )
         if explicit:
             try:
-                owner_id: Optional[uuid.UUID] = uuid.UUID(explicit)
+                owner_id: uuid.UUID | None = uuid.UUID(explicit)
             except (ValueError, TypeError):
                 owner_id = None
             if owner_id is not None:
@@ -267,9 +266,9 @@ class SettingsService:
     async def set_setting(
         self,
         key: str,
-        value: Optional[str],
-        user_id: Optional[uuid.UUID] = None,
-        description: Optional[str] = None,
+        value: str | None,
+        user_id: uuid.UUID | None = None,
+        description: str | None = None,
     ) -> UserSetting:
         """Set a setting value."""
         is_encrypted = key in self.ENCRYPTED_KEYS
@@ -309,7 +308,7 @@ class SettingsService:
     async def delete_setting(
         self,
         key: str,
-        user_id: Optional[uuid.UUID] = None,
+        user_id: uuid.UUID | None = None,
     ) -> bool:
         """Delete a setting."""
         stmt = delete(UserSetting).where(
@@ -322,7 +321,7 @@ class SettingsService:
 
     async def get_app_settings(
         self,
-        user_id: Optional[uuid.UUID] = None,
+        user_id: uuid.UUID | None = None,
     ) -> AppSettings:
         """Get all application settings as a structured object."""
         # Fetch all settings for the user
@@ -370,7 +369,7 @@ class SettingsService:
     async def update_app_settings(
         self,
         updates: AppSettingsUpdate,
-        user_id: Optional[uuid.UUID] = None,
+        user_id: uuid.UUID | None = None,
     ) -> AppSettings:
         """Update application settings."""
         if updates.claude_api_key is not None:
@@ -476,7 +475,7 @@ class SettingsService:
         return await self.get_app_settings(user_id)
 
     @staticmethod
-    def _parse_bool(value: Optional[str]) -> bool:
+    def _parse_bool(value: str | None) -> bool:
         """Parse a stored setting string as a bool. Missing/unrecognized -> False.
 
         Booleans are stored as the literal strings "true"/"false" (see
@@ -492,7 +491,7 @@ class SettingsService:
         """Render a bool for storage as a ``UserSetting.value`` string."""
         return "true" if value else "false"
 
-    def _mask_key(self, key: Optional[str]) -> Optional[str]:
+    def _mask_key(self, key: str | None) -> str | None:
         """Mask an API key for display (show first/last 4 chars)."""
         if not key:
             return None
@@ -500,7 +499,7 @@ class SettingsService:
             return "*" * len(key)
         return f"{key[:4]}...{key[-4:]}"
 
-    def _mask_url(self, url: Optional[str]) -> Optional[str]:
+    def _mask_url(self, url: str | None) -> str | None:
         """Mask a URL for display."""
         if not url:
             return None
@@ -512,7 +511,7 @@ class SettingsService:
     async def get_unmasked_setting(
         self,
         key: str,
-        user_id: Optional[uuid.UUID] = None,
-    ) -> Optional[str]:
+        user_id: uuid.UUID | None = None,
+    ) -> str | None:
         """Get unmasked setting value for internal use."""
         return await self.get_setting(key, user_id)

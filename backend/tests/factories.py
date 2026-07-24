@@ -3,7 +3,6 @@
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,8 +46,8 @@ async def create_test_equity(
     name: str = "Test Corp",
     exchange: str = "NASDAQ",
     asset_type: str = "stock",
-    sector: Optional[str] = "Technology",
-    industry: Optional[str] = "Software",
+    sector: str | None = "Technology",
+    industry: str | None = "Software",
     country: str = "US",
     currency: str = "USD",
 ) -> Equity:
@@ -72,9 +71,9 @@ async def create_test_watchlist(
     db: AsyncSession,
     *,
     name: str = "Test Watchlist",
-    description: Optional[str] = None,
-    user_id: Optional[uuid.UUID] = None,
-    equities: Optional[list[Equity]] = None,
+    description: str | None = None,
+    user_id: uuid.UUID | None = None,
+    equities: list[Equity] | None = None,
 ) -> Watchlist:
     """Create a watchlist, optionally with items."""
     watchlist = Watchlist(
@@ -104,16 +103,16 @@ async def create_test_alert(
     name: str = "Test Alert",
     condition_type: str = "above",
     threshold_value: float = 100.0,
-    comparison_period: Optional[str] = None,
+    comparison_period: str | None = None,
     cooldown_minutes: int = 60,
     is_active: bool = True,
-    last_checked_value: Optional[float] = None,
-    was_above_threshold: Optional[bool] = None,
-    last_triggered_at: Optional[datetime] = None,
-    confirm_checks: Optional[int] = None,
-    watchlist_item_id: Optional[int] = None,
-    zone_state: Optional[dict] = None,
-    user_id: Optional[uuid.UUID] = None,
+    last_checked_value: float | None = None,
+    was_above_threshold: bool | None = None,
+    last_triggered_at: datetime | None = None,
+    confirm_checks: int | None = None,
+    watchlist_item_id: int | None = None,
+    zone_state: dict | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> Alert:
     """Create an alert attached to an equity.
 
@@ -154,11 +153,11 @@ async def create_test_watchlist_item(
     watchlist: Watchlist,
     equity: Equity,
     *,
-    notes: Optional[str] = None,
-    target_price: Optional[Decimal] = None,
-    thesis: Optional[str] = None,
-    entry_zones: Optional[list] = None,
-    catalyst_tags: Optional[list] = None,
+    notes: str | None = None,
+    target_price: Decimal | None = None,
+    thesis: str | None = None,
+    entry_zones: list | None = None,
+    catalyst_tags: list | None = None,
     track_calendar: bool = True,
 ) -> WatchlistItem:
     """Create a watchlist item (entry_zones as raw JSON: [{tier, low, high}])."""
@@ -184,8 +183,8 @@ async def create_test_lesson(
     *,
     thesis_outcome: str = "wrong",
     lesson: str = "Sized too big into earnings.",
-    tags: Optional[list] = None,
-    trade_id: Optional[int] = None,
+    tags: list | None = None,
+    trade_id: int | None = None,
 ) -> Lesson:
     """Create a lesson record (tags as a lowercase string list)."""
     record = Lesson(
@@ -206,9 +205,9 @@ async def create_test_account(
     user: User,
     *,
     name: str = "Roth",
-    broker: Optional[str] = "Schwab",
-    account_type: Optional[str] = "roth",
-    risk_profile: Optional[str] = "aggressive",
+    broker: str | None = "Schwab",
+    account_type: str | None = "roth",
+    risk_profile: str | None = "aggressive",
     display_order: int = 0,
 ) -> Account:
     """Create a brokerage account owned by a user."""
@@ -234,9 +233,9 @@ async def create_test_trade(
     quantity: Decimal = Decimal("10"),
     price: Decimal = Decimal("100.00"),
     fees: Decimal = Decimal("0"),
-    executed_at: Optional[datetime] = None,
-    notes: Optional[str] = None,
-    account_id: Optional[int] = None,
+    executed_at: datetime | None = None,
+    notes: str | None = None,
+    account_id: int | None = None,
 ) -> Trade:
     """Create a trade record."""
     trade = Trade(

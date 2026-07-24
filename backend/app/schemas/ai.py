@@ -2,7 +2,6 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -35,18 +34,18 @@ class EquityContext(BaseModel):
 
     symbol: str
     name: str
-    price: Optional[float] = None
-    change_percent: Optional[float] = None
-    market_cap: Optional[int] = None
-    pe_ratio: Optional[float] = None
-    forward_pe: Optional[float] = None
-    eps_ttm: Optional[float] = None
-    dividend_yield: Optional[float] = None
-    beta: Optional[float] = None
-    week_52_high: Optional[float] = None
-    week_52_low: Optional[float] = None
-    sector: Optional[str] = None
-    industry: Optional[str] = None
+    price: float | None = None
+    change_percent: float | None = None
+    market_cap: int | None = None
+    pe_ratio: float | None = None
+    forward_pe: float | None = None
+    eps_ttm: float | None = None
+    dividend_yield: float | None = None
+    beta: float | None = None
+    week_52_high: float | None = None
+    week_52_low: float | None = None
+    sector: str | None = None
+    industry: str | None = None
 
 
 class RatioContext(BaseModel):
@@ -55,28 +54,28 @@ class RatioContext(BaseModel):
     name: str
     numerator_symbol: str
     denominator_symbol: str
-    current_value: Optional[float] = None
-    change_1d: Optional[float] = None
-    change_1m: Optional[float] = None
-    description: Optional[str] = None
+    current_value: float | None = None
+    change_1d: float | None = None
+    change_1m: float | None = None
+    description: str | None = None
 
 
 class WatchlistHolding(BaseModel):
     """A single watchlist member, condensed for AI context."""
 
     symbol: str
-    name: Optional[str] = None
-    price: Optional[float] = None
-    change_percent: Optional[float] = None
-    target_price: Optional[float] = None
-    thesis: Optional[str] = None
+    name: str | None = None
+    price: float | None = None
+    change_percent: float | None = None
+    target_price: float | None = None
+    thesis: str | None = None
 
 
 class WatchlistContext(BaseModel):
     """Context data for watchlist analysis."""
 
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     holdings: list[WatchlistHolding] = []
 
 
@@ -85,12 +84,12 @@ class AIAnalysisRequest(BaseModel):
 
     analysis_type: AnalysisType
     prompt: str = Field(..., min_length=1, max_length=2000)
-    symbol: Optional[str] = None  # For equity analysis
-    ratio_id: Optional[int] = None  # For ratio analysis
-    watchlist_id: Optional[int] = None  # For watchlist analysis
+    symbol: str | None = None  # For equity analysis
+    ratio_id: int | None = None  # For ratio analysis
+    watchlist_id: int | None = None  # For watchlist analysis
     # None → resolved server-side to the configured default (settings.AI_DEFAULT_MODEL).
     # This keeps the default configurable and un-hardcodable to an EOL id.
-    model: Optional[AIModel] = None
+    model: AIModel | None = None
     include_context: bool = True
 
 
@@ -101,7 +100,7 @@ class AIAnalysisResponse(BaseModel):
     prompt: str
     response: str
     model: str
-    context_summary: Optional[str] = None
+    context_summary: str | None = None
     timestamp: datetime
     cached: bool = False  # True when served from the Redis response cache
 
@@ -111,12 +110,12 @@ class AISettingsResponse(BaseModel):
 
     has_api_key: bool
     default_model: str
-    custom_instructions: Optional[str] = None
+    custom_instructions: str | None = None
 
 
 class AISettingsUpdate(BaseModel):
     """Request to update AI settings."""
 
-    api_key: Optional[str] = None
-    default_model: Optional[str] = None
-    custom_instructions: Optional[str] = None
+    api_key: str | None = None
+    default_model: str | None = None
+    custom_instructions: str | None = None

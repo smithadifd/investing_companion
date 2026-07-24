@@ -11,7 +11,6 @@ and at most a few minutes stale.
 import logging
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy import or_, select
@@ -163,10 +162,10 @@ class ContextPackService:
 
     @staticmethod
     def _value_by_symbol(
-        positions: List[PackPosition],
-    ) -> dict[str, Optional[Decimal]]:
+        positions: list[PackPosition],
+    ) -> dict[str, Decimal | None]:
         """Fold per-account positions into one current value per symbol."""
-        value_by_symbol: dict[str, Optional[Decimal]] = {}
+        value_by_symbol: dict[str, Decimal | None] = {}
         for p in positions:
             if p.current_value is not None:
                 value_by_symbol[p.symbol] = (
@@ -178,10 +177,10 @@ class ContextPackService:
 
     async def _exposures(
         self,
-        value_by_symbol: dict[str, Optional[Decimal]],
-        portfolio_value: Optional[Decimal],
-        user_id: Optional[UUID] = None,
-    ) -> List[PackExposure]:
+        value_by_symbol: dict[str, Decimal | None],
+        portfolio_value: Decimal | None,
+        user_id: UUID | None = None,
+    ) -> list[PackExposure]:
         """Position value per theme watchlist (overlapping by design)."""
         if not value_by_symbol:
             return []
@@ -225,8 +224,8 @@ class ContextPackService:
         return exposures
 
     async def active_alerts(
-        self, user_id: Optional[UUID] = None
-    ) -> List[PackAlert]:
+        self, user_id: UUID | None = None
+    ) -> list[PackAlert]:
         stmt = (
             select(Alert)
             .options(selectinload(Alert.equity), selectinload(Alert.ratio))
@@ -238,7 +237,7 @@ class ContextPackService:
         result = await self.db.execute(stmt)
         alerts = result.scalars().all()
 
-        packed: List[PackAlert] = []
+        packed: list[PackAlert] = []
         recently = datetime.now(timezone.utc) - timedelta(days=2)
         for a in alerts:
             symbol = (
@@ -246,7 +245,7 @@ class ContextPackService:
                 if a.equity
                 else (a.ratio.name if a.ratio else "?")
             )
-            distance: Optional[Decimal] = None
+            distance: Decimal | None = None
             threshold = Decimal(str(a.threshold_value))
             last = Decimal(str(a.last_checked_value)) if a.last_checked_value else None
             # No single threshold for percent conditions or entry zones
@@ -282,8 +281,8 @@ class ContextPackService:
         return packed
 
     async def _recent_triggers(
-        self, user_id: Optional[UUID] = None, days: int = 7
-    ) -> List[PackTrigger]:
+        self, user_id: UUID | None = None, days: int = 7
+    ) -> list[PackTrigger]:
         since = datetime.now(timezone.utc) - timedelta(days=days)
         stmt = (
             select(AlertHistory)
@@ -309,8 +308,8 @@ class ContextPackService:
         ]
 
     async def watchlist_targets(
-        self, user_id: Optional[UUID] = None
-    ) -> List[PackWatchlistItem]:
+        self, user_id: UUID | None = None
+    ) -> list[PackWatchlistItem]:
         """Items with a target price or entry zones, plus status vs the latest close."""
         stmt = (
             select(WatchlistItem, Watchlist.name, Equity)
@@ -331,7 +330,7 @@ class ContextPackService:
         result = await self.db.execute(stmt)
         rows = result.all()
 
-        packed: List[PackWatchlistItem] = []
+        packed: list[PackWatchlistItem] = []
         for item, wl_name, equity in rows:
             latest_close = await self.db.scalar(
                 select(PriceHistory.close)
@@ -365,7 +364,7 @@ class ContextPackService:
             )
         return packed
 
-    async def _upcoming_events(self, user_id: UUID) -> List[PackEvent]:
+    async def _upcoming_events(self, user_id: UUID) -> list[PackEvent]:
         response = await self.event_service.get_upcoming_events(
             days_ahead=14, user_id=user_id, limit=30
         )
@@ -387,13 +386,13 @@ class ContextPackService:
 def render_markdown(pack: ContextPack) -> str:
     """Render a pack as compact markdown for pasting into an AI conversation."""
 
-    def money(v: Optional[Decimal]) -> str:
+    def money(v: Decimal | None) -> str:
         return f"${v:,.2f}" if v is not None else "?"
 
-    def pct(v: Optional[Decimal]) -> str:
+    def pct(v: Decimal | None) -> str:
         return f"{v:+.1f}%" if v is not None else "?"
 
-    lines: List[str] = [
+    lines: list[str] = [
         f"# IC Context Pack (v{pack.schema_version}, actions v{pack.advisor_actions_version})",
         f"Generated: {pack.generated_at.strftime('%Y-%m-%d %H:%M UTC')}",
         "",

@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import abc
 import uuid
-from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,12 +34,12 @@ class AdvisoryAgent(abc.ABC):
     agent_flag: AgentFlag
 
     async def guard(
-        self, db: AsyncSession, user_id: Optional[uuid.UUID]
+        self, db: AsyncSession, user_id: uuid.UUID | None
     ) -> AgentGuardResult:
         """Run the shared preconditions guard for this agent."""
         return await check_agent_preconditions(db, user_id, agent_flag=self.agent_flag)
 
     @abc.abstractmethod
-    async def execute(self, db: AsyncSession, user_id: Optional[uuid.UUID]) -> None:
+    async def execute(self, db: AsyncSession, user_id: uuid.UUID | None) -> None:
         """Run the agent's actual logic. Implemented by a follow-up sub-PR."""
         raise NotImplementedError

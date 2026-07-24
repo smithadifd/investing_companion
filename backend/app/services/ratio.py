@@ -4,7 +4,6 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime
-from typing import List, Optional
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,7 +87,7 @@ class RatioService:
     """Service for ratio-related operations."""
 
     def __init__(
-        self, db: AsyncSession, user_id: Optional[uuid.UUID] = None
+        self, db: AsyncSession, user_id: uuid.UUID | None = None
     ) -> None:
         self.db = db
         self.user_id = user_id
@@ -134,8 +133,8 @@ class RatioService:
         await self.db.commit()
 
     async def list_ratios(
-        self, favorites_only: bool = False, category: Optional[str] = None
-    ) -> List[RatioResponse]:
+        self, favorites_only: bool = False, category: str | None = None
+    ) -> list[RatioResponse]:
         """List all ratios, optionally filtered."""
         stmt = self._scope(select(Ratio))
 
@@ -151,7 +150,7 @@ class RatioService:
 
         return [RatioResponse.model_validate(r) for r in ratios]
 
-    async def get_ratio(self, ratio_id: int) -> Optional[RatioResponse]:
+    async def get_ratio(self, ratio_id: int) -> RatioResponse | None:
         """Get a single ratio by ID."""
         stmt = self._scope(select(Ratio).where(Ratio.id == ratio_id))
         result = await self.db.execute(stmt)
@@ -181,7 +180,7 @@ class RatioService:
 
     async def update_ratio(
         self, ratio_id: int, data: RatioUpdate
-    ) -> Optional[RatioResponse]:
+    ) -> RatioResponse | None:
         """Update a ratio (only certain fields for system ratios)."""
         stmt = self._scope(select(Ratio).where(Ratio.id == ratio_id))
         result = await self.db.execute(stmt)
@@ -225,7 +224,7 @@ class RatioService:
 
     async def get_ratio_history(
         self, ratio_id: int, period: str = "1y"
-    ) -> Optional[RatioHistoryResponse]:
+    ) -> RatioHistoryResponse | None:
         """Get historical ratio values."""
         ratio = await self.get_ratio(ratio_id)
         if not ratio:
@@ -286,7 +285,7 @@ class RatioService:
             change_1m=change_1m,
         )
 
-    async def get_ratio_quote(self, ratio_id: int) -> Optional[RatioQuoteResponse]:
+    async def get_ratio_quote(self, ratio_id: int) -> RatioQuoteResponse | None:
         """Get current ratio quote."""
         stmt = self._scope(select(Ratio).where(Ratio.id == ratio_id))
         result = await self.db.execute(stmt)
@@ -327,7 +326,7 @@ class RatioService:
             timestamp=datetime.utcnow(),
         )
 
-    async def get_all_ratio_quotes(self) -> List[RatioQuoteResponse]:
+    async def get_all_ratio_quotes(self) -> list[RatioQuoteResponse]:
         """Get quotes for all ratios."""
         ratios = await self.list_ratios()
         tasks = [self.get_ratio_quote(r.id) for r in ratios]

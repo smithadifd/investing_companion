@@ -26,7 +26,6 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import date, time
-from typing import Optional
 
 import httpx
 
@@ -68,7 +67,7 @@ class MacroEventSpec:
     title: str
     description: str
     importance: str
-    event_time: Optional[time] = None
+    event_time: time | None = None
     all_day: bool = False
     is_confirmed: bool = True
 
@@ -121,7 +120,7 @@ def _slugify_ordinal(label: str) -> str:
 
 
 def macro_recurrence_key(
-    event_type: EventType, d: date, ordinal: Optional[str] = None
+    event_type: EventType, d: date, ordinal: str | None = None
 ) -> str:
     """Build the dedup key for a macro event: ``<type>_<year>_<month>``, or
     ``<type>_<year>_<month>_<ordinal>`` when ``ordinal`` is given.
@@ -168,7 +167,7 @@ def gdp_estimate_ordinal(d: date) -> str:
 class FredCalendarProvider:
     """Fetches scheduled macro-release dates from the FRED API."""
 
-    def __init__(self, api_key: Optional[str] = None) -> None:
+    def __init__(self, api_key: str | None = None) -> None:
         self._api_key = api_key if api_key is not None else settings.FRED_API_KEY
 
     @property

@@ -19,7 +19,6 @@ buy-the-dip case), and below the low bound for low-only zones.
 """
 
 from decimal import Decimal
-from typing import List, Optional, Tuple
 
 from app.schemas.watchlist import EntryZone, EntryZoneStatus
 
@@ -27,7 +26,7 @@ from app.schemas.watchlist import EntryZone, EntryZoneStatus
 APPROACHING_THRESHOLD_PCT = Decimal("3")
 
 
-def parse_zones(raw: Optional[list]) -> List[EntryZone]:
+def parse_zones(raw: list | None) -> list[EntryZone]:
     """Parse the JSONB list stored on a watchlist item (bounds are strings)."""
     if not raw:
         return []
@@ -54,7 +53,7 @@ def is_in_zone(price: Decimal, zone: EntryZone) -> bool:
 
 def zone_status(
     price: Decimal, zone: EntryZone
-) -> Tuple[str, Optional[Decimal]]:
+) -> tuple[str, Decimal | None]:
     """Status plus signed percent distance to the entry edge.
 
     Distance is the percent move from the price to the edge (negative =
@@ -88,10 +87,10 @@ def zone_status(
 
 
 def build_zone_statuses(
-    price: Optional[Decimal], zones: List[EntryZone]
-) -> List[EntryZoneStatus]:
+    price: Decimal | None, zones: list[EntryZone]
+) -> list[EntryZoneStatus]:
     """Zone statuses for a price; status 'unknown' when no price is available."""
-    statuses: List[EntryZoneStatus] = []
+    statuses: list[EntryZoneStatus] = []
     for zone in zones:
         if price is None:
             status, distance = "unknown", None

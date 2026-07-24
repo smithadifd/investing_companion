@@ -5,7 +5,6 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import List, Optional, Tuple
 
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
@@ -83,7 +82,7 @@ class AlertService:
     """Service for alert-related operations."""
 
     def __init__(
-        self, db: AsyncSession, user_id: Optional[uuid.UUID] = None
+        self, db: AsyncSession, user_id: uuid.UUID | None = None
     ) -> None:
         self.db = db
         self.user_id = user_id
@@ -106,9 +105,9 @@ class AlertService:
     async def list_alerts(
         self,
         active_only: bool = False,
-        equity_id: Optional[int] = None,
-        ratio_id: Optional[int] = None,
-    ) -> List[AlertResponse]:
+        equity_id: int | None = None,
+        ratio_id: int | None = None,
+    ) -> list[AlertResponse]:
         """List all alerts, optionally filtered."""
         stmt = self._scope(select(Alert))
 
@@ -127,7 +126,7 @@ class AlertService:
 
         return [await self._enrich_alert(a) for a in alerts]
 
-    async def get_alert(self, alert_id: int) -> Optional[AlertResponse]:
+    async def get_alert(self, alert_id: int) -> AlertResponse | None:
         """Get a single alert by ID."""
         stmt = self._scope(select(Alert).where(Alert.id == alert_id))
         result = await self.db.execute(stmt)
@@ -139,7 +138,7 @@ class AlertService:
 
     async def get_alert_with_history(
         self, alert_id: int, history_limit: int = 10
-    ) -> Optional[AlertWithHistoryResponse]:
+    ) -> AlertWithHistoryResponse | None:
         """Get an alert with its recent history."""
         stmt = self._scope(select(Alert).where(Alert.id == alert_id))
         result = await self.db.execute(stmt)
@@ -219,7 +218,7 @@ class AlertService:
 
     async def update_alert(
         self, alert_id: int, data: AlertUpdate
-    ) -> Optional[AlertResponse]:
+    ) -> AlertResponse | None:
         """Update an alert."""
         stmt = self._scope(select(Alert).where(Alert.id == alert_id))
         result = await self.db.execute(stmt)
@@ -289,7 +288,7 @@ class AlertService:
         await self.db.commit()
         return True
 
-    async def toggle_alert(self, alert_id: int) -> Optional[AlertResponse]:
+    async def toggle_alert(self, alert_id: int) -> AlertResponse | None:
         """Toggle an alert's active state."""
         stmt = self._scope(select(Alert).where(Alert.id == alert_id))
         result = await self.db.execute(stmt)
@@ -306,7 +305,7 @@ class AlertService:
 
     async def get_alert_history(
         self, alert_id: int, limit: int = 50
-    ) -> List[AlertHistoryResponse]:
+    ) -> list[AlertHistoryResponse]:
         """Get history for a specific alert."""
         stmt = (
             select(AlertHistory)
@@ -324,7 +323,7 @@ class AlertService:
 
     async def get_all_history(
         self, limit: int = 100, offset: int = 0
-    ) -> List[AlertHistoryResponse]:
+    ) -> list[AlertHistoryResponse]:
         """Get all alert history."""
         stmt = select(AlertHistory)
         if self.user_id is not None:
@@ -425,7 +424,7 @@ class AlertService:
             should_notify=should_notify,
         )
 
-    async def process_alert(self, alert: Alert) -> Tuple[bool, Optional[str]]:
+    async def process_alert(self, alert: Alert) -> tuple[bool, str | None]:
         """Process an alert: check condition, trigger if needed, notify.
 
         Returns (was_triggered, error_message)
@@ -607,9 +606,9 @@ class AlertService:
         condition_type: str,
         threshold_value: Decimal,
         current_value: Decimal,
-        comparison_period: Optional[str] = None,
-        notes: Optional[str] = None,
-        condition_override: Optional[str] = None,
+        comparison_period: str | None = None,
+        notes: str | None = None,
+        condition_override: str | None = None,
     ) -> dict:
         """Snapshot everything the sender needs, JSON-safe (Decimals -> str).
 
@@ -689,7 +688,7 @@ class AlertService:
         self,
         limit: int = DELIVERY_BATCH_LIMIT,
         lease_seconds: int = DELIVERY_LEASE_SECONDS,
-    ) -> List[AlertDelivery]:
+    ) -> list[AlertDelivery]:
         """Atomically lease a batch of due pending deliveries.
 
         ``FOR UPDATE SKIP LOCKED`` makes concurrent workers claim disjoint
@@ -973,7 +972,7 @@ class AlertService:
             target=target_info,
         )
 
-    async def _get_target_info(self, alert: Alert) -> Optional[AlertTargetInfo]:
+    async def _get_target_info(self, alert: Alert) -> AlertTargetInfo | None:
         """Get target info for an alert."""
         if alert.equity_id:
             stmt = select(Equity).where(Equity.id == alert.equity_id)
@@ -1001,7 +1000,7 @@ class AlertService:
 
     async def _get_current_value(
         self, alert: Alert
-    ) -> Tuple[Optional[Decimal], Optional[AlertTargetInfo], Optional[Decimal], Optional[Decimal]]:
+    ) -> tuple[Decimal | None, AlertTargetInfo | None, Decimal | None, Decimal | None]:
         """Get current price/ratio value for alert evaluation.
 
         Returns (current_value, target_info, intraday_high, intraday_low).
@@ -1044,9 +1043,9 @@ class AlertService:
         self,
         alert: Alert,
         current_value: Decimal,
-        intraday_high: Optional[Decimal] = None,
-        intraday_low: Optional[Decimal] = None,
-    ) -> Tuple[bool, str]:
+        intraday_high: Decimal | None = None,
+        intraday_low: Decimal | None = None,
+    ) -> tuple[bool, str]:
         """Evaluate if alert condition is met.
 
         For crossing/threshold alerts, intraday high/low are used to detect
@@ -1171,7 +1170,7 @@ class AlertService:
         return False, f"Unknown condition type: {condition}"
 
     @staticmethod
-    def _next_sustained_count(current_count: Optional[int], beyond: bool) -> int:
+    def _next_sustained_count(current_count: int | None, beyond: bool) -> int:
         """The consecutive-checks-met counter after one more check.
 
         Single source of truth for the sustained-confirmation counter. Both
@@ -1183,7 +1182,7 @@ class AlertService:
 
     def _evaluate_sustained(
         self, alert: Alert, current_value: Decimal, above: bool
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """Sustained crossing: the condition must hold for N consecutive checks.
 
         Uses the check-time value only — no intraday extremes. An intraday
@@ -1245,7 +1244,7 @@ class AlertService:
     #   deeper tier firing - or the price passing through to one - never
     #   re-fires this tier.
 
-    async def _get_zone_item(self, alert: Alert) -> Optional[WatchlistItem]:
+    async def _get_zone_item(self, alert: Alert) -> WatchlistItem | None:
         if not alert.watchlist_item_id:
             return None
         return await self.db.scalar(
@@ -1254,7 +1253,7 @@ class AlertService:
 
     def _evaluate_zone_transitions(
         self, alert: Alert, zones: list, price: Decimal
-    ) -> Tuple[dict, list]:
+    ) -> tuple[dict, list]:
         """Compute the next zone_state and the tiers that fire this check.
 
         Pure state-transition logic; persistence and notifications happen in
@@ -1297,7 +1296,7 @@ class AlertService:
         return new_state, fired
 
     def _zone_cooldown_passed(
-        self, alert: Alert, last_fired_at: Optional[str]
+        self, alert: Alert, last_fired_at: str | None
     ) -> bool:
         """Per-tier cooldown so one tier firing never blocks another."""
         if not last_fired_at:
@@ -1364,7 +1363,7 @@ class AlertService:
             should_notify=bool(fired),
         )
 
-    async def _process_zone_alert(self, alert: Alert) -> Tuple[bool, Optional[str]]:
+    async def _process_zone_alert(self, alert: Alert) -> tuple[bool, str | None]:
         """Process an entry_zone alert: fire per tier, advance dedup state."""
         try:
             item = await self._get_zone_item(alert)
@@ -1467,7 +1466,7 @@ class AlertService:
 
     async def _get_historical_reference_value(
         self, alert: Alert
-    ) -> Optional[Decimal]:
+    ) -> Decimal | None:
         """Get historical reference value for percent change alerts.
 
         Maps comparison_period to a lookback duration, then queries price_history
@@ -1547,7 +1546,7 @@ class AlertService:
 
     async def _get_closest_close(
         self, equity_id: int, target_time: datetime
-    ) -> Optional[Decimal]:
+    ) -> Decimal | None:
         """Get the close price nearest to target_time for an equity.
 
         Searches within a +/- 3 day window around the target time to handle
@@ -1573,7 +1572,7 @@ class AlertService:
             return None
         return Decimal(str(row.close))
 
-    async def _get_period_high(self, alert: Alert) -> Optional[Decimal]:
+    async def _get_period_high(self, alert: Alert) -> Decimal | None:
         """Get the highest stored price over the alert's comparison_period.
 
         Used by percent_from_high. Equity alerts only - ratio alerts would
@@ -1632,6 +1631,6 @@ class AlertService:
         )
         return datetime.now(timezone.utc) >= cooldown_end
 
-    async def _get_or_create_equity(self, symbol: str) -> Optional[Equity]:
+    async def _get_or_create_equity(self, symbol: str) -> Equity | None:
         """Get or create equity from symbol. Delegates to EquityService."""
         return await self.equity_service.get_or_create_equity(symbol)

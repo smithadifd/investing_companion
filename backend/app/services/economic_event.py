@@ -3,7 +3,7 @@
 import logging
 import uuid
 from datetime import date, timedelta
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,11 +76,11 @@ class EconomicEventService:
 
     async def list_events(
         self,
-        filters: Optional[EventFilters] = None,
-        user_id: Optional[uuid.UUID] = None,
+        filters: EventFilters | None = None,
+        user_id: uuid.UUID | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[EconomicEventResponse]:
+    ) -> list[EconomicEventResponse]:
         """List events with optional filtering."""
         stmt = select(EconomicEvent)
 
@@ -140,8 +140,8 @@ class EconomicEventService:
         return [await self._to_response(e) for e in events]
 
     async def get_event(
-        self, event_id: uuid.UUID, user_id: Optional[uuid.UUID] = None
-    ) -> Optional[EconomicEventResponse]:
+        self, event_id: uuid.UUID, user_id: uuid.UUID | None = None
+    ) -> EconomicEventResponse | None:
         """Get a single event by ID."""
         stmt = select(EconomicEvent).where(EconomicEvent.id == event_id)
         result = await self.db.execute(stmt)
@@ -195,7 +195,7 @@ class EconomicEventService:
         event_id: uuid.UUID,
         data: EconomicEventUpdate,
         user_id: uuid.UUID,
-    ) -> Optional[EconomicEventResponse]:
+    ) -> EconomicEventResponse | None:
         """Update an event (only custom events can be updated)."""
         stmt = select(EconomicEvent).where(EconomicEvent.id == event_id)
         result = await self.db.execute(stmt)
@@ -268,8 +268,8 @@ class EconomicEventService:
         self,
         year: int,
         month: int,
-        user_id: Optional[uuid.UUID] = None,
-        filters: Optional[EventFilters] = None,
+        user_id: uuid.UUID | None = None,
+        filters: EventFilters | None = None,
     ) -> CalendarMonth:
         """Get events organized by day for a month."""
         # Calculate date range
@@ -328,8 +328,8 @@ class EconomicEventService:
     async def get_upcoming_events(
         self,
         days_ahead: int = 7,
-        user_id: Optional[uuid.UUID] = None,
-        filters: Optional[EventFilters] = None,
+        user_id: uuid.UUID | None = None,
+        filters: EventFilters | None = None,
         limit: int = 20,
     ) -> UpcomingEventsResponse:
         """Get upcoming events for the next N days."""
@@ -352,7 +352,7 @@ class EconomicEventService:
         equity_id: int,
         include_past: bool = False,
         limit: int = 10,
-    ) -> List[EconomicEventResponse]:
+    ) -> list[EconomicEventResponse]:
         """Get events for a specific equity."""
         filters = EventFilters(
             equity_id=equity_id,
@@ -365,7 +365,7 @@ class EconomicEventService:
         symbol: str,
         include_past: bool = False,
         limit: int = 10,
-    ) -> List[EconomicEventResponse]:
+    ) -> list[EconomicEventResponse]:
         """Get events for a specific equity symbol."""
         equity = await self._get_equity_by_symbol(symbol)
         if not equity:
@@ -375,9 +375,9 @@ class EconomicEventService:
     async def get_watchlist_events(
         self,
         user_id: uuid.UUID,
-        watchlist_id: Optional[int] = None,
+        watchlist_id: int | None = None,
         days_ahead: int = 14,
-    ) -> List[EconomicEventResponse]:
+    ) -> list[EconomicEventResponse]:
         """Get upcoming events for watchlist equities."""
         filters = EventFilters(
             watchlist_id=watchlist_id,
@@ -394,8 +394,8 @@ class EconomicEventService:
     # -------------------------------------------------------------------------
 
     async def refresh_equity_events(
-        self, symbol: str, equity_id: Optional[int] = None
-    ) -> List[EconomicEventResponse]:
+        self, symbol: str, equity_id: int | None = None
+    ) -> list[EconomicEventResponse]:
         """Refresh events for an equity from Yahoo Finance.
 
         Creates or updates earnings and dividend events.
@@ -459,7 +459,7 @@ class EconomicEventService:
         return created_events
 
     async def refresh_watchlist_events(
-        self, user_id: uuid.UUID, watchlist_id: Optional[int] = None
+        self, user_id: uuid.UUID, watchlist_id: int | None = None
     ) -> int:
         """Refresh events for all equities in user's watchlists.
 
@@ -669,7 +669,7 @@ class EconomicEventService:
     # -------------------------------------------------------------------------
 
     async def get_stats(
-        self, user_id: Optional[uuid.UUID] = None
+        self, user_id: uuid.UUID | None = None
     ) -> EventStats:
         """Get event statistics."""
         today = date.today()
@@ -771,8 +771,8 @@ class EconomicEventService:
         )
 
     async def _get_watchlist_equity_ids(
-        self, user_id: Optional[uuid.UUID], watchlist_id: Optional[int] = None
-    ) -> List[int]:
+        self, user_id: uuid.UUID | None, watchlist_id: int | None = None
+    ) -> list[int]:
         """Get equity IDs from user's watchlist(s)."""
         if not user_id:
             return []
@@ -788,13 +788,13 @@ class EconomicEventService:
         result = await self.db.execute(stmt)
         return [row[0] for row in result.all() if row[0] is not None]
 
-    async def _get_equity_by_symbol(self, symbol: str) -> Optional[Equity]:
+    async def _get_equity_by_symbol(self, symbol: str) -> Equity | None:
         """Get equity by symbol."""
         stmt = select(Equity).where(Equity.symbol == symbol.upper())
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def _get_or_create_equity(self, symbol: str) -> Optional[Equity]:
+    async def _get_or_create_equity(self, symbol: str) -> Equity | None:
         """Get or create equity by symbol. Delegates to EquityService."""
         return await self.equity_service.get_or_create_equity(symbol)
 
@@ -806,8 +806,8 @@ class EconomicEventService:
         title: str,
         importance: str = "medium",
         is_confirmed: bool = True,
-        actual_value: Optional[float] = None,
-    ) -> Optional[EconomicEvent]:
+        actual_value: float | None = None,
+    ) -> EconomicEvent | None:
         """Create or update an equity event (upsert by unique constraint)."""
         # Check if exists
         stmt = select(EconomicEvent).where(

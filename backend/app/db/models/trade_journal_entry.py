@@ -9,7 +9,7 @@ lives here yet.
 """
 
 import uuid
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Text, UniqueConstraint
@@ -46,7 +46,7 @@ class TradeJournalEntry(Base, TimestampMixin):
     # Structured, agent-defined metrics backing the summary (entry/exit scores,
     # win-rate, hold-time deltas, etc.). Shape is owned by the follow-up agent
     # PR, not fixed here.
-    metrics: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    metrics: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
         # One review per user per exact window - the agent upserts rather than

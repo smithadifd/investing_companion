@@ -23,7 +23,6 @@ import io
 import logging
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import List, Optional
 
 import httpx
 
@@ -74,7 +73,7 @@ def _to_stooq_symbol(symbol: str) -> str:
     return s
 
 
-def _safe_decimal(value: str) -> Optional[Decimal]:
+def _safe_decimal(value: str) -> Decimal | None:
     if value is None:
         return None
     value = value.strip()
@@ -86,12 +85,12 @@ def _safe_decimal(value: str) -> Optional[Decimal]:
         return None
 
 
-def _safe_int(value: str) -> Optional[int]:
+def _safe_int(value: str) -> int | None:
     d = _safe_decimal(value)
     return int(d) if d is not None else None
 
 
-def _period_start(period: str) -> Optional[date]:
+def _period_start(period: str) -> date | None:
     """Lower-bound date for a period string, or ``None`` for no bound."""
     period = (period or "1y").lower()
     if period == "max":
@@ -104,7 +103,7 @@ def _period_start(period: str) -> Optional[date]:
     return (datetime.now(timezone.utc).date()) - timedelta(days=days)
 
 
-def parse_history_csv(text: str) -> List[OHLCVData]:
+def parse_history_csv(text: str) -> list[OHLCVData]:
     """Parse a Stooq daily CSV into OHLCV bars (oldest → newest).
 
     Rows with unparseable prices are dropped. A body that isn't the expected
@@ -113,7 +112,7 @@ def parse_history_csv(text: str) -> List[OHLCVData]:
     if not text or "," not in text:
         return []
 
-    bars: List[OHLCVData] = []
+    bars: list[OHLCVData] = []
     reader = csv.DictReader(io.StringIO(text))
     if not reader.fieldnames or "Close" not in reader.fieldnames:
         return []
@@ -147,7 +146,7 @@ def parse_history_csv(text: str) -> List[OHLCVData]:
     return bars
 
 
-def quote_from_bars(symbol: str, bars: List[OHLCVData]) -> Optional[QuoteResponse]:
+def quote_from_bars(symbol: str, bars: list[OHLCVData]) -> QuoteResponse | None:
     """Build a quote from recent daily bars (newest bar = current price).
 
     Change / percent-change are measured against the prior bar's close, so the
@@ -207,7 +206,7 @@ class StooqProvider(MarketDataProvider):
 
     async def get_history(
         self, symbol: str, period: str = "1y", interval: str = "1d"
-    ) -> List[OHLCVData]:
+    ) -> list[OHLCVData]:
         params = {"s": _to_stooq_symbol(symbol), "i": "d"}
         start = _period_start(period)
         if start is not None:
@@ -216,7 +215,7 @@ class StooqProvider(MarketDataProvider):
         text = await self._fetch_csv(params)
         return parse_history_csv(text)
 
-    async def get_quote(self, symbol: str) -> Optional[QuoteResponse]:
+    async def get_quote(self, symbol: str) -> QuoteResponse | None:
         # A short recent window is enough to price + compute the daily change.
         params = {
             "s": _to_stooq_symbol(symbol),

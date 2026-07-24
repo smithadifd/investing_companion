@@ -103,7 +103,6 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
 
 import redis.asyncio as redis
 from redis import exceptions as redis_exceptions
@@ -139,7 +138,7 @@ _SETTLED_MARKER_TTL_SECONDS = 900  # 15 minutes
 _ESTIMATE_CHARS_PER_TOKEN = 3
 
 
-def estimate_request_tokens(*texts: Optional[str]) -> int:
+def estimate_request_tokens(*texts: str | None) -> int:
     """Conservative input-token estimate for the given prompt strings.
 
     ``sum(len(text)) // 3`` across all non-empty parts (system prompt, user
@@ -334,12 +333,12 @@ return {1, new_total}
 class AITokenBudget:
     """Redis-backed per-user daily token ceiling, reserve-then-settle."""
 
-    def __init__(self, redis_client: Optional["redis.Redis"] = None) -> None:
+    def __init__(self, redis_client: redis.Redis | None = None) -> None:
         self._redis = redis_client
         self._reserve_script = None
         self._settle_script = None
 
-    async def _client(self) -> "redis.Redis":
+    async def _client(self) -> redis.Redis:
         if self._redis is None:
             self._redis = redis.from_url(
                 settings.REDIS_URL,
@@ -348,7 +347,7 @@ class AITokenBudget:
             )
         return self._redis
 
-    async def _scripts(self, client: "redis.Redis"):
+    async def _scripts(self, client: redis.Redis):
         if self._reserve_script is None:
             self._reserve_script = client.register_script(_RESERVE_LUA)
         if self._settle_script is None:
@@ -361,7 +360,7 @@ class AITokenBudget:
         return settings.AI_DAILY_TOKEN_BUDGET
 
     @staticmethod
-    def _who(user_id: Optional[uuid.UUID]) -> str:
+    def _who(user_id: uuid.UUID | None) -> str:
         return str(user_id) if user_id else "global"
 
     @staticmethod
@@ -369,7 +368,7 @@ class AITokenBudget:
         return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     @classmethod
-    def _key(cls, user_id: Optional[uuid.UUID]) -> str:
+    def _key(cls, user_id: uuid.UUID | None) -> str:
         return cls._day_key(cls._who(user_id), cls._today())
 
     # All three key shapes embed the SAME literal-brace ``{<who>:<day>}``
@@ -391,7 +390,7 @@ class AITokenBudget:
     def _settled_key(who: str, day: str, reservation_id: str) -> str:
         return f"ai:tokens:resv:settled:{{{who}:{day}}}:{reservation_id}"
 
-    async def used(self, user_id: Optional[uuid.UUID]) -> int:
+    async def used(self, user_id: uuid.UUID | None) -> int:
         """Tokens consumed (settled + any outstanding reservation) today.
 
         Fails open (returns 0) on Redis errors. Because :meth:`reserve`
@@ -408,7 +407,7 @@ class AITokenBudget:
             _log_redis_failure("read", exc)
             return 0
 
-    async def check(self, user_id: Optional[uuid.UUID]) -> None:
+    async def check(self, user_id: uuid.UUID | None) -> None:
         """Raise :class:`BudgetExceededError` when today's ceiling is reached.
 
         Advisory only — NOT the enforcement boundary. This is a cheap,
@@ -429,7 +428,7 @@ class AITokenBudget:
         if used >= limit:
             raise BudgetExceededError(used, limit)
 
-    async def reserve(self, user_id: Optional[uuid.UUID], tokens: int) -> ReservationToken:
+    async def reserve(self, user_id: uuid.UUID | None, tokens: int) -> ReservationToken:
         """Atomically reserve ``tokens`` against today's ceiling.
 
         This is the sole enforcement boundary: the check-and-increment
@@ -488,7 +487,7 @@ class AITokenBudget:
 
     async def settle(
         self,
-        user_id: Optional[uuid.UUID],
+        user_id: uuid.UUID | None,
         reservation: ReservationToken,
         actual: int,
     ) -> None:
@@ -573,7 +572,7 @@ class AITokenBudget:
                 actual,
             )
 
-    async def release(self, user_id: Optional[uuid.UUID], reservation: ReservationToken) -> None:
+    async def release(self, user_id: uuid.UUID | None, reservation: ReservationToken) -> None:
         """Convenience wrapper: settle a reservation with zero actual usage.
 
         Used when a call fails/is cancelled before any tokens are known to

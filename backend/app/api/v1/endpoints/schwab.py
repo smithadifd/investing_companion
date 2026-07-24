@@ -17,7 +17,6 @@ import json
 import logging
 import secrets
 import uuid
-from typing import Optional
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -57,7 +56,7 @@ def _settings_redirect(result: str) -> RedirectResponse:
     )
 
 
-def _trusted_received_url(request: Request) -> Optional[str]:
+def _trusted_received_url(request: Request) -> str | None:
     """Build the OAuth received-URL from the CONFIGURED callback base.
 
     The token exchange (schwab-py / authlib) parses ``code``/``state`` out of
@@ -182,9 +181,9 @@ async def connect_schwab(
 @router.get("/callback")
 async def schwab_callback(
     request: Request,
-    code: Optional[str] = None,
-    state: Optional[str] = None,
-    error: Optional[str] = None,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
     _demo_guard: None = Depends(require_not_demo),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:

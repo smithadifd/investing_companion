@@ -1,0 +1,14 @@
+# Explicit lint config so `ruff check backend/` behaves identically
+# locally and in CI, regardless of which ruff release is installed.
+#
+# ruff's *default* select set has changed across releases (0.16.x's
+# default is much broader than older releases: adds UP/B/I/DTZ/RUF/etc).
+# Without this file, an unpinned ruff version silently changes what CI
+# enforces. This pins the select set to ruff's historical defaults —
+# the rules this codebase was actually written against and already
+# passes cleanly.
+#
+# Broader adoption of the modern default rule set (UP/B/I/DTZ/RUF/...)
+# is deliberately deferred to a future charter, not done here.
+[lint]
+select = ["E4", "E7", "E9", "F"]

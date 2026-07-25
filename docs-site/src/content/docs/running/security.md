@@ -37,7 +37,7 @@ openssl rand -base64 24
 
 `docker-compose.local.yml` overrides this to `true` by default (`REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-true}`) so you can create your first account locally without extra configuration. `docker-compose.prod.yml` and `docker-compose.demo.yml` both keep it closed (`false`).
 
-Once you have created your account, make sure it is set to `false` (or simply left unset, since that's the application default):
+Once you have created your account, make sure it is set to `false`. Leaving it unset falls back to the application default of `false` under `docker-compose.prod.yml` and `docker-compose.demo.yml` — but **not** under `docker-compose.local.yml`, which overrides the default to `true`; there you must set it explicitly:
 
 ```bash
 REGISTRATION_ENABLED=false

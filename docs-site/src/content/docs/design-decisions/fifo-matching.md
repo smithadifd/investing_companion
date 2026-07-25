@@ -20,13 +20,13 @@ Two tables are involved.
 The matching function is `TradeService._recalculate_pairs(user_id, equity_id)` in `backend/app/services/trade.py`. For a single equity it does this:
 
 1. Deletes every existing `TradePair` row for that `(user_id, equity_id)`.
-2. Loads every `Trade` for that `(user_id, equity_id)`, ordered by `executed_at` ascending.
-3. Walks the trades in order, maintaining two in-memory FIFO queues: `long_queue` for open buys, `short_queue` for open shorts. Each queue entry is a tuple of `(trade_id, remaining_quantity, price, executed_at)`.
-4. On a `buy`, appends to `long_queue`. On a `short`, appends to `short_queue`.
-5. On a `sell`, drains `long_queue` from the head until the sell is fully matched or the queue is empty. On a `cover`, does the same against `short_queue`.
-6. For each match, writes a `TradePair` row and decrements the open lot.
+2. Loads every `Trade` for that `(user_id, equity_id)`, ordered by `executed_at` ascending with `id` as a secondary sort key, so trades sharing a timestamp still sort deterministically.
+3. Walks the trades in order, maintaining FIFO queues keyed by `account_id` (`None` is its own "unassigned" partition): `long_queues[account_id]` for open buys, `short_queues[account_id]` for open shorts. Each queue entry is a tuple of `(trade_id, remaining_quantity, price, executed_at, open_fee_per_share)`. A close only matches opens in the same account — **FIFO matching is partitioned by account**.
+4. On a `buy`, appends to `long_queues[trade.account_id]`. On a `short`, appends to `short_queues[trade.account_id]`.
+5. On a `sell`, drains `long_queues[trade.account_id]` from the head until the sell is fully matched or the queue is empty. On a `cover`, does the same against `short_queues[trade.account_id]`.
+6. For each match, writes a `TradePair` row (carrying the same `account_id`) and decrements the open lot.
 
-Long realized P&L is `quantity_matched * (close_price - open_price)`. Short realized P&L is the asymmetric `quantity_matched * (open_price - close_price)` — profit accrues when the cover price is below the short price. `holding_period_days` is `(close.executed_at - open.executed_at).days` in both cases.
+Long realized P&L is `quantity_matched * (close_price - open_price) - quantity_matched * (open_fee_per_share + close_fee_per_share)`. Short realized P&L is the asymmetric `quantity_matched * (open_price - close_price) - quantity_matched * (open_fee_per_share + close_fee_per_share)` — profit accrues when the cover price is below the short price. `open_fee_per_share` and `close_fee_per_share` come from `_fee_per_share()`, which spreads a trade's whole-order `fees` evenly across its `quantity`; both legs' matched share of commission is netted out of `realized_pnl`. `holding_period_days` is `(close.executed_at - open.executed_at).days` in both cases.
 
 ### Worked example
 
@@ -72,12 +72,12 @@ Shorts use a separate queue but the same algorithm. A `short` trade opens a lot 
 ## Edge cases and known gaps
 
 - **Partial matches are native.** A single close trade can produce multiple `trade_pairs` rows, one per open lot it touches. The final partial open lot is written back to the queue with `open_qty - matched`.
-- **Fees are ignored by P&L.** `realized_pnl` is pure price-delta times quantity. The `fees` column on `Trade` participates in `total_cost` and in the `_calculate_positions` cost-basis math, but it is not subtracted from `realized_pnl` on a pair. Net-of-fees realized P&L is not currently computed anywhere.
+- **Fees are netted into `realized_pnl`, not ignored.** Each pair's `realized_pnl` subtracts the matched share of both legs' commissions (see [the algorithm](#the-algorithm) for the formula and `_fee_per_share()` at `trade.py:33`). `backend/tests/test_services/test_trade_fees.py` (`TestRealizedPnlIncludesFees`) covers this directly.
 - **Oversold / over-covered quantity is dropped.** If a sell exceeds the long queue, the `while remaining > 0 and long_queue` loop exits and the leftover quantity is lost with no pair written and no error raised. Same for cover vs. short queue.
-- **Same-timestamp tiebreaker is `trades.id` implicitly.** The ORDER BY is `Trade.executed_at` only. When multiple trades share a timestamp, Postgres returns them in an unspecified order, which in practice is insertion order (ascending `id`). If this matters, enforce ordering upstream.
+- **Same-timestamp ties are broken by `id` explicitly.** The ORDER BY is `Trade.executed_at, Trade.id` (`trade.py:482`) — trades sharing a timestamp sort deterministically by ascending `id` rather than relying on Postgres's unspecified tie order. `backend/tests/test_services/test_trade_fifo_tiebreak.py` covers this directly.
 - **No wash sale logic.** Losses are booked in full on the close date. Wash sale rules, superficial loss rules, and any tax-lot adjustments are out of scope.
 - **Float vs. Decimal.** All math runs in `Decimal` end-to-end; no `float` conversions happen in the matching path.
 
 ## Testing
 
-No dedicated test file currently covers `_recalculate_pairs`. `backend/tests/test_services/` contains `test_alert_service.py` but no `test_trade_service.py`. This is a known gap — the algorithm is exercised only through manual use and the `backend/scripts/seed_trades.py` script. Adding a unit test that walks the worked example above is the recommended first test.
+`_recalculate_pairs` itself is covered across several files in `backend/tests/test_services/`, not one single `test_trade_service.py`: `test_trade_fifo_tiebreak.py` (same-timestamp ordering), `test_trade_fees.py` (fee netting into `realized_pnl`), and `test_trade_positions.py` (per-account partitioning, e.g. `test_fifo_matching_stays_within_account`). Two more files cover closely related but distinct code, not `_recalculate_pairs` directly: `test_open_lots.py` tests `_get_open_lots`, the read-only sibling walk used for basis reconciliation, and `test_trade_journal_pair_order.py` tests `_closed_trade_pairs` in `trade_journal.py` — deterministic *display* ordering of already-computed pairs for the journal narrative, not FIFO matching itself.

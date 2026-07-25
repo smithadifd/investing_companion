@@ -7,14 +7,17 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Enum,
     ForeignKey,
     Index,
     Integer,
     Numeric,
+    String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -88,6 +91,35 @@ class Trade(Base, TimestampMixin):
         index=True,
     )
 
+    # --- Provenance / adoption fields (schwab-adopt-semantics.md §2/§3) ------
+    # All defaulted so pre-existing rows are unaffected (a plain manual trade
+    # is source="manual", is_synthetic=False, basis_is_estimated=False).
+    #
+    # Provenance, NOT syntheticness: "manual" vs "schwab_api" (and later
+    # "csv_import"). A CSV-imported real fill is source="csv_import" but is
+    # not synthetic. Mirrors broker_import's `source` convention.
+    source: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="manual", default="manual"
+    )
+    # True only for a delta-adjustment / synthetic-opening trade written by the
+    # §2 adoption endpoint. Orthogonal to `source`.
+    is_synthetic: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )
+    # True when the synthetic trade's price is a current-quote placeholder
+    # rather than Schwab's reported average (§3: ImportedPosition.average_price
+    # was null at adoption time).
+    basis_is_estimated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )
+    # The BrokerImportRun this synthetic trade was reconciled against - the
+    # idempotency/provenance key. SET NULL so pruning run audit rows never
+    # deletes the adoption trade (its account_id is captured directly).
+    source_import_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("broker_import_runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     # Relationships
     user: Mapped["User"] = relationship(back_populates="trades")
     equity: Mapped["Equity"] = relationship(lazy="selectin")
@@ -114,6 +146,20 @@ class Trade(Base, TimestampMixin):
         Index("idx_trades_executed_at", "executed_at"),
         Index("idx_trades_user_executed", "user_id", "executed_at"),
         Index("idx_trades_user_account_equity", "user_id", "account_id", "equity_id"),
+        # Idempotency for §2 adoption: at most one synthetic trade per
+        # (user, account, equity, import run). Partial (WHERE is_synthetic) so
+        # ordinary manual trades never contend. A later run with further drift
+        # gets a new run id and is allowed a fresh adjustment; a re-adopt
+        # against the SAME run hits this index (caught as already-adopted).
+        Index(
+            "uq_trades_synthetic_adoption",
+            "user_id",
+            "account_id",
+            "equity_id",
+            "source_import_run_id",
+            unique=True,
+            postgresql_where=text("is_synthetic"),
+        ),
     )
 
     @property

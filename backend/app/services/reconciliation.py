@@ -14,7 +14,7 @@ Trade-provenance columns or the adoption endpoint.
 from decimal import Decimal
 from uuid import UUID
 
-from app.db.models.broker_import import ImportedPosition
+from app.db.models.broker_import import BrokerImportRun, ImportedPosition
 from app.schemas.reconciliation import (
     ReconciliationPosition,
     ReconciliationResponse,
@@ -33,13 +33,26 @@ class ReconciliationService:
         self.trades = TradeService(db)
 
     async def build(
-        self, user_id: UUID, account_id: int, source: str = "schwab_api"
+        self,
+        user_id: UUID,
+        account_id: int,
+        source: str = "schwab_api",
+        *,
+        run: BrokerImportRun | None = None,
     ) -> ReconciliationResponse | None:
         """The §6 envelope for ``account_id``, or ``None`` when the account has
         no active link (the caller maps that to 409).
 
         The caller is expected to have already 404'd an account that isn't the
         user's; this method only decides link-present vs link-absent.
+
+        ``run`` lets the adoption caller inject the run it has already selected
+        (and will stamp onto the synthetic trades), so the deltas rendered here
+        are computed from *that same* run - no run-completes-mid-call window
+        between "which run priced/sized the trade" and "which run the
+        idempotency key names". When ``run`` is None (the read-only view), the
+        latest complete run is selected once and used for BOTH ``last_import_at``
+        and the position snapshot, so those can't drift apart either.
         """
         link = await self.links.get_active_link(user_id, account_id, source)
         if link is None:
@@ -47,20 +60,21 @@ class ReconciliationService:
 
         account_hash = link.account_hash
 
-        latest_complete = await schwab_ingestion.get_latest_complete_run(
-            self.db, user_id, account_hash
-        )
-        last_import_at = (
-            latest_complete.created_at if latest_complete is not None else None
-        )
+        if run is None:
+            run = await schwab_ingestion.get_latest_complete_run(
+                self.db, user_id, account_hash
+            )
+        last_import_at = run.created_at if run is not None else None
         never_imported = last_import_at is None
         newer_failed_import_at = await schwab_ingestion.get_newer_failed_import_at(
             self.db, user_id, account_hash
         )
 
-        # Schwab side: latest complete run's rows ([] when never_imported).
-        schwab_rows = await schwab_ingestion.get_current_positions(
-            self.db, user_id, account_hash
+        # Schwab side: the pinned run's rows ([] when never_imported).
+        schwab_rows = (
+            await schwab_ingestion.get_positions_for_run(self.db, run.id)
+            if run is not None
+            else []
         )
         schwab_by_symbol: dict[str, ImportedPosition] = {
             row.symbol: row for row in schwab_rows

@@ -78,6 +78,12 @@ class TradeResponse(TradeBase):
     equity: TradeEquity
     total_value: Decimal
     total_cost: Decimal
+    # Provenance / adoption fields (§2/§3). Read-only here - set by the
+    # adoption endpoint, never accepted on the public create/update body.
+    source: str = "manual"
+    is_synthetic: bool = False
+    basis_is_estimated: bool = False
+    source_import_run_id: int | None = None
     position_closed: bool = Field(
         False,
         description=(

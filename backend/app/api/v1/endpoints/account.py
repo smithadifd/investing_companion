@@ -9,6 +9,7 @@ from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.account import AccountCreate, AccountResponse, AccountUpdate
 from app.schemas.account_link import AccountLinkCreate, AccountLinkResponse
+from app.schemas.adoption import AdoptionResponse
 from app.schemas.common import DataResponse, ResponseMeta
 from app.schemas.reconciliation import ReconciliationResponse
 from app.services.account import AccountService
@@ -16,6 +17,11 @@ from app.services.account_link import (
     AccountLinkService,
     AccountNotFoundError,
     LinkNeedsConfirmationError,
+)
+from app.services.adoption import (
+    AdoptionService,
+    NeverImportedError,
+    NoActiveLinkError,
 )
 from app.services.reconciliation import ReconciliationService
 
@@ -39,6 +45,13 @@ def get_reconciliation_service(
 ) -> ReconciliationService:
     """Dependency to get the reconciliation service instance."""
     return ReconciliationService(db)
+
+
+def get_adoption_service(
+    db: AsyncSession = Depends(get_db),
+) -> AdoptionService:
+    """Dependency to get the adoption service instance."""
+    return AdoptionService(db)
 
 
 @router.get("", response_model=DataResponse[list[AccountResponse]])
@@ -198,6 +211,54 @@ async def get_account_reconciliation(
             detail=(
                 "Account has no active Schwab link; link a Schwab account to "
                 "reconcile."
+            ),
+        )
+    return DataResponse(data=result, meta=ResponseMeta.now())
+
+
+@router.post(
+    "/{account_id}/reconciliation/adopt",
+    response_model=DataResponse[AdoptionResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def adopt_reconciliation(
+    account_id: int,
+    _demo_guard: None = Depends(require_not_demo),
+    current_user: User = Depends(get_current_user),
+    account_service: AccountService = Depends(get_account_service),
+    service: AdoptionService = Depends(get_adoption_service),
+) -> DataResponse[AdoptionResponse]:
+    """§2 adoption: write synthetic, provenance-stamped Trades from the §6
+    reconciliation delta for this account.
+
+    Mutation - demo-guarded (403 in demo mode). Owner-scoped (404 for an
+    account that isn't the user's). 409 when the account has no active Schwab
+    link, or is linked but has no completed import yet (adopting against an
+    empty Schwab side would sell every IC position to zero). Replay-safe: a
+    re-adopt against the same run creates no duplicate (the delta is recomputed
+    and the partial unique index enforces idempotency).
+    """
+    account = await account_service.get_account(account_id, current_user.id)
+    if account is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Account not found"
+        )
+    try:
+        result = await service.adopt(current_user.id, account_id)
+    except NoActiveLinkError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Account has no active Schwab link; link a Schwab account to "
+                "adopt."
+            ),
+        )
+    except NeverImportedError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Account is linked but has no completed Schwab import yet; "
+                "nothing to adopt."
             ),
         )
     return DataResponse(data=result, meta=ResponseMeta.now())

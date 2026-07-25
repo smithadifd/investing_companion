@@ -444,6 +444,21 @@ async def get_newer_failed_import_at(
     return latest_any.created_at
 
 
+async def get_positions_for_run(
+    db: AsyncSession, run_id: int
+) -> list[ImportedPosition]:
+    """The ``ImportedPosition`` rows for one specific run id. Read-only.
+
+    Split out of :func:`get_current_positions` so a caller that has *already*
+    selected a run - e.g. adoption, which stamps that exact run onto the
+    synthetic trades it writes - can read precisely that run's positions. That
+    keeps the delta it computes and the run it stamps from ever diverging if a
+    newer complete run lands mid-call (the run-selection TOCTOU)."""
+    stmt = select(ImportedPosition).where(ImportedPosition.import_run_id == run_id)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
 async def get_current_positions(
     db: AsyncSession, user_id: uuid.UUID, account_hash: str
 ) -> list[ImportedPosition]:
@@ -453,9 +468,7 @@ async def get_current_positions(
     run = await get_latest_complete_run(db, user_id, account_hash)
     if run is None:
         return []
-    stmt = select(ImportedPosition).where(ImportedPosition.import_run_id == run.id)
-    result = await db.execute(stmt)
-    return list(result.scalars().all())
+    return await get_positions_for_run(db, run.id)
 
 
 # ---------------------------------------------------------------------------

@@ -26,7 +26,7 @@ from app.schemas.trade import (
     TradeResponse,
     TradeUpdate,
 )
-from app.services.trade import TradeService
+from app.services.trade import SyntheticAdoptionConflictError, TradeService
 
 router = APIRouter()
 
@@ -237,6 +237,8 @@ async def update_trade(
     """
     try:
         trade = await service.update_trade(trade_id, current_user.id, data)
+    except SyntheticAdoptionConflictError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
@@ -248,6 +250,28 @@ async def update_trade(
             detail="Trade not found",
         )
 
+    return DataResponse(data=trade, meta=ResponseMeta.now())
+
+
+@router.post("/{trade_id}/detach", response_model=DataResponse[TradeResponse])
+async def detach_trade(
+    trade_id: int,
+    _demo_guard: None = Depends(require_not_demo),
+    current_user: User = Depends(get_current_user),
+    service: TradeService = Depends(get_trade_service),
+) -> DataResponse[TradeResponse]:
+    """Detach a synthetic (adoption) trade into an ordinary manual trade (§2).
+
+    Clears ``is_synthetic``/``source_import_run_id`` so the row can then be
+    edited. Idempotent: detaching an already-detached / non-synthetic trade is
+    a no-op 200. 404 when the trade isn't the user's.
+    """
+    trade = await service.detach_trade(trade_id, current_user.id)
+    if not trade:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Trade not found",
+        )
     return DataResponse(data=trade, meta=ResponseMeta.now())
 
 

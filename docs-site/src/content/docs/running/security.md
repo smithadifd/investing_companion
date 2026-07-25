@@ -33,15 +33,17 @@ openssl rand -base64 24
 
 ## Disabling registration
 
-`REGISTRATION_ENABLED` controls whether the `/api/v1/auth/register` endpoint accepts new users. It defaults to `true`.
+`REGISTRATION_ENABLED` controls whether the `/api/v1/auth/register` endpoint accepts new users. The application default is `false` — Investing Companion is a single-user, self-hosted app, so registration is closed unless you open it explicitly.
 
-Once you have created your account, set it to `false`:
+`docker-compose.local.yml` overrides this to `true` by default (`REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-true}`) so you can create your first account locally without extra configuration. `docker-compose.prod.yml` and `docker-compose.demo.yml` both keep it closed (`false`).
+
+Once you have created your account, make sure it is set to `false` (or simply left unset, since that's the application default):
 
 ```bash
 REGISTRATION_ENABLED=false
 ```
 
-The `docker-compose.prod.yml` file defaults this to `false` already (`REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-false}`), so if you deploy from that file without setting the variable, registration is off. If you are running locally or with a custom compose file, check that you have set it explicitly.
+If you deploy from `docker-compose.prod.yml` without setting the variable, registration is already off. If you are running locally, remember that `docker-compose.local.yml` opens it by default — set it explicitly once you're done onboarding.
 
 To re-enable registration temporarily (for example, to add another user), flip the variable and restart the API container, then flip it back.
 

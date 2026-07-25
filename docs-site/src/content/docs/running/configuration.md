@@ -16,7 +16,7 @@ There is no `.env.local` layer — if you need environment-specific overrides, p
 | `SECRET_KEY` | Yes (prod) | `dev-secret-key-change-in-production` | Signs JWT tokens. Must be 32+ characters and unique per deployment. |
 | `ENVIRONMENT` | No | `development` | Runtime context. Set to `production` to enable startup validation of secrets and CORS. |
 | `CORS_ORIGINS` | No | `http://localhost:3000,http://localhost:3001` | Comma-separated list of origins the API allows. Wildcards are rejected in production. |
-| `REGISTRATION_ENABLED` | No | `true` | Set to `false` after creating your account to prevent new signups. |
+| `REGISTRATION_ENABLED` | No | `false` | Closed by default (single-user app). `docker-compose.local.yml` overrides this to `true` for local onboarding; set to `false` after creating your account to prevent new signups. |
 
 When `ENVIRONMENT=production`, the app exits at startup if `SECRET_KEY` is a known insecure value, is shorter than 32 characters, or if `CORS_ORIGINS` contains `*`.
 

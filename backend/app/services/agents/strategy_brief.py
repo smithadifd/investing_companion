@@ -327,7 +327,14 @@ async def _collect_news(db: AsyncSession) -> list[dict]:
     stmt = (
         select(NewsItem)
         .where(NewsItem.published_at >= cutoff)
-        .order_by(NewsItem.published_at.desc())
+        # `NewsItem.id` is a secondary sort key so that rows sharing an
+        # identical `published_at` still sort deterministically - timestamp
+        # alone is not a unique key, and an unordered tie would let the
+        # narrative-prompt ordering vary across otherwise identical reruns
+        # (mirrors AA5/#230's fix in trade_journal.py's
+        # `_closed_trade_pairs`). Descending to match the primary key's
+        # `.desc()` - newest-first among ties.
+        .order_by(NewsItem.published_at.desc(), NewsItem.id.desc())
         .limit(NEWS_LIMIT)
     )
     rows = (await db.execute(stmt)).scalars().all()

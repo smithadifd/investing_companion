@@ -26,7 +26,7 @@ from app.db.models.broker_import import (
 from app.db.models.trade import Trade, TradeType
 from app.schemas.trade import TradeCreate, TradeUpdate
 from app.services.adoption import AdoptionService
-from app.services.trade import TradeService
+from app.services.trade import SyntheticAdoptionConflictError, TradeService
 from tests.factories import (
     create_test_account,
     create_test_equity,
@@ -243,6 +243,43 @@ class TestSyntheticEditGuardAndDetach:
         )
         assert remaining == 0
 
+    async def test_reassign_synthetic_account_collision_is_conflict_not_500(
+        self, db: AsyncSession, test_user
+    ):
+        """account_id is deliberately NOT in §2's edit-blocked set, so a
+        synthetic trade may be reassigned - but the partial unique adoption
+        index still forbids two synthetics for the same (user, account, equity,
+        run). Reassigning one synthetic onto an account that already holds a
+        synthetic for the same equity+run raises a clean
+        SyntheticAdoptionConflictError (endpoint -> 409), never an uncaught
+        IntegrityError 500."""
+        equity = await create_test_equity(db, symbol="COLL")
+        acct_a = await create_test_account(db, test_user, name="A")
+        acct_b = await create_test_account(db, test_user, name="B")
+        run = await _seed_run(db, test_user, [("COLL", "EQUITY", 2, 10)])
+
+        def _syn(account_id):
+            return Trade(
+                user_id=test_user.id, equity_id=equity.id, account_id=account_id,
+                trade_type=TradeType.BUY, quantity=Decimal("1"),
+                price=Decimal("10"), fees=Decimal("0"), executed_at=_now(),
+                is_synthetic=True, source="schwab_api",
+                source_import_run_id=run.id,
+            )
+
+        t_a = _syn(acct_a.id)
+        db.add(t_a)
+        db.add(_syn(acct_b.id))  # already occupies (user, B, equity, run)
+        await db.flush()
+        t_a_id = t_a.id
+        await db.commit()
+
+        svc = TradeService(db)
+        with pytest.raises(SyntheticAdoptionConflictError):
+            await svc.update_trade(
+                t_a_id, test_user.id, TradeUpdate(account_id=acct_b.id)
+            )
+
 
 class TestAdoptionIntegrityRace:
     async def test_double_adopt_reports_already_adopted_not_500(
@@ -301,3 +338,29 @@ class TestAdoptionIntegrityRace:
             )
         )
         assert count == 1
+
+    async def test_non_idempotency_integrity_error_reraises_not_already_adopted(
+        self, db: AsyncSession, test_user
+    ):
+        """A constraint failure that is NOT the idempotency-index collision (no
+        existing synthetic row for this key) must re-raise, never be dressed up
+        as ``already_adopted``. Here a bad ``source_import_run_id`` (no such
+        BrokerImportRun) makes create_trade's commit raise an FK IntegrityError;
+        because no matching synthetic row exists, _adopt_one re-raises rather
+        than reporting a false replay success with a null trade_id."""
+        equity = await create_test_equity(db, symbol="FKVIOL")
+        acct = await create_test_account(db, test_user, name="Roth")
+        svc = AdoptionService(db)
+        with pytest.raises(IntegrityError):
+            await svc._adopt_one(
+                user_id=test_user.id,
+                account_id=acct.id,
+                equity_id=equity.id,
+                symbol="FKVIOL",
+                trade_type=TradeType.BUY,
+                quantity=Decimal("1"),
+                price=Decimal("10"),
+                basis_is_estimated=False,
+                source="schwab_api",
+                source_import_run_id=999999,  # no such run -> FK violation
+            )

@@ -6,6 +6,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import and_, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -28,6 +29,19 @@ from app.schemas.trade import (
     TradeUpdate,
 )
 from app.services.equity import EquityService
+
+
+class SyntheticAdoptionConflictError(Exception):
+    """A trade mutation collided with the partial unique adoption index
+    ``uq_trades_synthetic_adoption`` (user, account, equity, import-run) WHERE
+    is_synthetic.
+
+    The one reachable trigger is reassigning a *synthetic* trade's ``account_id``
+    to an account that already holds a synthetic trade for the same equity and
+    import run - ``account_id`` is deliberately NOT in §2's edit-blocked set, so
+    the reassign is permitted, but the index still forbids a duplicate. Caught
+    at the commit boundary and surfaced as a 409 instead of an uncaught 500.
+    """
 
 
 def _fee_per_share(trade: Trade) -> Decimal:
@@ -300,7 +314,20 @@ class TradeService:
         if reassign_account:
             trade.account_id = data.account_id
 
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError as e:
+            # The only mutation that can violate a constraint here is reassigning
+            # a synthetic trade's account onto the partial unique adoption index
+            # (account_id isn't in §2's blocked edit set). Roll back and surface
+            # a clean 409 rather than letting an uncaught IntegrityError 500.
+            await self.db.rollback()
+            raise SyntheticAdoptionConflictError(
+                "Reassigning this synthetic (adoption) trade to that account "
+                "collides with an existing adoption trade for the same equity "
+                "and import run. Detach the trade first, or choose another "
+                "account."
+            ) from e
         await self.db.refresh(trade)
 
         # Recalculate P&L pairs for this equity (partitioned by account)

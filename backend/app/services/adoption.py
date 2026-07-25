@@ -86,8 +86,14 @@ class AdoptionService:
             raise NeverImportedError()
         run_id = run.id
 
-        # Same delta computation the §6 view renders (WYSIWYG).
-        recon = await self.reconciliation.build(user_id, account_id, source)
+        # Same delta computation the §6 view renders (WYSIWYG). Inject the run
+        # we just selected so the deltas are computed from the SAME run we stamp
+        # onto every synthetic trade below - if a newer complete run lands
+        # between here and the view's own query, we must not price/size against
+        # run B while the idempotency key names run A.
+        recon = await self.reconciliation.build(
+            user_id, account_id, source, run=run
+        )
         # recon is not None here: get_active_link already succeeded.
 
         adopted: list[AdoptedTrade] = []
@@ -241,6 +247,14 @@ class AdoptionService:
             existing_id = await self._existing_synthetic_id(
                 user_id, account_id, equity_id, source_import_run_id
             )
+            # Only the partial-unique-index collision (a synthetic row already
+            # exists for this exact key) is the replay-safe "already adopted"
+            # case. Any OTHER IntegrityError - an FK violation, a NOT NULL, a
+            # different constraint - is a genuine failure and must NOT be
+            # dressed up as replay success (which would also carry a null
+            # trade_id). Re-raise it so it surfaces as a 500 for the real cause.
+            if existing_id is None:
+                raise
             return AdoptedTrade(
                 symbol=symbol,
                 equity_id=equity_id,

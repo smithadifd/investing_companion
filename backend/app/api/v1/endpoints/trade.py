@@ -26,7 +26,7 @@ from app.schemas.trade import (
     TradeResponse,
     TradeUpdate,
 )
-from app.services.trade import TradeService
+from app.services.trade import SyntheticAdoptionConflictError, TradeService
 
 router = APIRouter()
 
@@ -237,6 +237,8 @@ async def update_trade(
     """
     try:
         trade = await service.update_trade(trade_id, current_user.id, data)
+    except SyntheticAdoptionConflictError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)

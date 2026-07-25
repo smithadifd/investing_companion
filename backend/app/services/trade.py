@@ -6,6 +6,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import and_, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -28,6 +29,19 @@ from app.schemas.trade import (
     TradeUpdate,
 )
 from app.services.equity import EquityService
+
+
+class SyntheticAdoptionConflictError(Exception):
+    """A trade mutation collided with the partial unique adoption index
+    ``uq_trades_synthetic_adoption`` (user, account, equity, import-run) WHERE
+    is_synthetic.
+
+    The one reachable trigger is reassigning a *synthetic* trade's ``account_id``
+    to an account that already holds a synthetic trade for the same equity and
+    import run - ``account_id`` is deliberately NOT in §2's edit-blocked set, so
+    the reassign is permitted, but the index still forbids a duplicate. Caught
+    at the commit boundary and surfaced as a 409 instead of an uncaught 500.
+    """
 
 
 def _fee_per_share(trade: Trade) -> Decimal:
@@ -152,8 +166,27 @@ class TradeService:
 
         return self._trade_to_response(trade)
 
-    async def create_trade(self, user_id: UUID, data: TradeCreate) -> TradeResponse | None:
-        """Create a new trade and recalculate P&L pairs."""
+    async def create_trade(
+        self,
+        user_id: UUID,
+        data: TradeCreate,
+        *,
+        source: str = "manual",
+        is_synthetic: bool = False,
+        basis_is_estimated: bool = False,
+        source_import_run_id: int | None = None,
+    ) -> TradeResponse | None:
+        """Create a new trade and recalculate P&L pairs.
+
+        The provenance keyword args are the ONLY new work §2 adoption adds on
+        top of the ordinary manual-trade path (``TradeService.create_trade`` is
+        the shared commit path - insert -> commit -> recalculate). They default
+        to a plain manual trade, so the public create endpoint is unchanged and
+        never exposes syntheticness to the request body. Adoption passes
+        ``is_synthetic=True`` + the run/basis provenance; a violation of the
+        partial unique index (a concurrent re-adopt against the same run) raises
+        IntegrityError from the commit for the caller to treat as idempotent.
+        """
         # Resolve equity
         equity = None
         if data.equity_id:
@@ -183,6 +216,10 @@ class TradeService:
             notes=data.notes,
             watchlist_item_id=data.watchlist_item_id,
             account_id=data.account_id,
+            source=source,
+            is_synthetic=is_synthetic,
+            basis_is_estimated=basis_is_estimated,
+            source_import_run_id=source_import_run_id,
         )
 
         self.db.add(trade)
@@ -231,6 +268,27 @@ class TradeService:
         if not trade:
             return None
 
+        # §2 edit/detach policy: a synthetic (adoption) trade must not have its
+        # quantity/price/trade_type/executed_at hand-edited in place - that
+        # would silently drift the row from what adoption computed while it
+        # still claims (via source_import_run_id) to satisfy the idempotency
+        # key, so a re-run would see "already adopted" and never re-heal it.
+        # The caller must detach first (clears is_synthetic/source_import_run_id,
+        # turning it into an ordinary manual trade). 422 via ValueError.
+        if trade.is_synthetic:
+            protected = ("trade_type", "quantity", "price", "executed_at")
+            attempted = [
+                f for f in protected
+                if f in data.model_fields_set and getattr(data, f) is not None
+            ]
+            if attempted:
+                raise ValueError(
+                    "Cannot edit "
+                    f"{'/'.join(protected)} of a synthetic (adoption) trade; "
+                    "detach it first "
+                    "(POST /api/v1/trades/{trade_id}/detach)."
+                )
+
         # Validate the account before mutating anything (explicit null
         # unassigns; a given id must belong to this user).
         reassign_account = "account_id" in data.model_fields_set
@@ -256,7 +314,20 @@ class TradeService:
         if reassign_account:
             trade.account_id = data.account_id
 
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError as e:
+            # The only mutation that can violate a constraint here is reassigning
+            # a synthetic trade's account onto the partial unique adoption index
+            # (account_id isn't in §2's blocked edit set). Roll back and surface
+            # a clean 409 rather than letting an uncaught IntegrityError 500.
+            await self.db.rollback()
+            raise SyntheticAdoptionConflictError(
+                "Reassigning this synthetic (adoption) trade to that account "
+                "collides with an existing adoption trade for the same equity "
+                "and import run. Detach the trade first, or choose another "
+                "account."
+            ) from e
         await self.db.refresh(trade)
 
         # Recalculate P&L pairs for this equity (partitioned by account)
@@ -288,6 +359,39 @@ class TradeService:
         await self._recalculate_pairs(user_id, equity_id)
 
         return True
+
+    async def detach_trade(
+        self, trade_id: int, user_id: UUID
+    ) -> TradeResponse | None:
+        """Detach a synthetic (adoption) trade into an ordinary manual trade.
+
+        Clears ``is_synthetic`` and ``source_import_run_id`` (§2's explicit
+        detach action) so the row can then be freely hand-edited via
+        ``update_trade``. Owner-scoped; returns ``None`` (caller -> 404) when
+        the trade isn't the user's or doesn't exist.
+
+        Idempotent: detaching a row that is already non-synthetic is a no-op
+        that returns the trade unchanged (200), never an error. Quantity/price/
+        type are untouched, so FIFO pairs don't change - no recalculation.
+        """
+        stmt = (
+            select(Trade)
+            .options(selectinload(Trade.equity), selectinload(Trade.account))
+            .where(Trade.id == trade_id, Trade.user_id == user_id)
+        )
+        result = await self.db.execute(stmt)
+        trade = result.scalar_one_or_none()
+
+        if not trade:
+            return None
+
+        if trade.is_synthetic:
+            trade.is_synthetic = False
+            trade.source_import_run_id = None
+            await self.db.commit()
+            await self.db.refresh(trade)
+
+        return self._trade_to_response(trade)
 
     async def get_position(self, user_id: UUID, equity_id: int) -> PositionSummary | None:
         """Get current position for a single equity."""
@@ -914,6 +1018,10 @@ class TradeService:
             equity=TradeEquity.model_validate(trade.equity),
             total_value=trade.total_value,
             total_cost=trade.total_cost,
+            source=trade.source,
+            is_synthetic=trade.is_synthetic,
+            basis_is_estimated=trade.basis_is_estimated,
+            source_import_run_id=trade.source_import_run_id,
             created_at=trade.created_at,
             updated_at=trade.updated_at,
         )

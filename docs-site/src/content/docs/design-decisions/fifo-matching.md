@@ -42,16 +42,16 @@ FIFO match:
        quantity_matched = 10
        realized_pnl     = 10 * (130 - 100) = 300.00
        holding_days     = 36
-     T1 is fully consumed, popped from long_queue.
+     T1 is fully consumed, popped from long_queues[account_id].
   2. T3 still has 5 to close, pulls 5 from T2:
        pair(open=T2, close=T3)
        quantity_matched = 5
        realized_pnl     = 5  * (130 - 110) = 100.00
        holding_days     = 21
-     T2 has 5 shares remaining in long_queue.
+     T2 has 5 shares remaining in long_queues[account_id].
 
 Post-state:
-  long_queue = [(T2, 5, $110, 2026-01-20)]
+  long_queues[account_id] = [(T2, 5, $110, 2026-01-20)]
   trade_pairs has 2 rows, total realized = $400.00
 ```
 
@@ -67,13 +67,13 @@ This means a mutation on one equity never touches pairs for another equity, and 
 
 ## Short-selling path
 
-Shorts use a separate queue but the same algorithm. A `short` trade opens a lot in `short_queue`; a `cover` drains it FIFO. The only asymmetry is the P&L sign: `(open_price - close_price)` instead of `(close_price - open_price)`. Long and short queues are independent — a buy never matches against an open short, and a sell never matches against an open short. That also means if a user flips direction (sells more than they own), the excess sell quantity is silently discarded once `long_queue` is empty. It does not open a short.
+Shorts use a separate queue but the same algorithm. A `short` trade opens a lot in `short_queues[account_id]`; a `cover` drains it FIFO. The only asymmetry is the P&L sign: `(open_price - close_price)` instead of `(close_price - open_price)`. Long and short queues are independent — a buy never matches against an open short, and a sell never matches against an open short. That also means if a user flips direction (sells more than they own), the excess sell quantity is silently discarded once `long_queues[account_id]` is empty. It does not open a short.
 
 ## Edge cases and known gaps
 
 - **Partial matches are native.** A single close trade can produce multiple `trade_pairs` rows, one per open lot it touches. The final partial open lot is written back to the queue with `open_qty - matched`.
 - **Fees are netted into `realized_pnl`, not ignored.** Each pair's `realized_pnl` subtracts the matched share of both legs' commissions (see [the algorithm](#the-algorithm) for the formula and `_fee_per_share()` at `trade.py:33`). `backend/tests/test_services/test_trade_fees.py` (`TestRealizedPnlIncludesFees`) covers this directly.
-- **Oversold / over-covered quantity is dropped.** If a sell exceeds the long queue, the `while remaining > 0 and long_queue` loop exits and the leftover quantity is lost with no pair written and no error raised. Same for cover vs. short queue.
+- **Oversold / over-covered quantity is dropped.** If a sell exceeds the long queue, the `while remaining > 0 and long_queues[account_id]` loop exits and the leftover quantity is lost with no pair written and no error raised. Same for cover vs. short queue.
 - **Same-timestamp ties are broken by `id` explicitly.** The ORDER BY is `Trade.executed_at, Trade.id` (`trade.py:482`) — trades sharing a timestamp sort deterministically by ascending `id` rather than relying on Postgres's unspecified tie order. `backend/tests/test_services/test_trade_fifo_tiebreak.py` covers this directly.
 - **No wash sale logic.** Losses are booked in full on the close date. Wash sale rules, superficial loss rules, and any tax-lot adjustments are out of scope.
 - **Float vs. Decimal.** All math runs in `Decimal` end-to-end; no `float` conversions happen in the matching path.

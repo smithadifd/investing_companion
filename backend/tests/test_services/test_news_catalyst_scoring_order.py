@@ -38,7 +38,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.news_item import NewsItem
-from app.services.agents.news_catalyst import NewsCatalystAgent
+from app.services.agents.news_catalyst import MAX_ARTICLES_SCORED_PER_RUN, NewsCatalystAgent
 
 
 class TestSelectScoringCandidatesTiebreak:
@@ -88,4 +88,74 @@ class TestSelectScoringCandidatesTiebreak:
             assert ids == [row_high.id, row_low.id], (
                 "must return id-descending regardless of physical insertion "
                 f"order or a same-timestamp tie; got {ids}"
+            )
+
+
+class TestSelectScoringCandidatesCapBoundary:
+    """Cap-boundary extension of AB3/#232's 2-row tie test (AC6).
+
+    #232 proved the tiebreak orders two tied rows deterministically. It did
+    not prove what happens when MORE tied rows exist than
+    ``MAX_ARTICLES_SCORED_PER_RUN`` (the ``.limit(50)`` on the query) admits:
+    does the cap keep an arbitrary 50-of-N, or specifically the id-descending
+    PREFIX of the tie set - i.e. does the tiebreak still hold exactly at the
+    boundary where SQL gets to decide which rows are in vs. out, not just
+    their order?
+    """
+
+    async def test_cap_boundary_selects_id_descending_prefix_stably(self, db: AsyncSession):
+        """More unscored rows share one ``published_at`` than the cap admits:
+        the query must return exactly the id-descending PREFIX of the tie
+        set (the highest-id rows), excluding the lowest-id rows entirely -
+        not an arbitrary N-of-M subset - and the same way on every repeated
+        call.
+
+        Physical insertion order below is id-ASCENDING (lowest id first,
+        highest id last), so the correct retained subset - id-descending,
+        highest ids first - is the REVERSE of insertion order for those
+        rows, and the excluded rows are exactly the ones inserted first.
+        Matching physical/insertion order by coincidence, or returning any
+        50-of-53, would fail this.
+        """
+        base_id = 822_000
+        tie_count = MAX_ARTICLES_SCORED_PER_RUN + 3
+        shared_published_at = datetime.now(timezone.utc) - timedelta(hours=1)
+
+        all_ids = [base_id + i for i in range(tie_count)]
+        for news_id in all_ids:
+            db.add(
+                NewsItem(
+                    id=news_id,
+                    symbol="TIEN",
+                    headline=f"Cap-boundary tie candidate {news_id}",
+                    url=f"https://example.com/ab3-cap-boundary-news-catalyst-{news_id}",
+                    source="AP",
+                    published_at=shared_published_at,
+                    relevance=None,
+                )
+            )
+        await db.commit()
+
+        expected_selected = sorted(all_ids, reverse=True)[:MAX_ARTICLES_SCORED_PER_RUN]
+        expected_excluded = set(all_ids) - set(expected_selected)
+        assert len(expected_excluded) == 3, "test setup: exactly 3 rows must fall outside the cap"
+
+        agent = NewsCatalystAgent()
+
+        # Stable across 5 repeated calls, not just lucky once.
+        for _ in range(5):
+            candidates = await agent._select_scoring_candidates(db)
+            candidate_ids = [c.id for c in candidates if c.id in all_ids]
+            assert len(candidate_ids) == MAX_ARTICLES_SCORED_PER_RUN, (
+                f"cap must admit exactly {MAX_ARTICLES_SCORED_PER_RUN} rows "
+                f"from the {tie_count}-row tie set; got {len(candidate_ids)}"
+            )
+            assert candidate_ids == expected_selected, (
+                "cap must select the id-descending PREFIX of the tie set "
+                f"(the {MAX_ARTICLES_SCORED_PER_RUN} highest ids), not an "
+                f"arbitrary subset; got {candidate_ids}"
+            )
+            assert expected_excluded.isdisjoint(candidate_ids), (
+                "rows outside the id-descending cap prefix must never be "
+                f"selected; found {expected_excluded & set(candidate_ids)}"
             )

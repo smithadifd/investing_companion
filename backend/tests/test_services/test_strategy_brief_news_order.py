@@ -34,7 +34,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.news_item import NewsItem
-from app.services.agents.strategy_brief import _collect_news
+from app.services.agents.strategy_brief import NEWS_LIMIT, _collect_news
 
 
 class TestCollectNewsTiebreak:
@@ -80,4 +80,77 @@ class TestCollectNewsTiebreak:
             assert urls == [row_high.url, row_low.url], (
                 "must return id-descending regardless of physical insertion "
                 f"order or a same-timestamp tie; got {urls}"
+            )
+
+
+class TestCollectNewsCapBoundary:
+    """Cap-boundary extension of AB3/#232's 2-row tie test (AC6).
+
+    #232 proved the tiebreak orders two tied rows deterministically. It did
+    not prove what happens when MORE tied rows exist than ``NEWS_LIMIT``
+    (the ``.limit(NEWS_LIMIT)`` on the query) admits: does the cap keep an
+    arbitrary N-of-M, or specifically the id-descending PREFIX of the tie
+    set - i.e. does the tiebreak still hold exactly at the boundary where
+    SQL gets to decide which rows are in vs. out, not just their order?
+    """
+
+    async def test_cap_boundary_selects_id_descending_prefix_stably(self, db: AsyncSession):
+        """More rows share one ``published_at`` than the cap admits: the
+        query must return exactly the id-descending PREFIX of the tie set
+        (the highest-id rows), excluding the lowest-id rows entirely - not
+        an arbitrary N-of-M subset - and the same way on every repeated
+        call.
+
+        Physical insertion order below is id-ASCENDING (lowest id first,
+        highest id last), so the correct retained subset - id-descending,
+        highest ids first - is the REVERSE of insertion order for those
+        rows, and the excluded rows are exactly the ones inserted first.
+        Matching physical/insertion order by coincidence, or returning any
+        N-of-M, would fail this.
+        """
+        base_id = 812_000
+        tie_count = NEWS_LIMIT + 3
+        shared_published_at = datetime.now(timezone.utc) - timedelta(hours=1)
+
+        all_ids = [base_id + i for i in range(tie_count)]
+        id_to_url = {
+            news_id: f"https://example.com/ab3-cap-boundary-strategy-brief-{news_id}"
+            for news_id in all_ids
+        }
+        for news_id in all_ids:
+            db.add(
+                NewsItem(
+                    id=news_id,
+                    symbol="TIES",
+                    headline=f"Cap-boundary tie candidate {news_id}",
+                    url=id_to_url[news_id],
+                    source="AP",
+                    published_at=shared_published_at,
+                )
+            )
+        await db.commit()
+
+        expected_selected_ids = sorted(all_ids, reverse=True)[:NEWS_LIMIT]
+        expected_selected_urls = [id_to_url[news_id] for news_id in expected_selected_ids]
+        expected_excluded_urls = {id_to_url[news_id] for news_id in all_ids} - set(
+            expected_selected_urls
+        )
+        assert len(expected_excluded_urls) == 3, "test setup: exactly 3 rows must fall outside the cap"
+
+        # Stable across 5 repeated calls, not just lucky once.
+        for _ in range(5):
+            news = await _collect_news(db)
+            urls = [n["url"] for n in news if n["symbol"] == "TIES"]
+            assert len(urls) == NEWS_LIMIT, (
+                f"cap must admit exactly {NEWS_LIMIT} rows from the "
+                f"{tie_count}-row tie set; got {len(urls)}"
+            )
+            assert urls == expected_selected_urls, (
+                "cap must select the id-descending PREFIX of the tie set "
+                f"(the {NEWS_LIMIT} highest ids), not an arbitrary subset; "
+                f"got {urls}"
+            )
+            assert expected_excluded_urls.isdisjoint(urls), (
+                "rows outside the id-descending cap prefix must never be "
+                f"selected; found {expected_excluded_urls & set(urls)}"
             )

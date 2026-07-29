@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -61,10 +62,17 @@ class Trade(Base, TimestampMixin):
         Enum(TradeType, name="trade_type_enum", values_callable=lambda x: [e.value for e in x]),
         nullable=False,
     )
+    # Unsigned magnitude: direction is carried by ``trade_type`` (buy/sell/
+    # short/cover), never by the sign of quantity. Guarded at the DB by
+    # ``ck_trades_quantity_positive`` (see __table_args__).
     quantity: Mapped[Decimal] = mapped_column(
         Numeric(18, 8),
         nullable=False,
     )
+    # Deliberately NOT check-constrained: a zero cost basis is legitimate
+    # (vested RSU, gifted/inherited shares, a spin-off lot). See
+    # alembic/deferred/ for the price > 0 constraint held back for a
+    # data-inspection decision.
     price: Mapped[Decimal] = mapped_column(
         Numeric(18, 8),
         nullable=False,
@@ -142,6 +150,13 @@ class Trade(Base, TimestampMixin):
     )
 
     __table_args__ = (
+        # Quantity is an unsigned magnitude - a buy of -5 or a sell of 0 is a
+        # malformed row, not a short/no-op, because direction lives in
+        # trade_type. The API layer already rejects it (schemas.trade
+        # Field(gt=0)), but every other writer - seeds, Schwab adoption,
+        # imports, psql - bypasses that; this is the backstop that cannot be
+        # bypassed. Mirrored by alembic 20260729_001.
+        CheckConstraint("quantity > 0", name="ck_trades_quantity_positive"),
         Index("idx_trades_user_equity", "user_id", "equity_id"),
         Index("idx_trades_executed_at", "executed_at"),
         Index("idx_trades_user_executed", "user_id", "executed_at"),

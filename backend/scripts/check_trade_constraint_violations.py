@@ -22,6 +22,11 @@ different things:
       ``price < 0`` never is. This section is the input to the deferred
       price-constraint decision - see ``alembic/deferred/README.md``.
 
+It also reports the total ``trades`` row count: ``ADD CONSTRAINT ... CHECK``
+validates every existing row while holding an ACCESS EXCLUSIVE lock, so the row
+count is the input to "how long is that lock held?" (migration 20260729_001,
+decision D5). It never affects the exit code.
+
 Read-only by construction: it opens one transaction, issues
 ``SET TRANSACTION READ ONLY`` before any other statement, and only ever SELECTs.
 Postgres itself rejects any write attempted on that connection.
@@ -66,6 +71,12 @@ from sqlalchemy.ext.asyncio import create_async_engine  # noqa: E402
 from app.core.config import settings  # noqa: E402
 
 DEFAULT_SAMPLE_LIMIT = 20
+
+# Table size. `ADD CONSTRAINT ... CHECK` validates every existing row under an
+# ACCESS EXCLUSIVE lock on trades (see migration 20260729_001, decision D5), so
+# the row count is what sets how long that lock is held. Reported so the apply
+# sitting can see it rather than assume it.
+TOTAL_ROWS_SQL = "SELECT count(*) FROM trades;"
 
 # Sample columns: enough to identify and triage a row without dumping notes.
 SAMPLE_COLUMNS = """
@@ -140,6 +151,8 @@ def print_sql(limit: int) -> None:
     """Emit the raw SQL so it can be pasted into psql, no Python needed."""
     print("-- READ-ONLY. Run inside a read-only transaction:")
     print("BEGIN; SET TRANSACTION READ ONLY;")
+    print("\n-- [total] table size - sets how long ADD CONSTRAINT holds its lock")
+    print(TOTAL_ROWS_SQL)
     for bucket in BUCKETS:
         print(f"\n-- [{bucket.label}] {bucket.note}")
         print(bucket.count_sql())
@@ -147,8 +160,11 @@ def print_sql(limit: int) -> None:
     print("\nROLLBACK;")
 
 
-async def collect(database_url: str, limit: int) -> dict[str, dict]:
-    """Count + sample every bucket over one read-only transaction."""
+async def collect(database_url: str, limit: int) -> tuple[int, dict[str, dict]]:
+    """Count + sample every bucket over one read-only transaction.
+
+    Returns ``(total_trades_rows, results_by_bucket_label)``.
+    """
     engine = create_async_engine(database_url)
     results: dict[str, dict] = {}
     try:
@@ -156,6 +172,7 @@ async def collect(database_url: str, limit: int) -> dict[str, dict]:
             # First statement in the transaction: Postgres then refuses any
             # write on this connection for its duration.
             await conn.execute(text("SET TRANSACTION READ ONLY"))
+            total_rows = int(await conn.scalar(text(TOTAL_ROWS_SQL)) or 0)
             for bucket in BUCKETS:
                 count = await conn.scalar(text(bucket.count_sql()))
                 samples: list[dict] = []
@@ -175,7 +192,7 @@ async def collect(database_url: str, limit: int) -> dict[str, dict]:
                 }
     finally:
         await engine.dispose()
-    return results
+    return total_rows, results
 
 
 def _print_bucket(result: dict, limit: int) -> None:
@@ -195,13 +212,18 @@ def _print_bucket(result: dict, limit: int) -> None:
         print(f"      ... {count - len(result['samples'])} more (raise --limit, currently {limit})")
 
 
-def report(results: dict[str, dict], url_display: str, limit: int) -> int:
+def report(results: dict[str, dict], url_display: str, limit: int, total_rows: int) -> int:
     """Print the human report; return the process exit code."""
     quantity_total = sum(results[b.label]["count"] for b in QUANTITY_BUCKETS)
     price_total = sum(results[b.label]["count"] for b in PRICE_BUCKETS)
 
     print(f"Trade constraint pre-check - {url_display}")
     print("READ-ONLY: every statement ran in a SET TRANSACTION READ ONLY transaction.\n")
+    print(
+        f"trades: {total_rows} row(s). `ADD CONSTRAINT ... CHECK` validates all of "
+        "them under an\n        ACCESS EXCLUSIVE lock, so this is the lock-duration "
+        "input (migration 20260729_001, D5).\n"
+    )
 
     print("QUANTITY - gate for migration 20260729_001: CHECK (quantity > 0)")
     for bucket in QUANTITY_BUCKETS:
@@ -240,16 +262,21 @@ async def main_async(args: argparse.Namespace) -> int:
     database_url = args.database_url or settings.DATABASE_URL
     url_display = make_url(database_url).render_as_string(hide_password=True)
     try:
-        results = await collect(database_url, args.limit)
+        total_rows, results = await collect(database_url, args.limit)
     except Exception as exc:  # operational failure - nothing was inspected
         print(f"Pre-check could not run against {url_display}: {exc!r}", file=sys.stderr)
         return 2
     if args.json:
-        print(json.dumps({"database": url_display, "buckets": results}, indent=2))
+        print(
+            json.dumps(
+                {"database": url_display, "total_rows": total_rows, "buckets": results},
+                indent=2,
+            )
+        )
         return 1 if any(
             results[b.label]["count"] for b in QUANTITY_BUCKETS
         ) else 0
-    return report(results, url_display, args.limit)
+    return report(results, url_display, args.limit, total_rows)
 
 
 def main() -> int:

@@ -68,11 +68,18 @@ def _finite(value: Decimal | None) -> Decimal | None:
     """``None`` for a non-finite Decimal, else the value unchanged.
 
     Postgres ``numeric`` accepts NaN and Infinity, and pydantic refuses to
-    serialize them - so a single such stored cell would make this view raise a
-    ValidationError on EVERY subsequent read. Both write paths now reject
-    non-finite values; this keeps the read path total for anything that
-    predates that guard, since no code path can delete an ImportedTransaction
-    to repair it.
+    serialize them - so a single such stored cell would make the view that
+    reads it raise a ValidationError on EVERY subsequent read.
+
+    APPLY THIS AT EVERY SITE THAT READS A STORED DECIMAL INTO A RESPONSE
+    MODEL. The ingestion parsers (``schwab_ingestion._decimal``,
+    ``broker_csv._decimal``) both reject non-finite values, but that is a
+    guard on TODAY'S writers, not an invariant of the column: ``numeric``
+    itself permits NaN, rows predate any guard, and a future writer (a
+    backfill, a fixture, another broker lane) is not bound by it. Treat stored
+    decimals as untrusted on read and this stays true no matter what lands in
+    the table - which matters because deletions are out of scope for v1, so a
+    row that breaks a view breaks it permanently.
     """
     if value is None or not value.is_finite():
         return None
@@ -155,14 +162,19 @@ class ReconciliationService:
                 None if eligible else f"asset_type {asset_type} not supported"
             )
 
-            schwab_quantity = sp.quantity if sp is not None else None
-            ic_quantity = ip.quantity if ip is not None else None
+            # _finite() BEFORE the arithmetic, not after: a non-finite stored
+            # cell reads as absent (the same as "that side has no position"),
+            # which keeps quantity_delta finite by construction and therefore
+            # keeps the schema's "NEVER null" guarantee on it honest. Sanitizing
+            # afterwards would leave a NaN delta with nowhere legal to put it.
+            schwab_quantity = _finite(sp.quantity) if sp is not None else None
+            ic_quantity = _finite(ip.quantity) if ip is not None else None
             quantity_delta = (
                 (schwab_quantity if schwab_quantity is not None else Decimal("0"))
                 - (ic_quantity if ic_quantity is not None else Decimal("0"))
             )
 
-            schwab_basis = sp.average_price if sp is not None else None
+            schwab_basis = _finite(sp.average_price) if sp is not None else None
             ic_basis: Decimal | None = None
             ledger_inconsistent = False
             if ip is not None:
@@ -170,7 +182,7 @@ class ReconciliationService:
                     user_id, ip.equity_id, account_id
                 )
                 ledger_inconsistent = open_lots.ledger_inconsistent
-                ic_basis = open_lots.basis()
+                ic_basis = _finite(open_lots.basis())
 
             basis_delta = (
                 schwab_basis - ic_basis
@@ -365,10 +377,11 @@ class ReconciliationService:
         """
         qty = txn.quantity
         # is_finite() before any comparison: Postgres ``numeric`` stores NaN
-        # happily, and ``Decimal("NaN") > 0`` raises InvalidOperation. Both
-        # write paths now reject non-finite values, so this is defence in
-        # depth for any row that predates that guard - and since nothing can
-        # DELETE an ImportedTransaction, a single such row would otherwise
+        # happily, and ``Decimal("NaN") > 0`` raises InvalidOperation. Today's
+        # ingestion parsers reject non-finite values, but that is a property of
+        # those writers rather than of the column (see _finite), so the read
+        # path guards independently - and since nothing can DELETE an
+        # ImportedTransaction, a single such row would otherwise
         # 500 this view forever.
         if qty is None or not qty.is_finite() or qty == 0:
             return None

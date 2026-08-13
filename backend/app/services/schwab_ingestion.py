@@ -172,12 +172,28 @@ async def get_connected_provider(
 # Normalization
 # ---------------------------------------------------------------------------
 def _decimal(value) -> Decimal | None:
+    """Parse one raw Schwab numeric field, or ``None``.
+
+    REJECTS NON-FINITE VALUES, for the same reason ``broker_csv._decimal``
+    does. Python's ``json.loads`` accepts bare ``NaN``/``Infinity`` literals by
+    default, so a malformed upstream response carries them straight through
+    ``provider.get_positions()`` into here - and ``Decimal("NaN")`` is a
+    perfectly valid construction that Postgres ``numeric`` then stores
+    happily. Pydantic refuses to serialize it, so a single such cell makes
+    every subsequent READ of the reconciliation view raise a ValidationError.
+    Dropping the field to ``None`` at parse time is the containable outcome:
+    the row still lands, the view still renders, and the value reads as absent
+    rather than as a number nobody can trust.
+    """
     if value is None:
         return None
     try:
-        return Decimal(str(value))
+        parsed = Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
         return None
+    if not parsed.is_finite():  # NaN / sNaN / +-Infinity
+        return None
+    return parsed
 
 
 def _normalize_position(raw: dict) -> dict:

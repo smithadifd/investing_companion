@@ -736,6 +736,52 @@ class TestPullTransactions:
         for row in rows:
             assert "accountNumber" not in row.raw
 
+    async def test_same_activity_id_in_two_linked_accounts_keeps_both_rows(
+        self, ingest_env, patch_provider
+    ):
+        """The API lane's key must be account-scoped, asserted as a PROPERTY.
+
+        Schwab does not document activityId as unique ACROSS one user's
+        accounts, and the constraint these rows land on is (user_id,
+        external_transaction_id) with NO account_hash in it. So a bare id lets
+        a Roth and a taxable account collide - and because the upsert also
+        assigns account_hash from the incoming values, the collision MOVES the
+        row rather than merely updating it: it vanishes from one reconciliation
+        view and reappears misattributed in the other.
+
+        Deliberately does NOT call account_scoped_external_id in its
+        assertions. Comparing the helper against itself would verify only that
+        account_hash is threaded through, and would still pass if the helper
+        were reverted to `return external_id`. Two surviving rows is the
+        property; the key format is free to change.
+        """
+        factory, user_id = ingest_env
+        now = _utcnow()
+        window = dict(
+            start_date=now - timedelta(days=40),
+            end_date=now - timedelta(days=10),
+        )
+        hash_a, hash_b = "HASH_ROTH", "HASH_TAXABLE"
+
+        # The SAME activityId reported under two different account hashes.
+        patch_provider(
+            _FakeProvider(transaction_pages=[[_transaction_fixture(activityId=555)]])
+        )
+        await pull_transactions(user_id, hash_a, session_factory=factory, **window)
+
+        patch_provider(
+            _FakeProvider(transaction_pages=[[_transaction_fixture(activityId=555)]])
+        )
+        await pull_transactions(user_id, hash_b, session_factory=factory, **window)
+
+        rows = await _read_all(factory, ImportedTransaction, user_id)
+        assert len(rows) == 2, (
+            "the second account's pull overwrote the first account's row - "
+            "external_transaction_id is not account-scoped"
+        )
+        assert {r.account_hash for r in rows} == {hash_a, hash_b}
+        assert len({r.external_transaction_id for r in rows}) == 2
+
     async def test_repull_same_window_does_not_duplicate(
         self, ingest_env, patch_provider
     ):

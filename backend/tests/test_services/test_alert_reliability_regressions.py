@@ -172,3 +172,187 @@ class TestSustainedCounterLockstep:
                 f"persisted counter {alert.consecutive_met_count} != evaluated "
                 f"{expected} at prev={prev}"
             )
+
+
+class TestIntradayWickReFire:
+    """Issue #258: a crossing alert fired by an intraday extreme must consume
+    the excursion, not re-fire every cooldown for the rest of the session.
+
+    ``_evaluate_condition`` fires ``crosses_below`` when the intraday LOW
+    breaches the threshold even though the check-time price is still above it.
+    On ``origin/main`` the latch is set from the check-time price alone, so it
+    stays ``True``, the same session low keeps satisfying the trigger, and the
+    alert re-notifies on every cooldown expiry. The fix keys the latch on the
+    same evidence the evaluator fired against.
+
+    ``test_crosses_below_wick_does_not_refire`` and
+    ``test_crosses_above_wick_does_not_refire`` FAIL on ``origin/main``.
+    """
+
+    @patch("app.services.alert.discord_service")
+    async def test_crosses_below_wick_does_not_refire(
+        self, mock_discord, db: AsyncSession
+    ):
+        # The live case: EQT half-starter (< $52) fired 2026-08-10 at $52.25.
+        mock_discord.send_alert_notification = AsyncMock(return_value=(True, None))
+        equity = await create_test_equity(db, symbol="WICK1")
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="crosses_below",
+            threshold_value=52.0,
+            cooldown_minutes=0,  # isolate the latch from the cooldown
+            was_above_threshold=True,
+        )
+
+        service = AlertService(db)
+        mock_yahoo = AsyncMock()
+        service.yahoo = mock_yahoo
+
+        # Check 1: price above the threshold, session low wicked through it.
+        mock_yahoo.get_quote = AsyncMock(
+            return_value=_mock_quote(52.25, high=53.10, low=51.80)
+        )
+        first, error = await service.process_alert(alert)
+        assert first is True, "the wick should fire once"
+        assert error is None
+        assert alert.was_above_threshold is False, (
+            "the intraday breach must be latched; leaving this True is #258"
+        )
+
+        # Check 2: same session, same session low, price still above.
+        # Nothing new has happened, so nothing new should fire.
+        mock_yahoo.get_quote = AsyncMock(
+            return_value=_mock_quote(52.40, high=53.10, low=51.80)
+        )
+        second, _ = await service.process_alert(alert)
+        assert second is False, "re-fired on the same intraday low (#258)"
+
+        # Check 3: still the same excursion, one more cooldown later.
+        mock_yahoo.get_quote = AsyncMock(
+            return_value=_mock_quote(52.60, high=53.10, low=51.80)
+        )
+        third, _ = await service.process_alert(alert)
+        assert third is False, "re-fired a second time on the same low (#258)"
+
+    @patch("app.services.alert.discord_service")
+    async def test_crosses_above_wick_does_not_refire(
+        self, mock_discord, db: AsyncSession
+    ):
+        mock_discord.send_alert_notification = AsyncMock(return_value=(True, None))
+        equity = await create_test_equity(db, symbol="WICK2")
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="crosses_above",
+            threshold_value=50.0,
+            cooldown_minutes=0,
+            was_above_threshold=False,
+        )
+
+        service = AlertService(db)
+        mock_yahoo = AsyncMock()
+        service.yahoo = mock_yahoo
+
+        mock_yahoo.get_quote = AsyncMock(
+            return_value=_mock_quote(49.50, high=50.40, low=49.00)
+        )
+        first, _ = await service.process_alert(alert)
+        assert first is True
+        assert alert.was_above_threshold is True, (
+            "the intraday breach must be latched; leaving this False is #258"
+        )
+
+        mock_yahoo.get_quote = AsyncMock(
+            return_value=_mock_quote(49.60, high=50.40, low=49.00)
+        )
+        second, _ = await service.process_alert(alert)
+        assert second is False, "re-fired on the same intraday high (#258)"
+
+    @patch("app.services.alert.discord_service")
+    async def test_genuine_new_excursion_still_fires(
+        self, mock_discord, db: AsyncSession
+    ):
+        """The fix must not silence real crossings — only duplicate ones.
+
+        Guards the obvious over-correction: latching the excursion so hard
+        that a recovery never re-arms the alert.
+        """
+        mock_discord.send_alert_notification = AsyncMock(return_value=(True, None))
+        equity = await create_test_equity(db, symbol="WICK3")
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="crosses_below",
+            threshold_value=52.0,
+            cooldown_minutes=0,
+            was_above_threshold=True,
+        )
+
+        service = AlertService(db)
+        mock_yahoo = AsyncMock()
+        service.yahoo = mock_yahoo
+
+        # Fire on the wick.
+        mock_yahoo.get_quote = AsyncMock(
+            return_value=_mock_quote(52.25, high=53.10, low=51.80)
+        )
+        assert (await service.process_alert(alert))[0] is True
+        assert alert.was_above_threshold is False
+
+        # New session: price recovered, the session low is back above the
+        # threshold. The alert must re-arm.
+        mock_yahoo.get_quote = AsyncMock(
+            return_value=_mock_quote(54.00, high=54.50, low=53.20)
+        )
+        assert (await service.process_alert(alert))[0] is False
+        assert alert.was_above_threshold is True, "must re-arm after recovery"
+
+        # A genuine second excursion fires again.
+        mock_yahoo.get_quote = AsyncMock(
+            return_value=_mock_quote(51.00, high=53.00, low=50.90)
+        )
+        assert (await service.process_alert(alert))[0] is True, (
+            "a real crossing after re-arming must still fire"
+        )
+
+    async def test_latch_lockstep_with_evaluator(self, db: AsyncSession):
+        """Pinning test: for every (price, high, low) shape, the latch agrees
+        with what the evaluator would fire on next check.
+
+        The invariant: immediately after a check, the alert must NOT be in a
+        state where the evaluator would fire again on identical inputs. That
+        is the #258 defect stated as a property, and it guards both directions
+        against a future edit to one site but not the other.
+        """
+        equity = await create_test_equity(db, symbol="LOCK2")
+        service = AlertService(db)
+        threshold = Decimal("52")
+
+        shapes = [
+            (Decimal("52.25"), Decimal("53.10"), Decimal("51.80")),  # wick below
+            (Decimal("51.00"), Decimal("53.00"), Decimal("50.90")),  # closed below
+            (Decimal("54.00"), Decimal("54.50"), Decimal("53.20")),  # clean above
+            (Decimal("52.00"), Decimal("52.00"), Decimal("52.00")),  # exactly at
+        ]
+
+        for condition in ("crosses_below", "crosses_above"):
+            for price, high, low in shapes:
+                alert = await create_test_alert(
+                    db, equity,
+                    condition_type=condition,
+                    threshold_value=float(threshold),
+                    was_above_threshold=True,
+                )
+                # Apply the latch this check would persist...
+                alert.was_above_threshold = service._next_was_above_threshold(
+                    condition, price, threshold, high, low
+                )
+                await db.flush()
+
+                # ...then re-evaluate the SAME inputs. A second fire here means
+                # the latch did not record the excursion the evaluator used.
+                triggered, desc = await service._evaluate_condition(
+                    alert, price, intraday_high=high, intraday_low=low
+                )
+                assert triggered is False, (
+                    f"{condition} would re-fire on unchanged inputs "
+                    f"(price={price}, high={high}, low={low}): {desc!r}"
+                )

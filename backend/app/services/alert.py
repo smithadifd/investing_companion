@@ -422,6 +422,8 @@ class AlertService:
             threshold_value=alert.threshold_value,
             condition_met=condition_desc,
             should_notify=should_notify,
+            intraday_high=intraday_high,
+            intraday_low=intraday_low,
         )
 
     async def process_alert(self, alert: Alert) -> tuple[bool, str | None]:
@@ -435,10 +437,10 @@ class AlertService:
         try:
             result = await self.check_alert(alert)
 
-            # Always update was_above_threshold for cross detection alerts
-            # Use >= so that price exactly at threshold counts as "above"
-            # (avoids a gap where price == threshold sets was_above to False,
-            # causing a subsequent drop below threshold to be missed)
+            # Always update was_above_threshold for cross detection alerts.
+            # The latch is keyed on the same evidence the evaluator fires on
+            # (check-time price AND the intraday extreme) — see
+            # _next_was_above_threshold.
             # Skip state updates when the fetch failed: the placeholder 0
             # value would corrupt was_above_threshold / the sustained counter
             if result.value_available and alert.condition_type in (
@@ -446,7 +448,13 @@ class AlertService:
                 "crosses_below",
             ):
                 threshold = Decimal(str(alert.threshold_value))
-                alert.was_above_threshold = result.current_value >= threshold
+                alert.was_above_threshold = self._next_was_above_threshold(
+                    alert.condition_type,
+                    result.current_value,
+                    threshold,
+                    result.intraday_high,
+                    result.intraday_low,
+                )
                 if alert.confirm_checks is not None:
                     # Advance the sustained counter. This MUST equal the
                     # prospective count _evaluate_sustained decided against —
@@ -1168,6 +1176,49 @@ class AlertService:
             return triggered, desc
 
         return False, f"Unknown condition type: {condition}"
+
+    @staticmethod
+    def _next_was_above_threshold(
+        condition_type: str,
+        current_value: Decimal,
+        threshold: Decimal,
+        intraday_high: Decimal | None,
+        intraday_low: Decimal | None,
+    ) -> bool:
+        """The crossing latch after one more check.
+
+        Single source of truth for ``was_above_threshold``, the sibling of
+        ``_next_sustained_count``. The latch MUST be keyed on the same
+        evidence the crossing evaluator fires on, or a trigger consumes an
+        excursion the latch never records — and the alert re-fires every
+        cooldown for the rest of the session (#258).
+
+        ``_evaluate_condition`` fires ``crosses_below`` on the intraday LOW
+        and ``crosses_above`` on the intraday HIGH, so the latch follows the
+        same extreme: once the low has breached, the alert reads "below"
+        until price re-arms by closing a check back on the other side. The
+        intraday extreme persists for the rest of the session, which is what
+        makes the fire once-per-excursion rather than once-per-cooldown.
+
+        Boundary handling matches the evaluator exactly: check-time price at
+        the threshold counts as above (so a later drop is still a cross),
+        while the intraday extremes use the evaluator's strict comparisons.
+        With no provider high/low the extremes fall back to check-time price
+        and this reduces to the original ``current_value >= threshold``.
+        """
+        currently_above = current_value >= threshold
+
+        if condition_type == "crosses_above":
+            effective_high = (
+                intraday_high if intraday_high is not None else current_value
+            )
+            return currently_above or effective_high > threshold
+
+        if condition_type == "crosses_below":
+            effective_low = intraday_low if intraday_low is not None else current_value
+            return currently_above and not effective_low < threshold
+
+        return currently_above
 
     @staticmethod
     def _next_sustained_count(current_count: int | None, beyond: bool) -> int:

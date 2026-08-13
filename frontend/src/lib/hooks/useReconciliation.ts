@@ -1,17 +1,26 @@
 /**
- * Hook for the read-only §6 Schwab reconciliation view.
+ * Hooks for the Schwab reconciliation surface.
  *
- * Strictly read-only: it fetches the Schwab-vs-IC delta table for one account.
- * There is no adopt/mutation hook here by design (that surface belongs to a
- * later wave).
+ * Two read hooks (the §6 positions delta table and the transactions activity
+ * view) and two mutations (pull from Schwab, adopt the delta). The mutations
+ * invalidate BOTH reconciliation queries plus trades/portfolio, because an
+ * import changes what the broker side reports and an adoption writes real
+ * trades that every position read is derived from.
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { AccountReconciliation } from '../api/types';
+import type {
+  AccountReconciliation,
+  AdoptionResult,
+  CsvImportResult,
+  ImportKindRequest,
+  ImportTriggerResult,
+  TransactionReconciliation,
+} from '../api/types';
 
 /**
- * Fetch the reconciliation view for one account.
+ * Fetch the positions reconciliation view for one account.
  *
  * Only runs when an account id is provided and `enabled` (e.g. the tab is
  * open). A 409 (no active Schwab link) surfaces as the query error, which the
@@ -27,5 +36,83 @@ export function useAccountReconciliation(
     enabled: enabled && accountId !== null,
     retry: false,
     staleTime: 60 * 1000,
+  });
+}
+
+/**
+ * Fetch the transactions activity reconciliation for one account.
+ *
+ * `days` is part of the query key so widening the window refetches rather than
+ * serving a narrower cached window.
+ */
+export function useAccountTransactionReconciliation(
+  accountId: number | null,
+  days = 90,
+  enabled = true
+) {
+  return useQuery<TransactionReconciliation>({
+    queryKey: ['reconciliation', 'transactions', accountId, days],
+    queryFn: () =>
+      api.getAccountTransactionReconciliation(accountId as number, days),
+    enabled: enabled && accountId !== null,
+    retry: false,
+    staleTime: 60 * 1000,
+  });
+}
+
+/** Query keys every reconciliation-affecting mutation must invalidate. */
+function invalidateReconciliation(
+  queryClient: ReturnType<typeof useQueryClient>
+) {
+  queryClient.invalidateQueries({ queryKey: ['reconciliation'] });
+  queryClient.invalidateQueries({ queryKey: ['trades'] });
+  queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+}
+
+/**
+ * Trigger a Schwab pull for one account. This is what takes a linked account
+ * out of its "never imported" state — before this existed, nothing in the app
+ * ever called the ingestion service.
+ */
+export function useTriggerBrokerImport() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    ImportTriggerResult,
+    Error,
+    { accountId: number; kind?: ImportKindRequest }
+  >({
+    mutationFn: ({ accountId, kind }) =>
+      api.triggerBrokerImport(accountId, kind ?? 'both'),
+    onSuccess: () => invalidateReconciliation(queryClient),
+  });
+}
+
+/**
+ * Adopt the reconciliation delta into synthetic trades. Replay-safe server
+ * side, so a double click cannot double-adopt.
+ */
+export function useAdoptReconciliation() {
+  const queryClient = useQueryClient();
+  return useMutation<AdoptionResult, Error, number>({
+    mutationFn: (accountId) => api.adoptAccountReconciliation(accountId),
+    onSuccess: () => invalidateReconciliation(queryClient),
+  });
+}
+
+/**
+ * Upload a broker transaction CSV. This is the only way to get activity older
+ * than Schwab's 60-day API horizon into the ledger comparison — the pull
+ * physically cannot reach it.
+ */
+export function useImportBrokerCsv() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    CsvImportResult,
+    Error,
+    { accountId: number; content: string; filename?: string }
+  >({
+    mutationFn: ({ accountId, content, filename }) =>
+      api.importBrokerCsv(accountId, content, filename),
+    onSuccess: () => invalidateReconciliation(queryClient),
   });
 }

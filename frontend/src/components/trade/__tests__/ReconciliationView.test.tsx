@@ -1,12 +1,33 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@/test/utils';
+import userEvent from '@testing-library/user-event';
 import { ReconciliationView } from '../ReconciliationView';
 import type { Account, AccountReconciliation } from '@/lib/api/types';
 
 const mockUseReconciliation = vi.fn();
+const mockTriggerImport = vi.fn();
+const mockAdopt = vi.fn();
+const mockUseTransactionReconciliation = vi.fn();
 vi.mock('@/lib/hooks/useReconciliation', () => ({
   useAccountReconciliation: (...args: unknown[]) =>
     mockUseReconciliation(...args),
+  useAccountTransactionReconciliation: (...args: unknown[]) =>
+    mockUseTransactionReconciliation(...args),
+  useTriggerBrokerImport: () => ({
+    mutateAsync: mockTriggerImport,
+    isPending: false,
+    isSuccess: false,
+    data: undefined,
+  }),
+  useAdoptReconciliation: () => ({
+    mutateAsync: mockAdopt,
+    isPending: false,
+  }),
+  // The Activity tab renders BrokerCsvUpload, which consumes this hook.
+  useImportBrokerCsv: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
 }));
 
 // Mock the client module with a real ApiError class (defined inside the
@@ -77,6 +98,11 @@ const populated: AccountReconciliation = {
 describe('ReconciliationView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseTransactionReconciliation.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: null,
+    });
   });
 
   it('renders both eligible and ineligible rows, greying (not hiding) ineligible', () => {
@@ -104,14 +130,88 @@ describe('ReconciliationView', () => {
     );
   });
 
-  it('has no Adopt control (strictly read-only)', () => {
+  it('offers Adopt for the eligible non-zero deltas only', async () => {
     mockUseReconciliation.mockReturnValue({
       data: populated,
       isLoading: false,
       error: null,
     });
     render(<ReconciliationView accounts={accounts} />);
-    expect(screen.queryByText(/adopt/i)).not.toBeInTheDocument();
+
+    // AAPL is eligible with a non-zero delta; OPT is ineligible and excluded.
+    const adoptButton = screen.getByRole('button', { name: /adopt \(1\)/i });
+    expect(adoptButton).toBeEnabled();
+
+    // Adoption is confirmation-gated — clicking does not mutate immediately.
+    await userEvent.click(adoptButton);
+    expect(mockAdopt).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/Adopt Schwab positions\?/i)
+    ).toBeInTheDocument();
+  });
+
+  it('disables Adopt when nothing is adoptable', () => {
+    mockUseReconciliation.mockReturnValue({
+      data: {
+        ...populated,
+        positions: [{ ...populated.positions[0], quantity_delta: '0' }],
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<ReconciliationView accounts={accounts} />);
+    expect(screen.getByRole('button', { name: /adopt/i })).toBeDisabled();
+  });
+
+  it('triggers a Schwab import from the Import button', async () => {
+    mockUseReconciliation.mockReturnValue({
+      data: populated,
+      isLoading: false,
+      error: null,
+    });
+    render(<ReconciliationView accounts={accounts} />);
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /import from schwab/i })
+    );
+    expect(mockTriggerImport).toHaveBeenCalledWith({ accountId: 1 });
+  });
+
+  it('switches to the activity tab and renders its view', async () => {
+    mockUseReconciliation.mockReturnValue({
+      data: populated,
+      isLoading: false,
+      error: null,
+    });
+    mockUseTransactionReconciliation.mockReturnValue({
+      data: {
+        window_start: '2026-05-01T00:00:00Z',
+        window_end: '2026-08-01T00:00:00Z',
+        last_import_at: '2026-07-31T00:00:00Z',
+        never_imported: false,
+        newer_failed_import_at: null,
+        history_gap: false,
+        history_gap_note: null,
+        transaction_history_limit_days: 60,
+        matched_count: 1,
+        broker_only_count: 2,
+        ic_only_count: 0,
+        transactions: [],
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<ReconciliationView accounts={accounts} />);
+
+    await userEvent.click(screen.getByRole('tab', { name: /activity/i }));
+    expect(screen.getByTestId('txn-broker-only-count')).toHaveTextContent(
+      '2 not in your ledger'
+    );
+    // The CSV recovery path is reachable from the activity tab even without a
+    // flagged history gap — a first-ever import of an old account needs it too.
+    expect(
+      screen.getByRole('button', { name: /upload broker csv/i })
+    ).toBeInTheDocument();
   });
 
   it('shows a never-imported banner instead of drift rows', () => {

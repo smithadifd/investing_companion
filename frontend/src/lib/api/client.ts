@@ -38,6 +38,11 @@ import type {
   AccountCreate,
   AccountReconciliation,
   AccountUpdate,
+  AdoptionResult,
+  CsvImportResult,
+  ImportKindRequest,
+  ImportTriggerResult,
+  TransactionReconciliation,
   ExposureResponse,
   NeedsAttentionResponse,
   TradeReadinessResponse,
@@ -1237,6 +1242,63 @@ class ApiClient {
   ): Promise<AccountReconciliation> {
     return this.fetch<AccountReconciliation>(
       `/accounts/${accountId}/reconciliation`
+    );
+  }
+
+  /**
+   * Transactions activity reconciliation — broker fills vs logged IC trades.
+   * 409 when the account has no active Schwab link.
+   */
+  async getAccountTransactionReconciliation(
+    accountId: number,
+    days = 90
+  ): Promise<TransactionReconciliation> {
+    return this.fetch<TransactionReconciliation>(
+      `/accounts/${accountId}/reconciliation/transactions?days=${days}`
+    );
+  }
+
+  /**
+   * Pull positions and/or transactions from Schwab for a linked account.
+   * 409 = not linked or Schwab needs (re)connecting; 502 = Schwab said no.
+   */
+  async triggerBrokerImport(
+    accountId: number,
+    kind: ImportKindRequest = 'both'
+  ): Promise<ImportTriggerResult> {
+    return this.fetch<ImportTriggerResult>(`/accounts/${accountId}/import`, {
+      method: 'POST',
+      body: JSON.stringify({ kind }),
+    });
+  }
+
+  /**
+   * Import a broker transaction CSV — the recovery path for activity older
+   * than Schwab's 60-day API history horizon. The file is sent as text in a
+   * JSON body, matching this API's other import endpoint. 422 when the file
+   * isn't a recognizable transaction export.
+   */
+  async importBrokerCsv(
+    accountId: number,
+    content: string,
+    filename?: string
+  ): Promise<CsvImportResult> {
+    return this.fetch<CsvImportResult>(`/accounts/${accountId}/import/csv`, {
+      method: 'POST',
+      body: JSON.stringify({ content, filename: filename ?? null }),
+    });
+  }
+
+  /**
+   * Adopt the reconciliation delta into synthetic, provenance-stamped trades.
+   * Replay-safe: re-adopting against the same import run creates no duplicate.
+   */
+  async adoptAccountReconciliation(
+    accountId: number
+  ): Promise<AdoptionResult> {
+    return this.fetch<AdoptionResult>(
+      `/accounts/${accountId}/reconciliation/adopt`,
+      { method: 'POST' }
     );
   }
 

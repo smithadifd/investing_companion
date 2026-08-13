@@ -8,10 +8,13 @@ latest ``status=complete`` positions run (see :func:`get_current_positions`).
 A re-pull is a new run (history), never an in-place update of a prior run's
 rows.
 
-Transactions are upserted by Schwab's stable ``activityId``: a re-pull over
-an overlapping window updates existing rows in place (a Schwab correction,
-same ID with changed fields, overwrites) and never duplicates. Deletions are
-out of scope for v1.
+Transactions are upserted by Schwab's stable ``activityId``, namespaced by
+account hash (see :func:`account_scoped_external_id`): a re-pull over an
+overlapping window updates existing rows in place (a Schwab correction, same
+ID with changed fields, overwrites) and never duplicates, while two of a
+user's OWN linked accounts can never collide with each other. Deletions are
+out of scope for v1 - which is also why anything unparseable must be rejected
+at write time: there is no delete surface to repair a bad row with.
 
 SESSION OWNERSHIP: :func:`pull_positions` and :func:`pull_transactions` own
 their entire transactional lifecycle - each creates its OWN session from the
@@ -43,14 +46,19 @@ truncation is recorded LOUDLY (``BrokerImportRun.notes`` + a warning log):
 the skipped span is unrecoverable via this API, and the broker-CSV import
 (sub-PR 3) is the designated recovery path.
 
-NO reconciliation logic and NO API endpoint/UI here - those are sub-PR 2 and
-the existing Settings UI respectively. This module only lands the ingestion
-primitive: given a user + an already-known Schwab account hash, pull once,
-normalize, and write.
+NO reconciliation logic and NO API endpoint/UI live in THIS module - it is
+only the ingestion primitive: given a user + an already-known Schwab account
+hash, pull once, normalize, and write. Those layers have since landed
+elsewhere and call in here: ``services/reconciliation.py`` +
+``services/adoption.py`` (sub-PR 2's logic), and ``services/broker_import.py``
++ ``POST /api/v1/accounts/{account_id}/import`` (the trigger that actually
+invokes the two pull functions below, honoring the session ownership above by
+never handing them a request-scoped session).
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -164,12 +172,28 @@ async def get_connected_provider(
 # Normalization
 # ---------------------------------------------------------------------------
 def _decimal(value) -> Decimal | None:
+    """Parse one raw Schwab numeric field, or ``None``.
+
+    REJECTS NON-FINITE VALUES, for the same reason ``broker_csv._decimal``
+    does. Python's ``json.loads`` accepts bare ``NaN``/``Infinity`` literals by
+    default, so a malformed upstream response carries them straight through
+    ``provider.get_positions()`` into here - and ``Decimal("NaN")`` is a
+    perfectly valid construction that Postgres ``numeric`` then stores
+    happily. Pydantic refuses to serialize it, so a single such cell makes
+    every subsequent READ of the reconciliation view raise a ValidationError.
+    Dropping the field to ``None`` at parse time is the containable outcome:
+    the row still lands, the view still renders, and the value reads as absent
+    rather than as a number nobody can trust.
+    """
     if value is None:
         return None
     try:
-        return Decimal(str(value))
+        parsed = Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
         return None
+    if not parsed.is_finite():  # NaN / sNaN / +-Infinity
+        return None
+    return parsed
 
 
 def _normalize_position(raw: dict) -> dict:
@@ -231,7 +255,28 @@ def _parse_schwab_datetime(value) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _normalize_transaction(raw: dict) -> dict:
+def account_scoped_external_id(account_hash: str, external_id: str) -> str:
+    """The ``external_transaction_id`` for one broker-supplied id.
+
+    NAMESPACED BY ACCOUNT, because the uniqueness constraint it lands on is
+    ``(user_id, external_transaction_id)`` - it does NOT include
+    ``account_hash`` - while one user may legitimately link several broker
+    accounts (``AccountLink`` is unique on ``(user_id, source, account_hash)``)
+    and Schwab does not document ``activityId`` as unique ACROSS a user's
+    accounts. A bare id would let a collision between a Roth and a taxable
+    account MOVE a row rather than merely update it, since the upsert also
+    assigns ``account_hash`` from the incoming values: the transaction would
+    vanish from one reconciliation view and reappear misattributed in the
+    other.
+
+    ``schwab:`` prefixed so it can additionally never collide with the
+    broker-CSV lane's ``csv:``-prefixed keys in the same column.
+    """
+    namespace = hashlib.sha256(account_hash.encode("utf-8")).hexdigest()[:8]
+    return f"schwab:{namespace}:{external_id[:40]}"
+
+
+def _normalize_transaction(raw: dict, account_hash: str) -> dict:
     """Map one raw (already account-number-redacted) Schwab transaction dict
     to ``ImportedTransaction`` column kwargs."""
     external_id = raw.get("activityId")
@@ -247,7 +292,9 @@ def _normalize_transaction(raw: dict) -> dict:
     order_id = raw.get("orderId")
 
     return {
-        "external_transaction_id": str(external_id),
+        "external_transaction_id": account_scoped_external_id(
+            account_hash, str(external_id)
+        ),
         "transaction_type": raw.get("type") or "UNKNOWN",
         "status": raw.get("status"),
         "sub_account": raw.get("subAccount"),
@@ -390,11 +437,20 @@ async def pull_positions(
 
 
 async def get_latest_complete_run(
-    db: AsyncSession, user_id: uuid.UUID, account_hash: str
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    account_hash: str,
+    kind: ImportKind = ImportKind.POSITIONS,
 ) -> BrokerImportRun | None:
-    """The most recent ``status=complete`` positions run for ``(user_id,
-    account_hash)``, or ``None`` if positions have never been successfully
-    pulled. "Current positions" = this run's ``ImportedPosition`` rows.
+    """The most recent ``status=complete`` run of ``kind`` for ``(user_id,
+    account_hash)``, or ``None`` if that kind has never been successfully
+    pulled. "Current positions" = the POSITIONS run's ``ImportedPosition`` rows.
+
+    ``kind`` defaults to POSITIONS (the §6 view's snapshot semantics). The
+    TRANSACTIONS variant is what the transactions reconciliation view reads for
+    its own recency envelope and for the run ``notes`` that carry a clamped
+    HISTORY GAP - the run is returned (not just its timestamp) precisely so a
+    caller can read those notes.
 
     Read-only; safe to call with any session.
     """
@@ -403,7 +459,7 @@ async def get_latest_complete_run(
         .where(
             BrokerImportRun.user_id == user_id,
             BrokerImportRun.account_hash == account_hash,
-            BrokerImportRun.kind == ImportKind.POSITIONS,
+            BrokerImportRun.kind == kind,
             BrokerImportRun.status == ImportStatus.COMPLETE,
         )
         .order_by(BrokerImportRun.created_at.desc())
@@ -413,24 +469,27 @@ async def get_latest_complete_run(
 
 
 async def get_newer_failed_import_at(
-    db: AsyncSession, user_id: uuid.UUID, account_hash: str
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    account_hash: str,
+    kind: ImportKind = ImportKind.POSITIONS,
 ) -> datetime | None:
-    """When the LATEST positions run is a ``failed`` one newer than the latest
+    """When the LATEST run of ``kind`` is a ``failed`` one newer than the latest
     complete run (or there is no complete run at all), its ``created_at`` -
     else ``None``. Surfaces "your last pull attempt actually failed, don't
     trust that this snapshot is current" (§6 / amendment 7).
 
     Sibling of :func:`get_latest_complete_run`: same read-only, any-session
-    contract, and scoped to ``kind=POSITIONS`` so it stays coherent with
-    ``last_import_at``. A failed pull is never conflated with a complete one -
-    ``ImportStatus`` already separates them; this is just a second query.
+    contract, and scoped to the SAME ``kind`` so it stays coherent with that
+    kind's ``last_import_at``. A failed pull is never conflated with a complete
+    one - ``ImportStatus`` already separates them; this is just a second query.
     """
     latest_any = await db.scalar(
         select(BrokerImportRun)
         .where(
             BrokerImportRun.user_id == user_id,
             BrokerImportRun.account_hash == account_hash,
-            BrokerImportRun.kind == ImportKind.POSITIONS,
+            BrokerImportRun.kind == kind,
         )
         .order_by(BrokerImportRun.created_at.desc())
         .limit(1)
@@ -517,10 +576,17 @@ async def _default_transaction_window_start(
     )
 
 
+# Marker prefix on BrokerImportRun.notes for a clamped, API-unrecoverable
+# span. Exported so readers (the transactions reconciliation envelope) can
+# detect the condition without string-matching a literal in two places.
+HISTORY_GAP_NOTE_PREFIX = "HISTORY GAP:"
+
+
 def _history_gap_note(requested_start: datetime, clamped_start: datetime) -> str:
     """The loud, run-row-visible record of an API-unrecoverable history gap."""
     return (
-        f"HISTORY GAP: requested window start {requested_start.isoformat()} "
+        f"{HISTORY_GAP_NOTE_PREFIX} requested window start "
+        f"{requested_start.isoformat()} "
         f"predates Schwab's {TRANSACTION_HISTORY_LIMIT_DAYS}-day transaction "
         f"history boundary; start clamped to {clamped_start.isoformat()}. "
         "Transactions in the skipped span are unrecoverable via the API - "
@@ -590,7 +656,10 @@ async def pull_transactions(
                     )
                     raw_transactions.extend(chunk)
 
-                normalized = [_normalize_transaction(t) for t in raw_transactions]
+                normalized = [
+                    _normalize_transaction(t, account_hash)
+                    for t in raw_transactions
+                ]
 
                 run = BrokerImportRun(
                     user_id=user_id,

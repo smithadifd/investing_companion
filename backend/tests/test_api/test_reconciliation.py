@@ -282,3 +282,185 @@ class TestReconciliationEndpoint:
             f"/api/v1/accounts/{acct['id']}/reconciliation"
         )
         assert resp.status_code == 200
+
+
+class TestPositionsReconciliationCrossUserIsolation:
+    """The audit's #1 bar on the §6 positions view.
+
+    The link lookup, the imported-position read and the IC-side position walk
+    are each filtered on user_id, so a broker ``account_hash`` is never itself
+    an authority - two users may legitimately hold the same hash STRING (it is
+    just an opaque token in a user-scoped column) and must still see only their
+    own rows.
+    """
+
+    async def _headers(self, db, user) -> dict:
+        from app.services.auth import AuthService
+
+        token, _ = AuthService(db)._create_access_token(user.id)
+        return {"Authorization": f"Bearer {token}"}
+
+    async def test_same_broker_hash_does_not_leak_positions_across_users(
+        self, client: AsyncClient, db: AsyncSession
+    ):
+        from tests.factories import create_test_account
+
+        a = await create_test_user(db, email="recon-iso-a@example.com")
+        b = await create_test_user(db, email="recon-iso-b@example.com")
+        a_account = await create_test_account(db, a, name="A Roth")
+        b_account = await create_test_account(db, b, name="B Roth")
+        await _link(db, a, a_account.id, HASH)
+        await _link(db, b, b_account.id, HASH)  # identical hash string
+
+        await _seed_positions_run(db, a, [("AAPL", "EQUITY", 25, 100)])
+        await db.commit()
+
+        hb = await self._headers(db, b)
+        resp = await client.get(
+            f"/api/v1/accounts/{b_account.id}/reconciliation", headers=hb
+        )
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["never_imported"] is True
+        assert data["positions"] == []
+
+        ha = await self._headers(db, a)
+        a_data = (
+            await client.get(
+                f"/api/v1/accounts/{a_account.id}/reconciliation", headers=ha
+            )
+        ).json()["data"]
+        assert [p["symbol"] for p in a_data["positions"]] == ["AAPL"]
+
+    async def test_b_cannot_adopt_into_a_account(
+        self, client: AsyncClient, db: AsyncSession
+    ):
+        from tests.factories import create_test_account
+
+        a = await create_test_user(db, email="adopt-iso-a@example.com")
+        b = await create_test_user(db, email="adopt-iso-b@example.com")
+        a_account = await create_test_account(db, a, name="A Roth")
+        await _link(db, a, a_account.id, HASH)
+        await _seed_positions_run(db, a, [("AAPL", "EQUITY", 25, 100)])
+        await db.commit()
+
+        hb = await self._headers(db, b)
+        resp = await client.post(
+            f"/api/v1/accounts/{a_account.id}/reconciliation/adopt", headers=hb
+        )
+        assert resp.status_code == 404
+
+
+class TestPositionsViewSurvivesNonFiniteValues:
+    """The §6 view must stay readable whatever is in the column.
+
+    ``json.loads`` accepts bare NaN/Infinity literals by default, so a
+    malformed Schwab response carries them through ``get_positions()``;
+    Postgres ``numeric`` then stores them happily and pydantic refuses to
+    serialize them. The ingestion parser now rejects them, but that is a
+    property of today's writer, not of the column - so the read path guards
+    independently.
+    """
+
+    async def _headers(self, db, user) -> dict:
+        from app.services.auth import AuthService
+
+        token, _ = AuthService(db)._create_access_token(user.id)
+        return {"Authorization": f"Bearer {token}"}
+
+    async def test_ingestion_parser_rejects_non_finite(self):
+        """Write side: the shared parser feeding _normalize_position AND
+        _normalize_transaction."""
+        from app.services.schwab_ingestion import _decimal, _normalize_position
+
+        for bad in ("NaN", "nan", "sNaN", "Infinity", "-Infinity", float("nan")):
+            assert _decimal(bad) is None, f"{bad!r} passed the parser"
+        assert _decimal("10.5") == Decimal("10.5")
+
+        row = _normalize_position(
+            {
+                "instrument": {"symbol": "AAPL", "assetType": "EQUITY"},
+                "longQuantity": "NaN",
+                "shortQuantity": 0,
+                "averagePrice": "Infinity",
+                "marketValue": "NaN",
+            }
+        )
+        for field in ("quantity", "average_price", "market_value"):
+            value = row[field]
+            assert value is None or value.is_finite(), f"{field} is non-finite"
+
+    async def test_view_renders_a_stored_non_finite_position(
+        self, client: AsyncClient, db: AsyncSession
+    ):
+        """Read side: a row that predates the parser guard (or comes from any
+        other writer) must degrade, not 500 the view forever - there is no
+        delete surface to repair it with."""
+        user = await create_test_user(db, email="nan-positions@example.com")
+        account = await create_test_account(db, user, name="Roth")
+        await _link(db, user, account.id)
+
+        run = BrokerImportRun(
+            user_id=user.id, account_hash=HASH, source="schwab_api",
+            kind=ImportKind.POSITIONS, status=ImportStatus.COMPLETE,
+            created_at=_now(),
+        )
+        db.add(run)
+        await db.flush()
+        db.add(
+            ImportedPosition(
+                import_run_id=run.id, user_id=user.id, account_hash=HASH,
+                source="schwab_api", symbol="AAPL", asset_type="EQUITY",
+                quantity=Decimal("NaN"), long_quantity=Decimal("NaN"),
+                short_quantity=Decimal("0"), average_price=Decimal("NaN"),
+                market_value=Decimal("NaN"), raw={},
+            )
+        )
+        await db.commit()
+
+        headers = await self._headers(db, user)
+        resp = await client.get(
+            f"/api/v1/accounts/{account.id}/reconciliation", headers=headers
+        )
+        assert resp.status_code == 200, resp.text
+        row = {p["symbol"]: p for p in resp.json()["data"]["positions"]}["AAPL"]
+        # Unusable numbers read as absent...
+        assert row["schwab_quantity"] is None
+        assert row["schwab_basis"] is None
+        # ...and the never-null guarantee on the delta still holds, because the
+        # sanitizer runs BEFORE the arithmetic (absent side treated as 0).
+        assert row["quantity_delta"] is not None
+        assert Decimal(row["quantity_delta"]).is_finite()
+
+    async def test_adopt_does_not_500_on_a_non_finite_position(
+        self, client: AsyncClient, db: AsyncSession
+    ):
+        """Adoption reuses build(), so the same guard keeps the mutation path
+        from choking - and no NaN can reach a real Trade."""
+        user = await create_test_user(db, email="nan-adopt@example.com")
+        account = await create_test_account(db, user, name="Roth")
+        await _link(db, user, account.id)
+
+        run = BrokerImportRun(
+            user_id=user.id, account_hash=HASH, source="schwab_api",
+            kind=ImportKind.POSITIONS, status=ImportStatus.COMPLETE,
+            created_at=_now(),
+        )
+        db.add(run)
+        await db.flush()
+        db.add(
+            ImportedPosition(
+                import_run_id=run.id, user_id=user.id, account_hash=HASH,
+                source="schwab_api", symbol="AAPL", asset_type="EQUITY",
+                quantity=Decimal("NaN"), long_quantity=Decimal("NaN"),
+                short_quantity=Decimal("0"), average_price=Decimal("NaN"),
+                raw={},
+            )
+        )
+        await db.commit()
+
+        headers = await self._headers(db, user)
+        resp = await client.post(
+            f"/api/v1/accounts/{account.id}/reconciliation/adopt", headers=headers
+        )
+        assert resp.status_code != 500, resp.text

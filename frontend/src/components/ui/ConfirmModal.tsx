@@ -63,7 +63,11 @@ export function ConfirmModal({
   return (
     <Modal onClose={onCancel} header={headerContent} maxWidth="sm">
       <div className="p-4">
-        <p className="text-neutral-600 dark:text-neutral-300">{message}</p>
+        {/* pre-line so a multi-paragraph message keeps its breaks; single-line
+            messages (every other caller) render identically. */}
+        <p className="text-neutral-600 dark:text-neutral-300 whitespace-pre-line">
+          {message}
+        </p>
       </div>
 
       <div className="flex justify-end gap-3 p-4 border-t border-neutral-200 dark:border-neutral-700">

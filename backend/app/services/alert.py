@@ -262,13 +262,33 @@ class AlertService:
         # stale value when the condition changes to a non-crossing type
         if alert.condition_type not in ("crosses_above", "crosses_below"):
             alert.confirm_checks = None
-        # A changed condition or threshold invalidates the sustained counter
+        # A changed condition, threshold or confirmation mode invalidates BOTH
+        # pieces of accumulated evaluation state, because both were accrued
+        # against the configuration being replaced. They must be cleared
+        # together — clearing only the counter is #263.
+        #
+        # For was_above_threshold specifically, None means "no baseline", so
+        # the next check re-establishes one from check-time price instead of
+        # evaluating a crossing against a latch that describes a threshold
+        # that no longer exists. Two concrete failures this prevents:
+        #
+        #   Re-level: a crosses_below alert at 41 with price 49.80 latches
+        #   "above". Re-level it to 55 and price is now BELOW the threshold
+        #   without having crossed it — the stale "above" latch turns the
+        #   very next check into a spurious "crossed below 55".
+        #
+        #   Sustained handoff (#263): while confirm_checks is set the latch
+        #   keeps accruing from intraday extremes that _evaluate_sustained
+        #   ignores by design. Clearing confirm_checks hands the crossing
+        #   evaluator that accumulated value with no fresh baseline, which
+        #   can suppress a real crossing outright.
         if (
             data.condition_type is not None
             or data.threshold_value is not None
             or "confirm_checks" in data.model_fields_set
         ):
             alert.consecutive_met_count = 0
+            alert.was_above_threshold = None
 
         await self.db.commit()
         await self.db.refresh(alert)

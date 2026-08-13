@@ -25,6 +25,7 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.equity import QuoteResponse
+from app.schemas.alert import AlertUpdate
 from app.services.alert import AlertService
 from tests.factories import create_test_alert, create_test_equity, create_test_user
 
@@ -420,4 +421,104 @@ class TestIntradayWickReFire:
         )
         assert await self._peek(service, mock_yahoo, alert, 50.50, 55.00, 49.00) is True, (
             "first real crossing after creation was swallowed"
+        )
+
+
+class TestLatchInvalidatedOnConfigChange:
+    """Issue #263 and its wider case: `was_above_threshold` is state accrued
+    against a specific (condition, threshold, confirmation mode). Changing any
+    of those must invalidate it, exactly as `consecutive_met_count` already is.
+
+    Clearing only the counter leaves the crossing evaluator reading a latch
+    that describes a configuration which no longer exists.
+    """
+
+    @patch("app.services.alert.discord_service")
+    async def test_relevel_does_not_cause_a_spurious_cross(
+        self, mock_discord, db: AsyncSession
+    ):
+        """Re-levelling past the current price must not manufacture a crossing.
+
+        FAILS before the fix: the alert latches "above 41" at price 49.80, gets
+        re-levelled to 55 — which price is already below without ever having
+        crossed — and the stale latch turns the next check into a fire.
+        """
+        mock_discord.send_alert_notification = AsyncMock(return_value=(True, None))
+        equity = await create_test_equity(db, symbol="RELVL1")
+        alert = await create_test_alert(
+            db, equity, condition_type="crosses_below", threshold_value=41.0,
+        )
+        service = AlertService(db)
+        mock_yahoo = AsyncMock()
+        mock_yahoo.get_quote = AsyncMock(return_value=_mock_quote(49.80, high=50.0, low=49.5))
+        service.yahoo = mock_yahoo
+
+        # Baseline, then a check that latches "above 41".
+        await service.process_alert(alert)
+        await service.process_alert(alert)
+        assert alert.was_above_threshold is True
+
+        # Re-level to 55 — above the current price, never crossed.
+        await service.update_alert(alert.id, AlertUpdate(threshold_value=Decimal("55")))
+        await db.refresh(alert)
+        assert alert.was_above_threshold is None, (
+            "a threshold change must invalidate the latch; keeping it fires a "
+            "cross that never happened"
+        )
+
+        result = await service.check_alert(alert)
+        assert result.is_triggered is False, (
+            "spurious crossing manufactured by a latch held over a re-level"
+        )
+
+    @patch("app.services.alert.discord_service")
+    async def test_clearing_confirm_checks_forces_a_fresh_baseline(
+        self, mock_discord, db: AsyncSession
+    ):
+        """#263 proper: the sustained→crossing handoff must re-baseline.
+
+        While confirm_checks is set the latch accrues from intraday extremes
+        that `_evaluate_sustained` ignores by design. Handing that accumulated
+        value to the crossing evaluator with no baseline can suppress a real
+        crossing.
+        """
+        mock_discord.send_alert_notification = AsyncMock(return_value=(True, None))
+        equity = await create_test_equity(db, symbol="SUST1")
+        alert = await create_test_alert(
+            db, equity, condition_type="crosses_below", threshold_value=52.0,
+            confirm_checks=2,
+        )
+        service = AlertService(db)
+        mock_yahoo = AsyncMock()
+        # Price above the threshold, but the session low wicks through it —
+        # the sustained path ignores that; the latch does not.
+        mock_yahoo.get_quote = AsyncMock(return_value=_mock_quote(52.50, high=53.0, low=51.0))
+        service.yahoo = mock_yahoo
+
+        await service.process_alert(alert)
+        await service.process_alert(alert)
+        assert alert.was_above_threshold is False, (
+            "precondition: the latch accrued 'below' from the wick while the "
+            "sustained evaluator correctly ignored it"
+        )
+
+        # Now clear confirm_checks — the alert becomes a plain crossing alert.
+        await service.update_alert(
+            alert.id, AlertUpdate(confirm_checks=None)
+        )
+        await db.refresh(alert)
+        assert alert.confirm_checks is None
+        assert alert.was_above_threshold is None, (
+            "clearing confirm_checks must re-baseline the latch (#263)"
+        )
+        assert alert.consecutive_met_count == 0
+
+        # Re-baseline on the next check, then a genuine crossing still fires.
+        mock_yahoo.get_quote = AsyncMock(return_value=_mock_quote(54.0, high=54.5, low=53.5))
+        assert (await service.process_alert(alert))[0] is False
+        assert alert.was_above_threshold is True
+        mock_yahoo.get_quote = AsyncMock(return_value=_mock_quote(51.0, high=54.0, low=50.5))
+        result = await service.check_alert(alert)
+        assert result.is_triggered is True, (
+            "a real crossing after the handoff must still fire"
         )

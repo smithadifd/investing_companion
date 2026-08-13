@@ -454,6 +454,10 @@ class AlertService:
                     threshold,
                     result.intraday_high,
                     result.intraday_low,
+                    # Read BEFORE the assignment: None here means the check
+                    # that just ran was the baseline, which fires on nothing
+                    # and so must consume nothing.
+                    is_baseline=alert.was_above_threshold is None,
                 )
                 if alert.confirm_checks is not None:
                     # Advance the sustained counter. This MUST equal the
@@ -1184,21 +1188,40 @@ class AlertService:
         threshold: Decimal,
         intraday_high: Decimal | None,
         intraday_low: Decimal | None,
+        is_baseline: bool = False,
     ) -> bool:
         """The crossing latch after one more check.
 
         Single source of truth for ``was_above_threshold``, the sibling of
         ``_next_sustained_count``. The latch MUST be keyed on the same
-        evidence the crossing evaluator fires on, or a trigger consumes an
-        excursion the latch never records — and the alert re-fires every
-        cooldown for the rest of the session (#258).
+        evidence the crossing evaluator actually used, or the two drift and
+        one of two failure modes follows.
 
-        ``_evaluate_condition`` fires ``crosses_below`` on the intraday LOW
-        and ``crosses_above`` on the intraday HIGH, so the latch follows the
-        same extreme: once the low has breached, the alert reads "below"
-        until price re-arms by closing a check back on the other side. The
-        intraday extreme persists for the rest of the session, which is what
-        makes the fire once-per-excursion rather than once-per-cooldown.
+        Drift in one direction is #258: ``_evaluate_condition`` fires
+        ``crosses_below`` on the intraday LOW and ``crosses_above`` on the
+        intraday HIGH, so a latch keyed on check-time price alone never
+        records the excursion that caused the fire, and the alert re-fires
+        every cooldown for the rest of the session. Hence the extremes below.
+
+        Drift in the other direction is worse, which is what ``is_baseline``
+        guards. On the first check of an alert (``was_above_threshold is
+        None``) the evaluator establishes a baseline from check-time price
+        and returns WITHOUT firing, deliberately consulting no intraday
+        extreme. If the latch consulted one anyway it could seed the opposite
+        side from the baseline just reported — a new ``crosses_below`` alert
+        at 52, created at price 52.50 on a session whose low had already
+        touched 49, would latch "below" and then silently swallow the next
+        genuine crossing. A missed notification is a worse failure than a
+        repeated one, so on the baseline call the latch uses check-time price
+        only, exactly as the evaluator did.
+
+        Re-arming is per-session, not per-recovery: a session's cumulative
+        low never rises, so once it breaches, a ``crosses_below`` alert stays
+        latched for the remainder of that session even if price recovers. It
+        re-arms when the session rolls over and the extremes reset. That is
+        the intended once-per-excursion behaviour at the daily cooldowns
+        these alerts use; an alert with a sub-session cooldown would lose the
+        ability to re-notify on a materially deeper move the same day.
 
         Boundary handling matches the evaluator exactly: check-time price at
         the threshold counts as above (so a later drop is still a cross),
@@ -1207,6 +1230,12 @@ class AlertService:
         and this reduces to the original ``current_value >= threshold``.
         """
         currently_above = current_value >= threshold
+
+        # Baseline: the evaluator consulted no intraday evidence, so neither
+        # may the latch. Consuming an excursion nothing fired on drops the
+        # next real crossing.
+        if is_baseline:
+            return currently_above
 
         if condition_type == "crosses_above":
             effective_high = (

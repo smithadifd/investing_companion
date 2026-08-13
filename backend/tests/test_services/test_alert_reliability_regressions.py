@@ -353,3 +353,71 @@ class TestIntradayWickReFire:
                         f"(price={price}, high={high}, low={low}, "
                         f"start={starting_latch}): {desc!r}"
                     )
+
+    @patch("app.services.alert.discord_service")
+    async def test_baseline_does_not_consume_a_stale_intraday_excursion(
+        self, mock_discord, db: AsyncSession
+    ):
+        """A brand-new alert must not swallow its first genuine crossing.
+
+        Caught in review of the #258 fix. On the baseline check
+        (``was_above_threshold is None``) the evaluator returns without firing
+        and never looks at the intraday extremes. If the LATCH looks at them
+        anyway it can seed the opposite side from the baseline just reported,
+        and the next real crossing evaluates as "no cross".
+
+        This is the inverse of #258 and strictly worse: #258 sends a
+        notification too often, this sends none at all.
+        """
+        mock_discord.send_alert_notification = AsyncMock(return_value=(True, None))
+        equity = await create_test_equity(db, symbol="BASE1")
+        # Created at 52.50 — above the threshold — but the session low had
+        # already touched 49.00 before the alert existed.
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="crosses_below",
+            threshold_value=52.0,
+            was_above_threshold=None,
+        )
+        service = AlertService(db)
+        mock_yahoo = AsyncMock()
+        service.yahoo = mock_yahoo
+
+        assert await self._drive(service, mock_yahoo, alert, 52.50, 53.00, 49.00) is False, (
+            "the baseline check must not fire"
+        )
+        assert alert.was_above_threshold is True, (
+            "baseline must latch on check-time price (52.50 >= 52), not on the "
+            "stale session low it never evaluated"
+        )
+
+        # The next check is a genuine drop through the threshold.
+        assert await self._peek(service, mock_yahoo, alert, 51.00, 53.00, 49.00) is True, (
+            "first real crossing after creation was swallowed"
+        )
+
+    @patch("app.services.alert.discord_service")
+    async def test_baseline_does_not_consume_a_stale_intraday_high(
+        self, mock_discord, db: AsyncSession
+    ):
+        """Mirror of the above for crosses_above."""
+        mock_discord.send_alert_notification = AsyncMock(return_value=(True, None))
+        equity = await create_test_equity(db, symbol="BASE2")
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="crosses_above",
+            threshold_value=50.0,
+            was_above_threshold=None,
+        )
+        service = AlertService(db)
+        mock_yahoo = AsyncMock()
+        service.yahoo = mock_yahoo
+
+        assert await self._drive(service, mock_yahoo, alert, 49.50, 55.00, 49.00) is False
+        assert alert.was_above_threshold is False, (
+            "baseline must latch on check-time price (49.50 < 50), not on the "
+            "stale session high it never evaluated"
+        )
+        assert await self._peek(service, mock_yahoo, alert, 50.50, 55.00, 49.00) is True, (
+            "first real crossing after creation was swallowed"
+        )

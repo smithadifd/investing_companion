@@ -15,7 +15,9 @@ advisor --(handoff block)--> executor (Claude Code) --(API calls)--> IC
 `GET /api/v1/export/context-pack` (auth required). `?format=markdown` renders for pasting
 into a conversation; the default JSON is for tooling.
 
-Top-level fields (`schema_version: "1.6"`, `advisor_actions_version: "1.2"`):
+Top-level fields. The pack's two version stamps are documented as rows in the table below and
+deliberately **not** restated as literals here — a copy of a version number is a cache, and it goes
+stale the moment either version moves. Read the stamp, never a note about the stamp:
 
 | Field | Contents |
 |-------|----------|

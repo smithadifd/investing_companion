@@ -3,12 +3,23 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { createElement } from 'react';
-import { useAccountReconciliation } from '../useReconciliation';
-import type { AccountReconciliation } from '../../api/types';
+import {
+  useAccountReconciliation,
+  useAccountTransactionReconciliation,
+  useAdoptReconciliation,
+  useTriggerBrokerImport,
+} from '../useReconciliation';
+import type {
+  AccountReconciliation,
+  TransactionReconciliation,
+} from '../../api/types';
 
 vi.mock('../../api/client', () => ({
   api: {
     getAccountReconciliation: vi.fn(),
+    getAccountTransactionReconciliation: vi.fn(),
+    triggerBrokerImport: vi.fn(),
+    adoptAccountReconciliation: vi.fn(),
   },
   ApiError: class ApiError extends Error {},
 }));
@@ -81,5 +92,114 @@ describe('useAccountReconciliation', () => {
       wrapper: createWrapper(),
     });
     expect(mockedApi.getAccountReconciliation).not.toHaveBeenCalled();
+  });
+});
+
+
+const transactionView: TransactionReconciliation = {
+  window_start: '2026-05-01T00:00:00Z',
+  window_end: '2026-08-01T00:00:00Z',
+  last_import_at: '2026-07-31T00:00:00Z',
+  never_imported: false,
+  newer_failed_import_at: null,
+  history_gap: true,
+  history_gap_note: 'HISTORY GAP: ...',
+  transaction_history_limit_days: 60,
+  matched_count: 1,
+  broker_only_count: 2,
+  ic_only_count: 0,
+  transactions: [],
+};
+
+describe('useAccountTransactionReconciliation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('passes the window through to the API', async () => {
+    mockedApi.getAccountTransactionReconciliation.mockResolvedValue(
+      transactionView
+    );
+
+    const { result } = renderHook(
+      () => useAccountTransactionReconciliation(1, 365),
+      { wrapper: createWrapper() }
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.broker_only_count).toBe(2);
+    expect(
+      mockedApi.getAccountTransactionReconciliation
+    ).toHaveBeenCalledWith(1, 365);
+  });
+
+  it('does not fetch when accountId is null', () => {
+    const { result } = renderHook(
+      () => useAccountTransactionReconciliation(null),
+      { wrapper: createWrapper() }
+    );
+    expect(result.current.fetchStatus).toBe('idle');
+    expect(
+      mockedApi.getAccountTransactionReconciliation
+    ).not.toHaveBeenCalled();
+  });
+});
+
+describe('useTriggerBrokerImport', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('defaults to importing both kinds', async () => {
+    mockedApi.triggerBrokerImport.mockResolvedValue({
+      account_id: 1,
+      runs: [],
+    });
+
+    const { result } = renderHook(() => useTriggerBrokerImport(), {
+      wrapper: createWrapper(),
+    });
+    await result.current.mutateAsync({ accountId: 1 });
+
+    expect(mockedApi.triggerBrokerImport).toHaveBeenCalledWith(1, 'both');
+  });
+
+  it('forwards an explicit kind', async () => {
+    mockedApi.triggerBrokerImport.mockResolvedValue({
+      account_id: 1,
+      runs: [],
+    });
+
+    const { result } = renderHook(() => useTriggerBrokerImport(), {
+      wrapper: createWrapper(),
+    });
+    await result.current.mutateAsync({ accountId: 1, kind: 'transactions' });
+
+    expect(mockedApi.triggerBrokerImport).toHaveBeenCalledWith(
+      1,
+      'transactions'
+    );
+  });
+});
+
+describe('useAdoptReconciliation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('adopts for the given account', async () => {
+    mockedApi.adoptAccountReconciliation.mockResolvedValue({
+      account_id: 7,
+      source_import_run_id: 3,
+      adopted: [],
+      skipped: [],
+    });
+
+    const { result } = renderHook(() => useAdoptReconciliation(), {
+      wrapper: createWrapper(),
+    });
+    await result.current.mutateAsync(7);
+
+    expect(mockedApi.adoptAccountReconciliation).toHaveBeenCalledWith(7);
   });
 });

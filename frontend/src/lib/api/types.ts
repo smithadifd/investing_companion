@@ -821,6 +821,115 @@ export interface AccountReconciliation {
   positions: ReconciliationPosition[];
 }
 
+// Per-row outcome of adopting a reconciliation delta into a synthetic trade.
+export interface AdoptedTrade {
+  symbol: string;
+  equity_id: number;
+  trade_type: TradeType;
+  quantity: string;
+  price: string | null;
+  basis_is_estimated: boolean;
+  status: 'created' | 'already_adopted';
+  trade_id: number | null;
+}
+
+export interface SkippedPosition {
+  symbol: string;
+  quantity_delta: string;
+  reason: string;
+  detail: string | null;
+}
+
+export interface AdoptionResult {
+  account_id: number;
+  source_import_run_id: number;
+  adopted: AdoptedTrade[];
+  skipped: SkippedPosition[];
+}
+
+// One BrokerImportRun as returned by an import trigger or CSV upload.
+// `notes` carries the clamped HISTORY GAP on a *complete* transactions run:
+// the pull succeeded but its requested window predated Schwab's 60-day
+// horizon, and the skipped span is only recoverable via a broker-CSV upload.
+export interface ImportRunSummary {
+  id: number;
+  source: string;
+  kind: 'positions' | 'transactions';
+  status: 'complete' | 'failed';
+  window_start: string | null;
+  window_end: string | null;
+  item_count: number | null;
+  error_message: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface ImportTriggerResult {
+  account_id: number;
+  runs: ImportRunSummary[];
+}
+
+export type ImportKindRequest = 'positions' | 'transactions' | 'both';
+
+export interface CsvSkippedRow {
+  row_number: number;
+  reason: string;
+  detail: string | null;
+}
+
+export interface CsvImportResult {
+  account_id: number;
+  run: ImportRunSummary;
+  imported_count: number;
+  skipped: CsvSkippedRow[];
+  earliest_occurred_at: string | null;
+  latest_occurred_at: string | null;
+}
+
+// Transactions activity reconciliation — which individual fills were never
+// written down (`broker_only`), vs logged trades the broker doesn't report
+// (`ic_only`). `non_trade` rows are cash movements: shown, never matched.
+export type TransactionMatchStatus =
+  | 'matched'
+  | 'broker_only'
+  | 'ic_only'
+  | 'non_trade';
+
+export interface TransactionMatch {
+  status: TransactionMatchStatus;
+  broker_transaction_id: number | null;
+  external_transaction_id: string | null;
+  broker_source: string | null;
+  broker_type: string | null;
+  broker_side: TradeType | null;
+  broker_quantity: string | null;
+  broker_price: string | null;
+  broker_net_amount: string | null;
+  broker_occurred_at: string | null;
+  trade_id: number | null;
+  ic_side: TradeType | null;
+  ic_quantity: string | null;
+  ic_price: string | null;
+  ic_executed_at: string | null;
+  symbol: string | null;
+  note: string | null;
+}
+
+export interface TransactionReconciliation {
+  window_start: string;
+  window_end: string;
+  last_import_at: string | null;
+  never_imported: boolean;
+  newer_failed_import_at: string | null;
+  history_gap: boolean;
+  history_gap_note: string | null;
+  transaction_history_limit_days: number;
+  matched_count: number;
+  broker_only_count: number;
+  ic_only_count: number;
+  transactions: TransactionMatch[];
+}
+
 // Trade types
 export type TradeType = 'buy' | 'sell' | 'short' | 'cover';
 

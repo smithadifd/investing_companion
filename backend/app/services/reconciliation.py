@@ -1,29 +1,67 @@
-"""Reconciliation service - builds the read-only §6 view for one account.
+"""Reconciliation service - builds the read-only views for one account.
 
-Strictly read-only. It compares the linked hash's latest-complete-run Schwab
-positions against IC's per-account positions and open FIFO lots, and returns a
-delta table. It writes nothing and adopts nothing - no mutation surface exists
-here (that is the §2 next-wave work).
+Strictly read-only, both of them. It writes nothing and adopts nothing - the
+§2 adoption mutation lives in ``services/adoption.py`` and calls in here for
+its deltas, so what a user sees is exactly what adoption would write.
 
-Gated only on an ACTIVE :class:`AccountLink` for the account (§6): quantity
-reconciliation needs nothing beyond the link plus data that already exists, and
-basis reconciliation adds only the open-lots helper (§3) - neither needs the
-Trade-provenance columns or the adoption endpoint.
+* :meth:`ReconciliationService.build` - the §6 POSITIONS view: the linked
+  hash's latest-complete-run Schwab positions against IC's per-account
+  positions and open FIFO lots, as a delta table.
+* :meth:`ReconciliationService.build_transactions` - the TRANSACTIONS activity
+  view: imported broker transactions against IC's manually-entered trades, as
+  matched / broker-only / IC-only rows. Positions reconciliation says *how far
+  off* the ledger is; this says *which fills were never written down*, which is
+  the thing a human can actually act on.
+
+Both are gated only on an ACTIVE :class:`AccountLink` for the account (§6),
+and both take the AUTHENTICATED ``user_id`` as their first argument and thread
+it into every query - the link lookup, the imported-row reads, and the IC-side
+trade reads are each filtered on it, so no query in this module can return a
+row belonging to another user.
+
+SESSION OWNERSHIP: this service only ever READS through the request-scoped
+session it is constructed with. It never commits, never rolls back, and never
+calls the ``schwab_ingestion`` pull functions (which own their own sessions) -
+only that module's read helpers, which explicitly accept any caller session.
 """
 
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
-from app.db.models.broker_import import BrokerImportRun, ImportedPosition
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+
+from app.db.models.broker_import import (
+    BrokerImportRun,
+    ImportedPosition,
+    ImportedTransaction,
+    ImportKind,
+)
+from app.db.models.trade import Trade, TradeType
 from app.schemas.reconciliation import (
     ReconciliationPosition,
     ReconciliationResponse,
+    TransactionMatch,
+    TransactionReconciliationResponse,
 )
 from app.services import schwab_ingestion
 from app.services.account_link import AccountLinkService
 from app.services.trade import TradeService
 
 _ELIGIBLE_ASSET_TYPE = "EQUITY"  # §5: v1 adoption eligibility
+
+# How far apart a broker fill and an IC trade may be and still be considered
+# the same event. Deliberately generous (whole days, not minutes): broker
+# exports routinely carry a settlement or trade DATE with no time component,
+# and a hand-entered IC trade carries whatever wall-clock the user typed. A
+# tighter tolerance would report a symbol/side/quantity-identical pair as two
+# separate rows - a false "you never wrote this down", which is the exact
+# failure mode this view exists to avoid.
+_MATCH_DATE_TOLERANCE_DAYS = 2
+
+# Default width of the reconciled window when the caller names none.
+_DEFAULT_TRANSACTION_VIEW_DAYS = 90
 
 
 class ReconciliationService:
@@ -146,4 +184,302 @@ class ReconciliationService:
             never_imported=never_imported,
             newer_failed_import_at=newer_failed_import_at,
             positions=positions,
+        )
+
+    # -----------------------------------------------------------------
+    # Transactions activity view
+    # -----------------------------------------------------------------
+    async def build_transactions(
+        self,
+        user_id: UUID,
+        account_id: int,
+        source: str = "schwab_api",
+        *,
+        days: int | None = None,
+    ) -> TransactionReconciliationResponse | None:
+        """Activity reconciliation for ``account_id``, or ``None`` when the
+        account has no active link (the caller maps that to 409).
+
+        The caller is expected to have already 404'd an account that isn't the
+        user's; this method only decides link-present vs link-absent.
+
+        ``source`` selects which LINK to resolve (the account's Schwab link),
+        not which imported rows to read: transactions written by the CSV
+        recovery path carry ``source="csv_import"`` but belong to the same
+        broker account hash, and the entire point of that path is that they
+        reconcile side by side with API-pulled rows. So the imported-row query
+        below filters on ``(user_id, account_hash)`` and deliberately NOT on
+        source; each row reports its own lane via ``broker_source``.
+
+        Every query here is filtered on ``user_id`` - the link, the imported
+        transactions, and the IC trades alike.
+        """
+        link = await self.links.get_active_link(user_id, account_id, source)
+        if link is None:
+            return None
+        account_hash = link.account_hash
+
+        window_end = datetime.now(timezone.utc)
+        window_days = days if days is not None else _DEFAULT_TRANSACTION_VIEW_DAYS
+        window_start = window_end - timedelta(days=window_days)
+
+        run = await schwab_ingestion.get_latest_complete_run(
+            self.db, user_id, account_hash, ImportKind.TRANSACTIONS
+        )
+        last_import_at = run.created_at if run is not None else None
+        newer_failed_import_at = await schwab_ingestion.get_newer_failed_import_at(
+            self.db, user_id, account_hash, ImportKind.TRANSACTIONS
+        )
+        # A clamped, API-unrecoverable span on the LATEST complete transactions
+        # run. Reading only the latest run is what makes this self-clearing: a
+        # subsequent CSV import writes its own complete transactions run with no
+        # gap note, so repairing the gap removes the notice rather than leaving
+        # a permanent scar from a run that has since been superseded.
+        gap_note = (
+            run.notes
+            if run is not None
+            and run.notes is not None
+            and run.notes.startswith(schwab_ingestion.HISTORY_GAP_NOTE_PREFIX)
+            else None
+        )
+
+        broker_rows = await self._imported_transactions(
+            user_id, account_hash, window_start, window_end
+        )
+        ic_trades = await self._ic_trades(
+            user_id, account_id, window_start, window_end
+        )
+
+        rows = self._match(broker_rows, ic_trades)
+
+        return TransactionReconciliationResponse(
+            window_start=window_start,
+            window_end=window_end,
+            last_import_at=last_import_at,
+            never_imported=last_import_at is None,
+            newer_failed_import_at=newer_failed_import_at,
+            history_gap=gap_note is not None,
+            history_gap_note=gap_note,
+            transaction_history_limit_days=(
+                schwab_ingestion.TRANSACTION_HISTORY_LIMIT_DAYS
+            ),
+            matched_count=sum(1 for r in rows if r.status == "matched"),
+            broker_only_count=sum(1 for r in rows if r.status == "broker_only"),
+            ic_only_count=sum(1 for r in rows if r.status == "ic_only"),
+            transactions=rows,
+        )
+
+    async def _imported_transactions(
+        self,
+        user_id: UUID,
+        account_hash: str,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> list[ImportedTransaction]:
+        """Imported broker transactions for this user's hash in the window.
+
+        Ordered by ``(occurred_at, id)`` - the same deterministic ordering rule
+        §3 pinned for the open-lots walk, and for the same reason: broker source
+        data routinely shares a timestamp across rows, and greedy matching below
+        must produce the same pairing on every run.
+        """
+        stmt = (
+            select(ImportedTransaction)
+            .where(
+                ImportedTransaction.user_id == user_id,
+                ImportedTransaction.account_hash == account_hash,
+                ImportedTransaction.occurred_at >= window_start,
+                ImportedTransaction.occurred_at < window_end,
+            )
+            .order_by(ImportedTransaction.occurred_at, ImportedTransaction.id)
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def _ic_trades(
+        self,
+        user_id: UUID,
+        account_id: int,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> list[Trade]:
+        """This user's IC trades for this account in the window.
+
+        Synthetic (adoption) trades are excluded from the match pool on
+        purpose: a synthetic row is a position-level quantity plug, not a fill
+        that ever happened at the broker. Matching one against a broker
+        transaction would manufacture a false "matched" and hide a genuine
+        broker-only fill behind it.
+        """
+        stmt = (
+            select(Trade)
+            .options(selectinload(Trade.equity))
+            .where(
+                Trade.user_id == user_id,
+                Trade.account_id == account_id,
+                Trade.executed_at >= window_start,
+                Trade.executed_at < window_end,
+                Trade.is_synthetic.is_(False),
+            )
+            .order_by(Trade.executed_at, Trade.id)
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    @staticmethod
+    def _broker_side(txn: ImportedTransaction) -> str | None:
+        """Map a broker transaction's leg to an IC trade side.
+
+        Schwab's ``transferItems[].amount`` (normalized into ``quantity``) is
+        SIGNED - positive for shares coming in, negative for shares going out -
+        and ``positionEffect`` says whether the leg opened or closed exposure.
+        The two together are what distinguish a long buy from a short cover:
+
+        =========  ===============  ======
+        quantity   positionEffect   side
+        =========  ===============  ======
+        > 0        OPENING          buy
+        < 0        CLOSING          sell
+        < 0        OPENING          short
+        > 0        CLOSING          cover
+        =========  ===============  ======
+
+        With no ``positionEffect`` (some exports omit it), the sign alone
+        decides buy vs sell - the long-side reading, which is the overwhelming
+        common case and the only one IC's manual entry usually holds.
+        """
+        qty = txn.quantity
+        if qty is None or qty == 0:
+            return None
+        effect = (txn.position_effect or "").upper()
+        incoming = qty > 0
+        if effect == "OPENING":
+            return TradeType.BUY.value if incoming else TradeType.SHORT.value
+        if effect == "CLOSING":
+            return TradeType.COVER.value if incoming else TradeType.SELL.value
+        return TradeType.BUY.value if incoming else TradeType.SELL.value
+
+    def _match(
+        self, broker_rows: list[ImportedTransaction], ic_trades: list[Trade]
+    ) -> list[TransactionMatch]:
+        """Pair broker transactions with IC trades; report the leftovers.
+
+        Greedy, one-to-one, first-fit in ``(occurred_at, id)`` order: each
+        broker transaction claims the earliest still-unclaimed IC trade with the
+        same symbol, the same side, the same absolute quantity, and an execution
+        time within :data:`_MATCH_DATE_TOLERANCE_DAYS`. One-to-one matters -
+        two identical fills on the same day must consume two IC trades, so a
+        user who logged only one of them still sees exactly one ``broker_only``
+        row rather than both fills reading as matched.
+
+        Deliberately NOT a price comparison: brokers report an execution price
+        that can differ in the last cent from what a user typed, and a false
+        mismatch here costs more than a missed one.
+        """
+        rows: list[TransactionMatch] = []
+        # Index of unmatched IC trades by (symbol, side); each list stays in
+        # (executed_at, id) order because ic_trades already is.
+        available: dict[tuple[str, str], list[Trade]] = {}
+        for trade in ic_trades:
+            symbol = (trade.equity.symbol if trade.equity else "") or ""
+            available.setdefault(
+                (symbol.upper(), trade.trade_type.value), []
+            ).append(trade)
+
+        matched_trade_ids: set[int] = set()
+        tolerance = timedelta(days=_MATCH_DATE_TOLERANCE_DAYS)
+
+        for txn in broker_rows:
+            side = self._broker_side(txn)
+            symbol = (txn.symbol or "").upper()
+            if not symbol or side is None:
+                rows.append(
+                    TransactionMatch(
+                        status="non_trade",
+                        broker_transaction_id=txn.id,
+                        external_transaction_id=txn.external_transaction_id,
+                        broker_source=txn.source,
+                        broker_type=txn.transaction_type,
+                        broker_net_amount=txn.net_amount,
+                        broker_occurred_at=txn.occurred_at,
+                        symbol=txn.symbol,
+                        note=(
+                            "No tradeable instrument leg (cash movement, "
+                            "dividend, or fee) - nothing to match against a "
+                            "trade."
+                        ),
+                    )
+                )
+                continue
+
+            wanted = abs(txn.quantity) if txn.quantity is not None else None
+            partner: Trade | None = None
+            for candidate in available.get((symbol, side), []):
+                if candidate.id in matched_trade_ids:
+                    continue
+                if wanted is None or candidate.quantity != wanted:
+                    continue
+                if abs(candidate.executed_at - txn.occurred_at) > tolerance:
+                    continue
+                partner = candidate
+                break
+
+            if partner is None:
+                rows.append(
+                    self._broker_row(txn, side, status="broker_only")
+                )
+            else:
+                matched_trade_ids.add(partner.id)
+                row = self._broker_row(txn, side, status="matched")
+                row.trade_id = partner.id
+                row.ic_side = partner.trade_type.value
+                row.ic_quantity = partner.quantity
+                row.ic_price = partner.price
+                row.ic_executed_at = partner.executed_at
+                rows.append(row)
+
+        for trade in ic_trades:
+            if trade.id in matched_trade_ids:
+                continue
+            rows.append(
+                TransactionMatch(
+                    status="ic_only",
+                    trade_id=trade.id,
+                    ic_side=trade.trade_type.value,
+                    ic_quantity=trade.quantity,
+                    ic_price=trade.price,
+                    ic_executed_at=trade.executed_at,
+                    symbol=(trade.equity.symbol if trade.equity else None),
+                )
+            )
+
+        # Newest activity first; ties broken by symbol then status so the order
+        # is total and stable across requests.
+        rows.sort(
+            key=lambda r: (
+                -(r.broker_occurred_at or r.ic_executed_at).timestamp(),
+                r.symbol or "",
+                r.status,
+            )
+        )
+        return rows
+
+    @staticmethod
+    def _broker_row(
+        txn: ImportedTransaction, side: str, *, status: str
+    ) -> TransactionMatch:
+        return TransactionMatch(
+            status=status,
+            broker_transaction_id=txn.id,
+            external_transaction_id=txn.external_transaction_id,
+            broker_source=txn.source,
+            broker_type=txn.transaction_type,
+            broker_side=side,
+            broker_quantity=(
+                abs(txn.quantity) if txn.quantity is not None else None
+            ),
+            broker_price=txn.price,
+            broker_net_amount=txn.net_amount,
+            broker_occurred_at=txn.occurred_at,
+            symbol=txn.symbol,
         )

@@ -282,3 +282,70 @@ class TestReconciliationEndpoint:
             f"/api/v1/accounts/{acct['id']}/reconciliation"
         )
         assert resp.status_code == 200
+
+
+class TestPositionsReconciliationCrossUserIsolation:
+    """The audit's #1 bar on the §6 positions view.
+
+    The link lookup, the imported-position read and the IC-side position walk
+    are each filtered on user_id, so a broker ``account_hash`` is never itself
+    an authority - two users may legitimately hold the same hash STRING (it is
+    just an opaque token in a user-scoped column) and must still see only their
+    own rows.
+    """
+
+    async def _headers(self, db, user) -> dict:
+        from app.services.auth import AuthService
+
+        token, _ = AuthService(db)._create_access_token(user.id)
+        return {"Authorization": f"Bearer {token}"}
+
+    async def test_same_broker_hash_does_not_leak_positions_across_users(
+        self, client: AsyncClient, db: AsyncSession
+    ):
+        from tests.factories import create_test_account
+
+        a = await create_test_user(db, email="recon-iso-a@example.com")
+        b = await create_test_user(db, email="recon-iso-b@example.com")
+        a_account = await create_test_account(db, a, name="A Roth")
+        b_account = await create_test_account(db, b, name="B Roth")
+        await _link(db, a, a_account.id, HASH)
+        await _link(db, b, b_account.id, HASH)  # identical hash string
+
+        await _seed_positions_run(db, a, [("AAPL", "EQUITY", 25, 100)])
+        await db.commit()
+
+        hb = await self._headers(db, b)
+        resp = await client.get(
+            f"/api/v1/accounts/{b_account.id}/reconciliation", headers=hb
+        )
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["never_imported"] is True
+        assert data["positions"] == []
+
+        ha = await self._headers(db, a)
+        a_data = (
+            await client.get(
+                f"/api/v1/accounts/{a_account.id}/reconciliation", headers=ha
+            )
+        ).json()["data"]
+        assert [p["symbol"] for p in a_data["positions"]] == ["AAPL"]
+
+    async def test_b_cannot_adopt_into_a_account(
+        self, client: AsyncClient, db: AsyncSession
+    ):
+        from tests.factories import create_test_account
+
+        a = await create_test_user(db, email="adopt-iso-a@example.com")
+        b = await create_test_user(db, email="adopt-iso-b@example.com")
+        a_account = await create_test_account(db, a, name="A Roth")
+        await _link(db, a, a_account.id, HASH)
+        await _seed_positions_run(db, a, [("AAPL", "EQUITY", 25, 100)])
+        await db.commit()
+
+        hb = await self._headers(db, b)
+        resp = await client.post(
+            f"/api/v1/accounts/{a_account.id}/reconciliation/adopt", headers=hb
+        )
+        assert resp.status_code == 404

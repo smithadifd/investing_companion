@@ -38,6 +38,10 @@ import type {
   AccountCreate,
   AccountReconciliation,
   AccountUpdate,
+  AdoptionResult,
+  ImportKindRequest,
+  ImportTriggerResult,
+  TransactionReconciliation,
   ExposureResponse,
   NeedsAttentionResponse,
   TradeReadinessResponse,
@@ -1237,6 +1241,46 @@ class ApiClient {
   ): Promise<AccountReconciliation> {
     return this.fetch<AccountReconciliation>(
       `/accounts/${accountId}/reconciliation`
+    );
+  }
+
+  /**
+   * Transactions activity reconciliation — broker fills vs logged IC trades.
+   * 409 when the account has no active Schwab link.
+   */
+  async getAccountTransactionReconciliation(
+    accountId: number,
+    days = 90
+  ): Promise<TransactionReconciliation> {
+    return this.fetch<TransactionReconciliation>(
+      `/accounts/${accountId}/reconciliation/transactions?days=${days}`
+    );
+  }
+
+  /**
+   * Pull positions and/or transactions from Schwab for a linked account.
+   * 409 = not linked or Schwab needs (re)connecting; 502 = Schwab said no.
+   */
+  async triggerBrokerImport(
+    accountId: number,
+    kind: ImportKindRequest = 'both'
+  ): Promise<ImportTriggerResult> {
+    return this.fetch<ImportTriggerResult>(`/accounts/${accountId}/import`, {
+      method: 'POST',
+      body: JSON.stringify({ kind }),
+    });
+  }
+
+  /**
+   * Adopt the reconciliation delta into synthetic, provenance-stamped trades.
+   * Replay-safe: re-adopting against the same import run creates no duplicate.
+   */
+  async adoptAccountReconciliation(
+    accountId: number
+  ): Promise<AdoptionResult> {
+    return this.fetch<AdoptionResult>(
+      `/accounts/${accountId}/reconciliation/adopt`,
+      { method: 'POST' }
     );
   }
 

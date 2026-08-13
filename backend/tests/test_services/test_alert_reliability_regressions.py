@@ -179,20 +179,46 @@ class TestIntradayWickReFire:
     the excursion, not re-fire every cooldown for the rest of the session.
 
     ``_evaluate_condition`` fires ``crosses_below`` when the intraday LOW
-    breaches the threshold even though the check-time price is still above it.
-    On ``origin/main`` the latch is set from the check-time price alone, so it
-    stays ``True``, the same session low keeps satisfying the trigger, and the
-    alert re-notifies on every cooldown expiry. The fix keys the latch on the
-    same evidence the evaluator fired against.
+    breaches the threshold even though check-time price is still above it. On
+    ``origin/main`` the latch is set from check-time price alone, so it stays
+    ``True``, the same session low keeps satisfying the trigger, and the alert
+    re-notifies on every cooldown expiry. The fix keys the latch on the same
+    evidence the evaluator fired against.
 
-    ``test_crosses_below_wick_does_not_refire`` and
-    ``test_crosses_above_wick_does_not_refire`` FAIL on ``origin/main``.
+    These assert on ``check_alert(...).is_triggered`` — the pure evaluation —
+    rather than on ``process_alert``'s bool. ``process_alert`` also returns
+    False when the outbox idempotency key collides, and its bucket is
+    ``max(cooldown_minutes or 1, 1) * 60`` seconds wide, so back-to-back calls
+    in a test share a bucket. Asserting on the bool would pass on ``main`` for
+    that unrelated reason — the dedup layer masking the defect — and prove
+    nothing. ``check_alert`` is read-only, so the state under test only
+    advances where a test calls ``process_alert``.
     """
+
+    @staticmethod
+    async def _drive(service, mock_yahoo, alert, price, high, low):
+        """Run one full check (evaluate + persist state), return is_triggered."""
+        mock_yahoo.get_quote = AsyncMock(
+            return_value=_mock_quote(price, high=high, low=low)
+        )
+        fired, _ = await service.process_alert(alert)
+        return fired
+
+    @staticmethod
+    async def _peek(service, mock_yahoo, alert, price, high, low):
+        """Evaluate without mutating state — would this fire right now?"""
+        mock_yahoo.get_quote = AsyncMock(
+            return_value=_mock_quote(price, high=high, low=low)
+        )
+        result = await service.check_alert(alert)
+        return result.is_triggered
 
     @patch("app.services.alert.discord_service")
     async def test_crosses_below_wick_does_not_refire(
         self, mock_discord, db: AsyncSession
     ):
+        # FAILS on origin/main: the latch stays True, so the same session low
+        # keeps evaluating as a fresh crossing.
         # The live case: EQT half-starter (< $52) fired 2026-08-10 at $52.25.
         mock_discord.send_alert_notification = AsyncMock(return_value=(True, None))
         equity = await create_test_equity(db, symbol="WICK1")
@@ -200,72 +226,51 @@ class TestIntradayWickReFire:
             db, equity,
             condition_type="crosses_below",
             threshold_value=52.0,
-            cooldown_minutes=0,  # isolate the latch from the cooldown
             was_above_threshold=True,
         )
-
         service = AlertService(db)
         mock_yahoo = AsyncMock()
         service.yahoo = mock_yahoo
 
-        # Check 1: price above the threshold, session low wicked through it.
-        mock_yahoo.get_quote = AsyncMock(
-            return_value=_mock_quote(52.25, high=53.10, low=51.80)
-        )
-        first, error = await service.process_alert(alert)
-        assert first is True, "the wick should fire once"
-        assert error is None
+        # Price above the threshold, session low wicked through it.
+        assert await self._drive(service, mock_yahoo, alert, 52.25, 53.10, 51.80) is True
         assert alert.was_above_threshold is False, (
             "the intraday breach must be latched; leaving this True is #258"
         )
 
-        # Check 2: same session, same session low, price still above.
-        # Nothing new has happened, so nothing new should fire.
-        mock_yahoo.get_quote = AsyncMock(
-            return_value=_mock_quote(52.40, high=53.10, low=51.80)
+        # Same session, same session low, price still above: nothing new has
+        # happened, so the evaluator must not see another crossing.
+        assert await self._peek(service, mock_yahoo, alert, 52.40, 53.10, 51.80) is False, (
+            "re-evaluated as a fresh crossing on the same intraday low (#258)"
         )
-        second, _ = await service.process_alert(alert)
-        assert second is False, "re-fired on the same intraday low (#258)"
-
-        # Check 3: still the same excursion, one more cooldown later.
-        mock_yahoo.get_quote = AsyncMock(
-            return_value=_mock_quote(52.60, high=53.10, low=51.80)
+        assert await self._peek(service, mock_yahoo, alert, 52.60, 53.10, 51.80) is False, (
+            "still re-evaluating as a crossing later in the same session (#258)"
         )
-        third, _ = await service.process_alert(alert)
-        assert third is False, "re-fired a second time on the same low (#258)"
 
     @patch("app.services.alert.discord_service")
     async def test_crosses_above_wick_does_not_refire(
         self, mock_discord, db: AsyncSession
     ):
+        # FAILS on origin/main (mirror direction).
         mock_discord.send_alert_notification = AsyncMock(return_value=(True, None))
         equity = await create_test_equity(db, symbol="WICK2")
         alert = await create_test_alert(
             db, equity,
             condition_type="crosses_above",
             threshold_value=50.0,
-            cooldown_minutes=0,
             was_above_threshold=False,
         )
-
         service = AlertService(db)
         mock_yahoo = AsyncMock()
         service.yahoo = mock_yahoo
 
-        mock_yahoo.get_quote = AsyncMock(
-            return_value=_mock_quote(49.50, high=50.40, low=49.00)
-        )
-        first, _ = await service.process_alert(alert)
-        assert first is True
+        assert await self._drive(service, mock_yahoo, alert, 49.50, 50.40, 49.00) is True
         assert alert.was_above_threshold is True, (
             "the intraday breach must be latched; leaving this False is #258"
         )
-
-        mock_yahoo.get_quote = AsyncMock(
-            return_value=_mock_quote(49.60, high=50.40, low=49.00)
+        assert await self._peek(service, mock_yahoo, alert, 49.60, 50.40, 49.00) is False, (
+            "re-evaluated as a fresh crossing on the same intraday high (#258)"
         )
-        second, _ = await service.process_alert(alert)
-        assert second is False, "re-fired on the same intraday high (#258)"
 
     @patch("app.services.alert.discord_service")
     async def test_genuine_new_excursion_still_fires(
@@ -282,34 +287,23 @@ class TestIntradayWickReFire:
             db, equity,
             condition_type="crosses_below",
             threshold_value=52.0,
-            cooldown_minutes=0,
             was_above_threshold=True,
         )
-
         service = AlertService(db)
         mock_yahoo = AsyncMock()
         service.yahoo = mock_yahoo
 
         # Fire on the wick.
-        mock_yahoo.get_quote = AsyncMock(
-            return_value=_mock_quote(52.25, high=53.10, low=51.80)
-        )
-        assert (await service.process_alert(alert))[0] is True
+        assert await self._drive(service, mock_yahoo, alert, 52.25, 53.10, 51.80) is True
         assert alert.was_above_threshold is False
 
-        # New session: price recovered, the session low is back above the
+        # New session: price recovered and the session low is back above the
         # threshold. The alert must re-arm.
-        mock_yahoo.get_quote = AsyncMock(
-            return_value=_mock_quote(54.00, high=54.50, low=53.20)
-        )
-        assert (await service.process_alert(alert))[0] is False
+        assert await self._drive(service, mock_yahoo, alert, 54.00, 54.50, 53.20) is False
         assert alert.was_above_threshold is True, "must re-arm after recovery"
 
-        # A genuine second excursion fires again.
-        mock_yahoo.get_quote = AsyncMock(
-            return_value=_mock_quote(51.00, high=53.00, low=50.90)
-        )
-        assert (await service.process_alert(alert))[0] is True, (
+        # A genuine second excursion must evaluate as a crossing again.
+        assert await self._peek(service, mock_yahoo, alert, 51.00, 53.00, 50.90) is True, (
             "a real crossing after re-arming must still fire"
         )
 
@@ -331,28 +325,31 @@ class TestIntradayWickReFire:
             (Decimal("51.00"), Decimal("53.00"), Decimal("50.90")),  # closed below
             (Decimal("54.00"), Decimal("54.50"), Decimal("53.20")),  # clean above
             (Decimal("52.00"), Decimal("52.00"), Decimal("52.00")),  # exactly at
+            (Decimal("49.00"), Decimal("53.00"), Decimal("48.00")),  # deep below
         ]
 
         for condition in ("crosses_below", "crosses_above"):
             for price, high, low in shapes:
-                alert = await create_test_alert(
-                    db, equity,
-                    condition_type=condition,
-                    threshold_value=float(threshold),
-                    was_above_threshold=True,
-                )
-                # Apply the latch this check would persist...
-                alert.was_above_threshold = service._next_was_above_threshold(
-                    condition, price, threshold, high, low
-                )
-                await db.flush()
+                for starting_latch in (True, False):
+                    alert = await create_test_alert(
+                        db, equity,
+                        condition_type=condition,
+                        threshold_value=float(threshold),
+                        was_above_threshold=starting_latch,
+                    )
+                    # Apply the latch this check would persist...
+                    alert.was_above_threshold = service._next_was_above_threshold(
+                        condition, price, threshold, high, low
+                    )
+                    await db.flush()
 
-                # ...then re-evaluate the SAME inputs. A second fire here means
-                # the latch did not record the excursion the evaluator used.
-                triggered, desc = await service._evaluate_condition(
-                    alert, price, intraday_high=high, intraday_low=low
-                )
-                assert triggered is False, (
-                    f"{condition} would re-fire on unchanged inputs "
-                    f"(price={price}, high={high}, low={low}): {desc!r}"
-                )
+                    # ...then re-evaluate the SAME inputs. A fire here means the
+                    # latch did not record the excursion the evaluator used.
+                    triggered, desc = await service._evaluate_condition(
+                        alert, price, intraday_high=high, intraday_low=low
+                    )
+                    assert triggered is False, (
+                        f"{condition} would re-fire on unchanged inputs "
+                        f"(price={price}, high={high}, low={low}, "
+                        f"start={starting_latch}): {desc!r}"
+                    )

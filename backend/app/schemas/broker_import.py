@@ -72,6 +72,23 @@ class ImportTriggerResponse(BaseModel):
     runs: list[ImportRunSummary]
 
 
+class CsvImportRequest(BaseModel):
+    """Body for a broker-CSV upload.
+
+    The file arrives as TEXT in a JSON body rather than as multipart, matching
+    this codebase's existing import convention (``POST /watchlists/import``)
+    and keeping the size bound declarative. ``max_length`` is characters, a
+    conservative under-estimate of the service's own byte limit, which is
+    re-checked there.
+    """
+
+    content: str = Field(..., min_length=1, max_length=5_000_000)
+    filename: str | None = Field(None, max_length=255)
+    # Which LINK to attribute the rows to. The rows themselves are always
+    # written with source="csv_import".
+    link_source: str = Field("schwab_api", max_length=50)
+
+
 class CsvImportResponse(BaseModel):
     """Result of one broker-CSV upload (sub-PR 3).
 

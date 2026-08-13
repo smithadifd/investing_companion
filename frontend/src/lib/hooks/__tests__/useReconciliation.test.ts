@@ -7,6 +7,7 @@ import {
   useAccountReconciliation,
   useAccountTransactionReconciliation,
   useAdoptReconciliation,
+  useImportBrokerCsv,
   useTriggerBrokerImport,
 } from '../useReconciliation';
 import type {
@@ -20,6 +21,7 @@ vi.mock('../../api/client', () => ({
     getAccountTransactionReconciliation: vi.fn(),
     triggerBrokerImport: vi.fn(),
     adoptAccountReconciliation: vi.fn(),
+    importBrokerCsv: vi.fn(),
   },
   ApiError: class ApiError extends Error {},
 }));
@@ -201,5 +203,48 @@ describe('useAdoptReconciliation', () => {
     await result.current.mutateAsync(7);
 
     expect(mockedApi.adoptAccountReconciliation).toHaveBeenCalledWith(7);
+  });
+});
+
+describe('useImportBrokerCsv', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('forwards the file contents and name', async () => {
+    mockedApi.importBrokerCsv.mockResolvedValue({
+      account_id: 1,
+      run: {
+        id: 1,
+        source: 'csv_import',
+        kind: 'transactions',
+        status: 'complete',
+        window_start: null,
+        window_end: null,
+        item_count: 2,
+        error_message: null,
+        notes: null,
+        created_at: '2026-08-13T00:00:00Z',
+      },
+      imported_count: 2,
+      skipped: [],
+      earliest_occurred_at: null,
+      latest_occurred_at: null,
+    });
+
+    const { result } = renderHook(() => useImportBrokerCsv(), {
+      wrapper: createWrapper(),
+    });
+    await result.current.mutateAsync({
+      accountId: 1,
+      content: 'Date,Action\n',
+      filename: 'x.csv',
+    });
+
+    expect(mockedApi.importBrokerCsv).toHaveBeenCalledWith(
+      1,
+      'Date,Action\n',
+      'x.csv'
+    );
   });
 });

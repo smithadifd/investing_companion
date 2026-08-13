@@ -39,6 +39,7 @@ import type {
   AccountReconciliation,
   AccountUpdate,
   AdoptionResult,
+  CsvImportResult,
   ImportKindRequest,
   ImportTriggerResult,
   TransactionReconciliation,
@@ -1268,6 +1269,23 @@ class ApiClient {
     return this.fetch<ImportTriggerResult>(`/accounts/${accountId}/import`, {
       method: 'POST',
       body: JSON.stringify({ kind }),
+    });
+  }
+
+  /**
+   * Import a broker transaction CSV — the recovery path for activity older
+   * than Schwab's 60-day API history horizon. The file is sent as text in a
+   * JSON body, matching this API's other import endpoint. 422 when the file
+   * isn't a recognizable transaction export.
+   */
+  async importBrokerCsv(
+    accountId: number,
+    content: string,
+    filename?: string
+  ): Promise<CsvImportResult> {
+    return this.fetch<CsvImportResult>(`/accounts/${accountId}/import/csv`, {
+      method: 'POST',
+      body: JSON.stringify({ content, filename: filename ?? null }),
     });
   }
 

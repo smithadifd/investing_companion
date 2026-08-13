@@ -64,6 +64,21 @@ _MATCH_DATE_TOLERANCE_DAYS = 2
 _DEFAULT_TRANSACTION_VIEW_DAYS = 90
 
 
+def _finite(value: Decimal | None) -> Decimal | None:
+    """``None`` for a non-finite Decimal, else the value unchanged.
+
+    Postgres ``numeric`` accepts NaN and Infinity, and pydantic refuses to
+    serialize them - so a single such stored cell would make this view raise a
+    ValidationError on EVERY subsequent read. Both write paths now reject
+    non-finite values; this keeps the read path total for anything that
+    predates that guard, since no code path can delete an ImportedTransaction
+    to repair it.
+    """
+    if value is None or not value.is_finite():
+        return None
+    return value
+
+
 class ReconciliationService:
     def __init__(self, db) -> None:
         self.db = db
@@ -349,7 +364,13 @@ class ReconciliationService:
         common case and the only one IC's manual entry usually holds.
         """
         qty = txn.quantity
-        if qty is None or qty == 0:
+        # is_finite() before any comparison: Postgres ``numeric`` stores NaN
+        # happily, and ``Decimal("NaN") > 0`` raises InvalidOperation. Both
+        # write paths now reject non-finite values, so this is defence in
+        # depth for any row that predates that guard - and since nothing can
+        # DELETE an ImportedTransaction, a single such row would otherwise
+        # 500 this view forever.
+        if qty is None or not qty.is_finite() or qty == 0:
             return None
         effect = (txn.position_effect or "").upper()
         incoming = qty > 0
@@ -375,17 +396,32 @@ class ReconciliationService:
         Deliberately NOT a price comparison: brokers report an execution price
         that can differ in the last cent from what a user typed, and a false
         mismatch here costs more than a missed one.
+
+        LINEAR, not quadratic. The naive form ("for each broker row, scan every
+        trade") is O(n*m), and a CSV upload can legitimately carry tens of
+        thousands of same-symbol rows for a decade-old account - enough to hang
+        a request. Two properties keep the scan bounded instead: candidates are
+        bucketed by ``(symbol, side, quantity)`` so only genuinely comparable
+        trades are ever walked, and within a bucket both sides are in ascending
+        time order, so a per-bucket cursor can permanently retire trades that
+        fall before the current row's tolerance window (no later broker row can
+        reach back to them) and the scan can stop at the first trade past it.
         """
         rows: list[TransactionMatch] = []
-        # Index of unmatched IC trades by (symbol, side); each list stays in
-        # (executed_at, id) order because ic_trades already is.
-        available: dict[tuple[str, str], list[Trade]] = {}
+        # Unmatched IC trades bucketed by (symbol, side, quantity); each list
+        # stays in (executed_at, id) order because ic_trades already is, and a
+        # claimed trade is tombstoned to None in place. Decimal hashes by
+        # value, so 10 and 10.00000000 land in the same bucket.
+        available: dict[tuple[str, str, Decimal], list[Trade | None]] = {}
         for trade in ic_trades:
             symbol = (trade.equity.symbol if trade.equity else "") or ""
             available.setdefault(
-                (symbol.upper(), trade.trade_type.value), []
+                (symbol.upper(), trade.trade_type.value, trade.quantity), []
             ).append(trade)
 
+        # Per-bucket cursor: everything before it is claimed or permanently
+        # out of reach. Only ever advances.
+        cursors: dict[tuple[str, str, Decimal], int] = {}
         matched_trade_ids: set[int] = set()
         tolerance = timedelta(days=_MATCH_DATE_TOLERANCE_DAYS)
 
@@ -400,7 +436,7 @@ class ReconciliationService:
                         external_transaction_id=txn.external_transaction_id,
                         broker_source=txn.source,
                         broker_type=txn.transaction_type,
-                        broker_net_amount=txn.net_amount,
+                        broker_net_amount=_finite(txn.net_amount),
                         broker_occurred_at=txn.occurred_at,
                         symbol=txn.symbol,
                         note=(
@@ -412,17 +448,41 @@ class ReconciliationService:
                 )
                 continue
 
+            # _broker_side already rejected a null/zero quantity, so this is
+            # always a real magnitude here.
             wanted = abs(txn.quantity) if txn.quantity is not None else None
             partner: Trade | None = None
-            for candidate in available.get((symbol, side), []):
-                if candidate.id in matched_trade_ids:
-                    continue
-                if wanted is None or candidate.quantity != wanted:
-                    continue
-                if abs(candidate.executed_at - txn.occurred_at) > tolerance:
-                    continue
-                partner = candidate
-                break
+            key = (symbol, side, wanted) if wanted is not None else None
+            candidates = available.get(key) if key is not None else None
+            if key is not None and candidates:
+                earliest = txn.occurred_at - tolerance
+                latest = txn.occurred_at + tolerance
+                cursor = cursors.get(key, 0)
+                # Retire the front of the bucket: already-claimed trades, and
+                # trades older than THIS row's window. Broker rows ascend in
+                # occurred_at, so a trade too old for this one is too old for
+                # every row still to come - it can be passed permanently. (It
+                # still reports as ic_only; that pass reads ic_trades, not
+                # these buckets.)
+                while cursor < len(candidates) and (
+                    candidates[cursor] is None
+                    or candidates[cursor].executed_at < earliest
+                ):
+                    cursor += 1
+                cursors[key] = cursor
+
+                index = cursor
+                while index < len(candidates):
+                    candidate = candidates[index]
+                    if candidate is None:
+                        index += 1
+                        continue
+                    if candidate.executed_at > latest:
+                        # Sorted ascending, so nothing further can match either.
+                        break
+                    partner = candidate
+                    candidates[index] = None  # claimed
+                    break
 
             if partner is None:
                 rows.append(
@@ -433,8 +493,8 @@ class ReconciliationService:
                 row = self._broker_row(txn, side, status="matched")
                 row.trade_id = partner.id
                 row.ic_side = partner.trade_type.value
-                row.ic_quantity = partner.quantity
-                row.ic_price = partner.price
+                row.ic_quantity = _finite(partner.quantity)
+                row.ic_price = _finite(partner.price)
                 row.ic_executed_at = partner.executed_at
                 rows.append(row)
 
@@ -446,8 +506,8 @@ class ReconciliationService:
                     status="ic_only",
                     trade_id=trade.id,
                     ic_side=trade.trade_type.value,
-                    ic_quantity=trade.quantity,
-                    ic_price=trade.price,
+                    ic_quantity=_finite(trade.quantity),
+                    ic_price=_finite(trade.price),
                     ic_executed_at=trade.executed_at,
                     symbol=(trade.equity.symbol if trade.equity else None),
                 )
@@ -478,8 +538,8 @@ class ReconciliationService:
             broker_quantity=(
                 abs(txn.quantity) if txn.quantity is not None else None
             ),
-            broker_price=txn.price,
-            broker_net_amount=txn.net_amount,
+            broker_price=_finite(txn.price),
+            broker_net_amount=_finite(txn.net_amount),
             broker_occurred_at=txn.occurred_at,
             symbol=txn.symbol,
         )

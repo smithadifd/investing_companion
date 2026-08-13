@@ -512,3 +512,39 @@ class TestTransactionReconciliationCrossUserIsolation:
         assert data["matched_count"] == 0
         assert data["broker_only_count"] == 1
         assert data["ic_only_count"] == 0
+
+    async def test_ic_trade_query_is_user_scoped_not_only_account_scoped(
+        self, client: AsyncClient, db: AsyncSession, two_users
+    ):
+        """Mutation guard for `_ic_trades`.
+
+        Today `account_id` alone would be enough, because the caller already
+        404'd an account the user doesn't own. That makes dropping `user_id`
+        from this query a SILENT regression - it survives every other test.
+        Here a Trade row for user B carries user A's account_id directly (the
+        FK permits it; only application code prevents it), so the query's
+        user_id filter is the only thing keeping B's fill out of A's view.
+        """
+        a, b = two_users
+        a_account = await create_test_account(db, a, name="A Roth")
+        await _link(db, a, a_account.id)
+        a_run = await _txn_run(db, a)
+        await _imported_txn(
+            db, a, a_run, symbol="AAPL", quantity=Decimal("10"),
+            occurred_at=_ago(3), external_id="scope-1",
+        )
+
+        aapl = await create_test_equity(db, symbol="AAPL")
+        await create_test_trade(
+            db, aapl, b, quantity=Decimal("10"), trade_type=TradeType.BUY,
+            executed_at=_ago(3), account_id=a_account.id,  # B's trade, A's account
+        )
+
+        ha = await _headers(db, a)
+        data = (
+            await client.get(URL.format(a_account.id), headers=ha)
+        ).json()["data"]
+        # B's trade must not satisfy A's broker row.
+        assert data["matched_count"] == 0
+        assert data["broker_only_count"] == 1
+        assert data["ic_only_count"] == 0

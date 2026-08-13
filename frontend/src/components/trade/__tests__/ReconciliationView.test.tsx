@@ -23,6 +23,11 @@ vi.mock('@/lib/hooks/useReconciliation', () => ({
     mutateAsync: mockAdopt,
     isPending: false,
   }),
+  // The Activity tab renders BrokerCsvUpload, which consumes this hook.
+  useImportBrokerCsv: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
 }));
 
 // Mock the client module with a real ApiError class (defined inside the
@@ -202,6 +207,11 @@ describe('ReconciliationView', () => {
     expect(screen.getByTestId('txn-broker-only-count')).toHaveTextContent(
       '2 not in your ledger'
     );
+    // The CSV recovery path is reachable from the activity tab even without a
+    // flagged history gap — a first-ever import of an old account needs it too.
+    expect(
+      screen.getByRole('button', { name: /upload broker csv/i })
+    ).toBeInTheDocument();
   });
 
   it('shows a never-imported banner instead of drift rows', () => {

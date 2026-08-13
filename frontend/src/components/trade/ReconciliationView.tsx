@@ -14,6 +14,7 @@ import type {
   AdoptionResult,
   ReconciliationPosition,
 } from '@/lib/api/types';
+import { BrokerCsvUpload } from './BrokerCsvUpload';
 import { TransactionReconciliationView } from './TransactionReconciliationView';
 
 interface ReconciliationViewProps {
@@ -207,6 +208,8 @@ export function ReconciliationView({ accounts }: ReconciliationViewProps) {
           accountId={accountId}
           days={days}
           onDaysChange={setDays}
+          recoverySlot={<BrokerCsvUpload accountId={accountId} compact />}
+          uploadSlot={<BrokerCsvUpload accountId={accountId} />}
         />
       ) : (
         <>
@@ -330,7 +333,12 @@ export function ReconciliationView({ accounts }: ReconciliationViewProps) {
             'difference, so your ledger matches what Schwab reports. Basis is ' +
             'not converged (v1 reconciles quantity only), rows needing manual ' +
             'review are skipped, and re-running against the same import ' +
-            'creates no duplicates.'
+            'creates no duplicates.\n\n' +
+            'Afterwards, the individual fills behind that difference will ' +
+            'still show as "Not in your ledger" on the Activity tab — they are ' +
+            'covered by the synthetic trade, so entering them by hand as well ' +
+            'would double-count. Delete the synthetic trade first if you want ' +
+            'to log them individually.'
           }
           confirmLabel="Adopt"
           variant="warning"

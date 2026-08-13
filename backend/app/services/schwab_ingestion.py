@@ -8,10 +8,13 @@ latest ``status=complete`` positions run (see :func:`get_current_positions`).
 A re-pull is a new run (history), never an in-place update of a prior run's
 rows.
 
-Transactions are upserted by Schwab's stable ``activityId``: a re-pull over
-an overlapping window updates existing rows in place (a Schwab correction,
-same ID with changed fields, overwrites) and never duplicates. Deletions are
-out of scope for v1.
+Transactions are upserted by Schwab's stable ``activityId``, namespaced by
+account hash (see :func:`account_scoped_external_id`): a re-pull over an
+overlapping window updates existing rows in place (a Schwab correction, same
+ID with changed fields, overwrites) and never duplicates, while two of a
+user's OWN linked accounts can never collide with each other. Deletions are
+out of scope for v1 - which is also why anything unparseable must be rejected
+at write time: there is no delete surface to repair a bad row with.
 
 SESSION OWNERSHIP: :func:`pull_positions` and :func:`pull_transactions` own
 their entire transactional lifecycle - each creates its OWN session from the
@@ -55,6 +58,7 @@ never handing them a request-scoped session).
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -235,7 +239,28 @@ def _parse_schwab_datetime(value) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _normalize_transaction(raw: dict) -> dict:
+def account_scoped_external_id(account_hash: str, external_id: str) -> str:
+    """The ``external_transaction_id`` for one broker-supplied id.
+
+    NAMESPACED BY ACCOUNT, because the uniqueness constraint it lands on is
+    ``(user_id, external_transaction_id)`` - it does NOT include
+    ``account_hash`` - while one user may legitimately link several broker
+    accounts (``AccountLink`` is unique on ``(user_id, source, account_hash)``)
+    and Schwab does not document ``activityId`` as unique ACROSS a user's
+    accounts. A bare id would let a collision between a Roth and a taxable
+    account MOVE a row rather than merely update it, since the upsert also
+    assigns ``account_hash`` from the incoming values: the transaction would
+    vanish from one reconciliation view and reappear misattributed in the
+    other.
+
+    ``schwab:`` prefixed so it can additionally never collide with the
+    broker-CSV lane's ``csv:``-prefixed keys in the same column.
+    """
+    namespace = hashlib.sha256(account_hash.encode("utf-8")).hexdigest()[:8]
+    return f"schwab:{namespace}:{external_id[:40]}"
+
+
+def _normalize_transaction(raw: dict, account_hash: str) -> dict:
     """Map one raw (already account-number-redacted) Schwab transaction dict
     to ``ImportedTransaction`` column kwargs."""
     external_id = raw.get("activityId")
@@ -251,7 +276,9 @@ def _normalize_transaction(raw: dict) -> dict:
     order_id = raw.get("orderId")
 
     return {
-        "external_transaction_id": str(external_id),
+        "external_transaction_id": account_scoped_external_id(
+            account_hash, str(external_id)
+        ),
         "transaction_type": raw.get("type") or "UNKNOWN",
         "status": raw.get("status"),
         "sub_account": raw.get("subAccount"),
@@ -613,7 +640,10 @@ async def pull_transactions(
                     )
                     raw_transactions.extend(chunk)
 
-                normalized = [_normalize_transaction(t) for t in raw_transactions]
+                normalized = [
+                    _normalize_transaction(t, account_hash)
+                    for t in raw_transactions
+                ]
 
                 run = BrokerImportRun(
                     user_id=user_id,

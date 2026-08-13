@@ -13,6 +13,7 @@ import { api } from '../api/client';
 import type {
   AccountReconciliation,
   AdoptionResult,
+  CsvImportResult,
   ImportKindRequest,
   ImportTriggerResult,
   TransactionReconciliation,
@@ -94,6 +95,24 @@ export function useAdoptReconciliation() {
   const queryClient = useQueryClient();
   return useMutation<AdoptionResult, Error, number>({
     mutationFn: (accountId) => api.adoptAccountReconciliation(accountId),
+    onSuccess: () => invalidateReconciliation(queryClient),
+  });
+}
+
+/**
+ * Upload a broker transaction CSV. This is the only way to get activity older
+ * than Schwab's 60-day API horizon into the ledger comparison — the pull
+ * physically cannot reach it.
+ */
+export function useImportBrokerCsv() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    CsvImportResult,
+    Error,
+    { accountId: number; content: string; filename?: string }
+  >({
+    mutationFn: ({ accountId, content, filename }) =>
+      api.importBrokerCsv(accountId, content, filename),
     onSuccess: () => invalidateReconciliation(queryClient),
   });
 }

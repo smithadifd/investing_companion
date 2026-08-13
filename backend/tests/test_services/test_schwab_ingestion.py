@@ -54,6 +54,7 @@ from app.services.schwab_ingestion import (
     get_connected_provider,
     get_current_positions,
     get_latest_complete_run,
+    account_scoped_external_id,
     pull_positions,
     pull_transactions,
 )
@@ -386,8 +387,10 @@ class TestPrimaryTransferItem:
 
 class TestNormalizeTransaction:
     def test_happy_path(self):
-        result = _normalize_transaction(_transaction_fixture())
-        assert result["external_transaction_id"] == "1000000001"
+        result = _normalize_transaction(_transaction_fixture(), ACCOUNT_HASH)
+        assert result["external_transaction_id"] == account_scoped_external_id(
+            ACCOUNT_HASH, "1000000001"
+        )
         assert result["transaction_type"] == "TRADE"
         assert result["symbol"] == "SYNT"
         assert result["asset_type"] == "EQUITY"
@@ -404,20 +407,20 @@ class TestNormalizeTransaction:
         bad = _transaction_fixture()
         del bad["activityId"]
         with pytest.raises(SchwabAPIError):
-            _normalize_transaction(bad)
+            _normalize_transaction(bad, ACCOUNT_HASH)
 
     def test_missing_date_raises(self):
         bad = _transaction_fixture()
         del bad["tradeDate"]
         del bad["time"]
         with pytest.raises(SchwabAPIError):
-            _normalize_transaction(bad)
+            _normalize_transaction(bad, ACCOUNT_HASH)
 
     def test_falls_back_to_time_when_trade_date_missing(self):
         bad = _transaction_fixture()
         del bad["tradeDate"]
         bad["time"] = "2026-06-02T09:00:00+0000"
-        result = _normalize_transaction(bad)
+        result = _normalize_transaction(bad, ACCOUNT_HASH)
         assert result["occurred_at"] == datetime(2026, 6, 2, 9, 0, tzinfo=timezone.utc)
 
     def test_non_trade_transaction_with_no_primary_leg(self):
@@ -432,7 +435,7 @@ class TestNormalizeTransaction:
                 }
             ],
         )
-        result = _normalize_transaction(txn)
+        result = _normalize_transaction(txn, ACCOUNT_HASH)
         assert result["symbol"] is None
         assert result["asset_type"] is None
         assert result["quantity"] is None
@@ -441,19 +444,19 @@ class TestNormalizeTransaction:
         assert result["transaction_type"] == "ACH_RECEIPT"
 
     def test_order_id_stringified(self):
-        result = _normalize_transaction(_transaction_fixture(orderId=42))
+        result = _normalize_transaction(_transaction_fixture(orderId=42), ACCOUNT_HASH)
         assert result["order_id"] == "42"
 
     def test_missing_order_id_is_none(self):
         bad = _transaction_fixture()
         del bad["orderId"]
-        result = _normalize_transaction(bad)
+        result = _normalize_transaction(bad, ACCOUNT_HASH)
         assert result["order_id"] is None
 
     def test_missing_type_defaults_to_unknown(self):
         bad = _transaction_fixture()
         del bad["type"]
-        result = _normalize_transaction(bad)
+        result = _normalize_transaction(bad, ACCOUNT_HASH)
         assert result["transaction_type"] == "UNKNOWN"
 
 
@@ -726,7 +729,10 @@ class TestPullTransactions:
 
         rows = await _read_all(factory, ImportedTransaction, user_id)
         assert len(rows) == 2
-        assert {r.external_transaction_id for r in rows} == {"1000000001", "2"}
+        assert {r.external_transaction_id for r in rows} == {
+            account_scoped_external_id(ACCOUNT_HASH, "1000000001"),
+            account_scoped_external_id(ACCOUNT_HASH, "2"),
+        }
         for row in rows:
             assert "accountNumber" not in row.raw
 
@@ -837,7 +843,8 @@ class TestPullTransactions:
         # Seed a committed transaction 90 days old, so the cursor default
         # resolves to a start Schwab would reject.
         kwargs = _normalize_transaction(
-            _transaction_fixture(activityId=777, tradeDate=_schwab_ts(stale_dt))
+            _transaction_fixture(activityId=777, tradeDate=_schwab_ts(stale_dt)),
+            ACCOUNT_HASH,
         )
         async with factory() as seed_db:
             seed_db.add(
@@ -1002,7 +1009,7 @@ class TestModelConstraints:
     async def test_duplicate_external_transaction_id_for_user_violates_unique_constraint(
         self, db, test_user
     ):
-        kwargs = _normalize_transaction(_transaction_fixture())
+        kwargs = _normalize_transaction(_transaction_fixture(), ACCOUNT_HASH)
         db.add(
             ImportedTransaction(
                 user_id=test_user.id,

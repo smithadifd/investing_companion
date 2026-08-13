@@ -11,6 +11,8 @@ from app.schemas.account import AccountCreate, AccountResponse, AccountUpdate
 from app.schemas.account_link import AccountLinkCreate, AccountLinkResponse
 from app.schemas.adoption import AdoptionResponse
 from app.schemas.broker_import import (
+    CsvImportRequest,
+    CsvImportResponse,
     ImportTriggerRequest,
     ImportTriggerResponse,
 )
@@ -29,6 +31,13 @@ from app.services.adoption import (
     AdoptionService,
     NeverImportedError,
     NoActiveLinkError,
+)
+from app.services.broker_csv import (
+    BrokerCsvImportService,
+    CsvFormatError,
+)
+from app.services.broker_csv import (
+    NoActiveLinkError as CsvNoActiveLinkError,
 )
 from app.services.broker_import import BrokerImportService
 from app.services.broker_import import (
@@ -72,6 +81,13 @@ def get_broker_import_service(
 ) -> BrokerImportService:
     """Dependency to get the broker import (pull trigger) service instance."""
     return BrokerImportService(db)
+
+
+def get_broker_csv_service(
+    db: AsyncSession = Depends(get_db),
+) -> BrokerCsvImportService:
+    """Dependency to get the broker-CSV import service instance."""
+    return BrokerCsvImportService(db)
 
 
 async def _owned_account_or_404(
@@ -303,6 +319,56 @@ async def trigger_broker_import(
         data=ImportTriggerResponse(account_id=account_id, runs=runs),
         meta=ResponseMeta.now(),
     )
+
+
+@router.post(
+    "/{account_id}/import/csv",
+    response_model=DataResponse[CsvImportResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def import_broker_csv(
+    account_id: int,
+    data: CsvImportRequest,
+    _demo_guard: None = Depends(require_not_demo),
+    current_user: User = Depends(get_current_user),
+    account_service: AccountService = Depends(get_account_service),
+    service: BrokerCsvImportService = Depends(get_broker_csv_service),
+) -> DataResponse[CsvImportResponse]:
+    """Import a broker transaction CSV - the history recovery path (sub-PR 3).
+
+    Schwab's API only serves the trailing 60 days of transactions and cannot
+    paginate past that, so any older activity is permanently unreachable
+    through the pull. A broker CSV export reaches as far back as the broker's
+    own web export does, and lands in the same imported-transactions table
+    (``source="csv_import"``) so recovered rows reconcile side by side with
+    API-pulled ones.
+
+    Mutation - demo-guarded. Owner-scoped: 404 for an account that isn't the
+    caller's. 409 without an active broker link. 422 when the upload isn't a
+    recognizable transaction CSV. Re-uploading the same export is idempotent.
+    """
+    await _owned_account_or_404(account_id, current_user.id, account_service)
+    try:
+        result = await service.import_csv(
+            current_user.id,
+            account_id,
+            data.content,
+            filename=data.filename,
+            link_source=data.link_source,
+        )
+    except CsvNoActiveLinkError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Account has no active Schwab link; link a Schwab account "
+                "before importing its history."
+            ),
+        )
+    except CsvFormatError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
+        )
+    return DataResponse(data=result, meta=ResponseMeta.now())
 
 
 @router.get(

@@ -11,6 +11,12 @@ interface TransactionReconciliationViewProps {
   onDaysChange: (days: number) => void;
   /** Rendered inside the history-gap banner as the CSV recovery affordance. */
   recoverySlot?: React.ReactNode;
+  /**
+   * Rendered next to the window selector. The CSV path is not only for a
+   * flagged gap — a first-ever import of an account with years of history is
+   * beyond the API horizon too, and no banner fires for that.
+   */
+  uploadSlot?: React.ReactNode;
 }
 
 const STATUS_LABEL: Record<TransactionMatch['status'], string> = {
@@ -54,6 +60,7 @@ export function TransactionReconciliationView({
   days,
   onDaysChange,
   recoverySlot,
+  uploadSlot,
 }: TransactionReconciliationViewProps) {
   const { data, isLoading, error } = useAccountTransactionReconciliation(
     accountId,
@@ -73,25 +80,28 @@ export function TransactionReconciliationView({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <label
-          htmlFor="recon-window"
-          className="text-sm text-neutral-600 dark:text-neutral-300"
-        >
-          Window
-        </label>
-        <select
-          id="recon-window"
-          value={days}
-          onChange={(e) => onDaysChange(Number(e.target.value))}
-          className="px-2 py-1 text-sm border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50"
-        >
-          {WINDOWS.map((d) => (
-            <option key={d} value={d}>
-              Last {d} days
-            </option>
-          ))}
-        </select>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <label
+            htmlFor="recon-window"
+            className="text-sm text-neutral-600 dark:text-neutral-300"
+          >
+            Window
+          </label>
+          <select
+            id="recon-window"
+            value={days}
+            onChange={(e) => onDaysChange(Number(e.target.value))}
+            className="px-2 py-1 text-sm border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50"
+          >
+            {WINDOWS.map((d) => (
+              <option key={d} value={d}>
+                Last {d} days
+              </option>
+            ))}
+          </select>
+        </div>
+        {uploadSlot}
       </div>
 
       {isLoading && (
@@ -194,6 +204,11 @@ function ActivityRow({ row }: { row: TransactionMatch }) {
   const side = row.broker_side ?? row.ic_side;
   const qty = row.broker_quantity ?? row.ic_quantity;
   const price = row.broker_price ?? row.ic_price;
+  const priceMismatch =
+    row.status === 'matched' &&
+    row.broker_price !== null &&
+    row.ic_price !== null &&
+    Number(row.broker_price) !== Number(row.ic_price);
   return (
     <tr
       data-testid={`activity-row-${row.status}-${row.symbol ?? 'cash'}`}
@@ -206,7 +221,22 @@ function ActivityRow({ row }: { row: TransactionMatch }) {
       </td>
       <td className="px-3 py-2 uppercase">{side ?? '—'}</td>
       <td className="px-3 py-2 text-right tabular-nums">{fmt(qty)}</td>
-      <td className="px-3 py-2 text-right tabular-nums">{fmt(price)}</td>
+      <td className="px-3 py-2 text-right tabular-nums">
+        {fmt(price)}
+        {/* Matching deliberately ignores price (brokers and hand-entry differ
+            in the last cent), so a genuine price typo would otherwise be
+            invisible on a matched row. Show the ledger's value when the two
+            actually disagree. */}
+        {priceMismatch && (
+          <div
+            className="text-xs text-amber-600 dark:text-amber-400"
+            data-testid={`activity-price-mismatch-${row.symbol}`}
+            title="Your ledger's price differs from the broker's"
+          >
+            yours {fmt(row.ic_price)}
+          </div>
+        )}
+      </td>
       <td className={`px-3 py-2 ${STATUS_CLASS[row.status]}`}>
         {STATUS_LABEL[row.status]}
       </td>

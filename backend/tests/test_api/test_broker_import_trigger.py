@@ -76,8 +76,14 @@ def spy_pulls(monkeypatch, db: AsyncSession):
                     "user_id": user_id,
                     "account_hash": account_hash,
                     # A real pull is handed NO caller session (session
-                    # ownership); assert the trigger honors that.
+                    # ownership); assert the trigger honors that. BOTH are
+                    # recorded: capturing only kwargs would let a
+                    # positionally-passed session slip through unnoticed.
                     "session_factory": kwargs.get("session_factory"),
+                    "extra_args": args,
+                    "extra_kwargs": {
+                        k: v for k, v in kwargs.items() if k != "session_factory"
+                    },
                 }
             )
             if raises is not None:
@@ -210,6 +216,10 @@ class TestImportTriggerBehavior:
         await authed_client.post(f"/api/v1/accounts/{account.id}/import", json={})
         assert calls, "expected the pulls to have been called"
         assert all(c["session_factory"] is None for c in calls)
+        # Nothing extra was passed at all - so no session reached them
+        # positionally either.
+        assert all(c["extra_args"] == () for c in calls)
+        assert all(c["extra_kwargs"] == {} for c in calls)
 
     async def test_not_connected_maps_to_409(
         self, authed_client: AsyncClient, db: AsyncSession, test_user, spy_pulls

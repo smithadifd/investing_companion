@@ -158,6 +158,12 @@ add ladder gets re-leveled) rather than retiring and re-adding. Notes:
 
 - Target by trigger **name**; the executor owns name→ID. Trigger names aren't unique, so an
   ambiguous or missing name comes back `flagged`, not guessed.
+- **The field list above is exact — a trigger has no `notes` field.** It carries only `name`, `rule`,
+  `action`, `tier`, `display_order` and its alert links, so provenance and reasoning belong inline in
+  `action` (that is where the existing triggers already keep theirs). This matters more than an
+  ordinary "don't invent fields" rule: an unrecognized *action type* comes back `flagged`, but an
+  unrecognized *field* is dropped silently by request validation — the write returns success and the
+  text is simply lost.
 - Editing `rule`/`action` is gated. The executor reads the current trigger and **only treats it as
   approved when the `⚠️` mark is present and the change actually touches `rule`/`action`** — an
   unmarked prose edit is `skipped`, same as any unmarked-but-risky action.

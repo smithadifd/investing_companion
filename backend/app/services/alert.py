@@ -422,6 +422,8 @@ class AlertService:
             threshold_value=alert.threshold_value,
             condition_met=condition_desc,
             should_notify=should_notify,
+            intraday_high=intraday_high,
+            intraday_low=intraday_low,
         )
 
     async def process_alert(self, alert: Alert) -> tuple[bool, str | None]:
@@ -435,10 +437,10 @@ class AlertService:
         try:
             result = await self.check_alert(alert)
 
-            # Always update was_above_threshold for cross detection alerts
-            # Use >= so that price exactly at threshold counts as "above"
-            # (avoids a gap where price == threshold sets was_above to False,
-            # causing a subsequent drop below threshold to be missed)
+            # Always update was_above_threshold for cross detection alerts.
+            # The latch is keyed on the same evidence the evaluator fires on
+            # (check-time price AND the intraday extreme) — see
+            # _next_was_above_threshold.
             # Skip state updates when the fetch failed: the placeholder 0
             # value would corrupt was_above_threshold / the sustained counter
             if result.value_available and alert.condition_type in (
@@ -446,7 +448,17 @@ class AlertService:
                 "crosses_below",
             ):
                 threshold = Decimal(str(alert.threshold_value))
-                alert.was_above_threshold = result.current_value >= threshold
+                alert.was_above_threshold = self._next_was_above_threshold(
+                    alert.condition_type,
+                    result.current_value,
+                    threshold,
+                    result.intraday_high,
+                    result.intraday_low,
+                    # Read BEFORE the assignment: None here means the check
+                    # that just ran was the baseline, which fires on nothing
+                    # and so must consume nothing.
+                    is_baseline=alert.was_above_threshold is None,
+                )
                 if alert.confirm_checks is not None:
                     # Advance the sustained counter. This MUST equal the
                     # prospective count _evaluate_sustained decided against —
@@ -1168,6 +1180,74 @@ class AlertService:
             return triggered, desc
 
         return False, f"Unknown condition type: {condition}"
+
+    @staticmethod
+    def _next_was_above_threshold(
+        condition_type: str,
+        current_value: Decimal,
+        threshold: Decimal,
+        intraday_high: Decimal | None,
+        intraday_low: Decimal | None,
+        is_baseline: bool = False,
+    ) -> bool:
+        """The crossing latch after one more check.
+
+        Single source of truth for ``was_above_threshold``, the sibling of
+        ``_next_sustained_count``. The latch MUST be keyed on the same
+        evidence the crossing evaluator actually used, or the two drift and
+        one of two failure modes follows.
+
+        Drift in one direction is #258: ``_evaluate_condition`` fires
+        ``crosses_below`` on the intraday LOW and ``crosses_above`` on the
+        intraday HIGH, so a latch keyed on check-time price alone never
+        records the excursion that caused the fire, and the alert re-fires
+        every cooldown for the rest of the session. Hence the extremes below.
+
+        Drift in the other direction is worse, which is what ``is_baseline``
+        guards. On the first check of an alert (``was_above_threshold is
+        None``) the evaluator establishes a baseline from check-time price
+        and returns WITHOUT firing, deliberately consulting no intraday
+        extreme. If the latch consulted one anyway it could seed the opposite
+        side from the baseline just reported — a new ``crosses_below`` alert
+        at 52, created at price 52.50 on a session whose low had already
+        touched 49, would latch "below" and then silently swallow the next
+        genuine crossing. A missed notification is a worse failure than a
+        repeated one, so on the baseline call the latch uses check-time price
+        only, exactly as the evaluator did.
+
+        Re-arming is per-session, not per-recovery: a session's cumulative
+        low never rises, so once it breaches, a ``crosses_below`` alert stays
+        latched for the remainder of that session even if price recovers. It
+        re-arms when the session rolls over and the extremes reset. That is
+        the intended once-per-excursion behaviour at the daily cooldowns
+        these alerts use; an alert with a sub-session cooldown would lose the
+        ability to re-notify on a materially deeper move the same day.
+
+        Boundary handling matches the evaluator exactly: check-time price at
+        the threshold counts as above (so a later drop is still a cross),
+        while the intraday extremes use the evaluator's strict comparisons.
+        With no provider high/low the extremes fall back to check-time price
+        and this reduces to the original ``current_value >= threshold``.
+        """
+        currently_above = current_value >= threshold
+
+        # Baseline: the evaluator consulted no intraday evidence, so neither
+        # may the latch. Consuming an excursion nothing fired on drops the
+        # next real crossing.
+        if is_baseline:
+            return currently_above
+
+        if condition_type == "crosses_above":
+            effective_high = (
+                intraday_high if intraday_high is not None else current_value
+            )
+            return currently_above or effective_high > threshold
+
+        if condition_type == "crosses_below":
+            effective_low = intraday_low if intraday_low is not None else current_value
+            return currently_above and not effective_low < threshold
+
+        return currently_above
 
     @staticmethod
     def _next_sustained_count(current_count: int | None, beyond: bool) -> int:

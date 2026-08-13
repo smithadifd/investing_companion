@@ -290,6 +290,12 @@ class AlertCheckResult(BaseModel):
     condition_met: str  # Human-readable description
     should_notify: bool  # Considering cooldown
     value_available: bool = True  # False when the price fetch failed
+    # The intraday extremes the crossing evaluator fired against. Carried so
+    # process_alert can key was_above_threshold on the SAME evidence rather
+    # than on the check-time price alone (#258); None when the provider gave
+    # no high/low, which degrades the latch to check-time price.
+    intraday_high: Decimal | None = None
+    intraday_low: Decimal | None = None
 
 
 class AlertStats(BaseModel):

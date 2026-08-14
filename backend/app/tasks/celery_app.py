@@ -94,8 +94,12 @@ else:
             "task": "price_history.sync_all",
             "schedule": crontab(hour=21, minute=15),
         },
-        # Nudge on Discord as the Schwab refresh token nears its 7-day expiry.
-        # Daily at 13:00 UTC (~9 AM ET) so reconnect reminders land in the morning.
+        # Nudge on Discord when Schwab INGESTION is at risk: the refresh token
+        # nearing its 7-day expiry, or transaction sync having gone quiet long
+        # enough to drift toward Schwab's unrecoverable 60-day history horizon
+        # (#273 — the nag is about trade/position sync, not quotes). Daily at
+        # 13:00 UTC (~9 AM ET) so reconnect reminders land in the morning. The
+        # task name is deliberately unchanged from when it only watched expiry.
         "check-schwab-token-expiry-daily": {
             "task": "schwab.check_token_expiry",
             "schedule": crontab(hour=13, minute=0),

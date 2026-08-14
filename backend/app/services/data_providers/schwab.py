@@ -1,4 +1,17 @@
-"""Schwab opt-in real-time / all-session quote provider (Phase F, PR-B).
+"""Schwab client: brokerage ingestion, plus an opt-in all-session quote role.
+
+TWO ROLES, DECOUPLED (#273). Connecting Schwab is an **ingestion** integration
+— transactions and positions, which no market-data vendor can supply and which
+``services/schwab_ingestion.py`` drives. Serving **quotes** is a separate,
+opt-in role gated by ``SCHWAB_QUOTES_ENABLED`` (default off, see
+:func:`schwab_quotes_enabled`): Yahoo already covers all three extended-quote
+surfaces (briefing movers, the strategy brief's quote block, and
+``scripts/premarket_pulse.py`` — enumerated on
+``get_extended_quote_provider``), so leaving the quote role on only gave a
+7-day token expiry a blast radius over prices. The class below still
+implements both; which one is live
+is a wiring decision made in ``data_providers/__init__.py`` (quotes) and
+``schwab_ingestion.get_connected_provider`` (ingestion), never here.
 
 Wraps schwab-py with token storage in the encrypted ``user_settings`` table
 (``SCHWAB_TOKEN``) instead of schwab-py's default token file, via
@@ -8,8 +21,11 @@ format: ``{"creation_timestamp": <int>, "token": {...oauth token...}}``.
 Schwab access tokens last 30 minutes; schwab-py/authlib auto-refreshes them
 and the refreshed token is persisted back here. Schwab *refresh* tokens
 hard-expire 7 days after login and cannot be extended — after that the user
-must reconnect, and everything silently falls back to Yahoo (the free,
-no-key base from PR-A). Schwab is never required.
+must reconnect. What that expiry actually costs depends on the role: the
+quote role (when opted in) degrades silently to Yahoo, while ingestion stops
+outright and transaction sync starts falling behind Schwab's 60-day history
+horizon — which is what ``tasks/schwab.check_token_expiry`` now nags about.
+Schwab is never required.
 
 Symbols Schwab can't quote in our Yahoo-flavored notation (futures ``GC=F``,
 forex ``JPY=X``, indices ``^VIX``, dashed tickers) are delegated per-symbol
@@ -93,12 +109,32 @@ def redact_account_fields(payload):
 
 
 def is_schwab_configured() -> bool:
-    """True when the server has Schwab app credentials + callback URL set."""
+    """True when the server has Schwab app credentials + callback URL set.
+
+    This gates the whole integration — ingestion included. It says nothing
+    about whether Schwab is also serving quotes; that is
+    :func:`schwab_quotes_enabled`.
+    """
     return bool(
         settings.SCHWAB_APP_KEY
         and settings.SCHWAB_APP_SECRET
         and settings.SCHWAB_CALLBACK_URL
     )
+
+
+def schwab_quotes_enabled() -> bool:
+    """True when this server opted Schwab back into the QUOTE chain (#273).
+
+    Default off. Connecting Schwab buys transactions/positions ingestion —
+    the thing no market-data vendor sells — and by default nothing else, so a
+    lapsed 7-day refresh token can no longer degrade prices. Yahoo remains the
+    extended-hours quote source unless ``SCHWAB_QUOTES_ENABLED`` is set.
+
+    Deliberately separate from :func:`is_schwab_configured`: ingestion callers
+    (``schwab_ingestion.get_connected_provider``) must never consult this — it
+    is a quote-role switch, not a connection switch.
+    """
+    return bool(settings.SCHWAB_QUOTES_ENABLED)
 
 
 def token_age_days(wrapped_token: dict) -> float | None:

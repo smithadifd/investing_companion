@@ -1,5 +1,11 @@
 """Schwab OAuth connection endpoints (Phase F, PR-B).
 
+What connecting buys (#273): brokerage TRANSACTION and POSITION ingestion —
+the one thing no market-data vendor sells. Serving quotes is a separate,
+default-off role (``SCHWAB_QUOTES_ENABLED``), surfaced read-only on /status as
+``quotes_enabled`` so the settings page can state which roles are actually
+live rather than promising prices connecting may not change.
+
 Three-legged OAuth: POST /connect returns Schwab's authorize URL (with a
 CSRF state bound to the user via Redis), the browser logs in at Schwab,
 Schwab redirects to GET /callback, and the callback exchanges the code for
@@ -34,6 +40,7 @@ from app.services.data_providers.schwab import (
     SCHWAB_TOKEN_LIFETIME_DAYS,
     is_schwab_configured,
     parse_wrapped_token,
+    schwab_quotes_enabled,
     token_age_days,
     token_is_expired,
 )
@@ -128,7 +135,9 @@ async def get_schwab_status(
 
     if wrapped is None:
         schwab_status = SchwabStatus(
-            configured=is_schwab_configured(), connected=False
+            configured=is_schwab_configured(),
+            connected=False,
+            quotes_enabled=schwab_quotes_enabled(),
         )
     else:
         age = token_age_days(wrapped)
@@ -137,6 +146,7 @@ async def get_schwab_status(
             configured=is_schwab_configured(),
             connected=not expired,
             needs_reconnect=expired,
+            quotes_enabled=schwab_quotes_enabled(),
             token_age_days=round(age, 2) if age is not None else None,
             expires_in_days=(
                 round(max(0.0, SCHWAB_TOKEN_LIFETIME_DAYS - age), 2)
@@ -236,10 +246,19 @@ async def disconnect_schwab(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataResponse[SchwabStatus]:
-    """Forget the stored Schwab token; quotes fall back to the free base."""
+    """Forget the stored Schwab token.
+
+    Transaction/position sync stops until the account is reconnected. Quotes
+    are unaffected unless this server opted into the Schwab quote role, in
+    which case extended-hours quotes fall back to the free Yahoo base.
+    """
     service = SettingsService(db)
     await service.delete_setting(SettingsService.SCHWAB_TOKEN, current_user.id)
     return DataResponse(
-        data=SchwabStatus(configured=is_schwab_configured(), connected=False),
+        data=SchwabStatus(
+            configured=is_schwab_configured(),
+            connected=False,
+            quotes_enabled=schwab_quotes_enabled(),
+        ),
         meta=ResponseMeta.now(),
     )

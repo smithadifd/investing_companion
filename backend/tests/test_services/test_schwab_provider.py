@@ -282,39 +282,147 @@ class TestSchwabTokenRefreshPersistence:
 
 
 # ---------------------------------------------------------------------------
-# Provider selection (Schwab when connected, else Yahoo)
+# Provider selection.
+#
+# The quote role is opt-in and DEFAULT OFF (#273): a fully configured, freshly
+# connected Schwab account serves ingestion only, and the extended-hours quote
+# chain stays on Yahoo until SCHWAB_QUOTES_ENABLED is set. With the opt-in on,
+# selection is byte-for-byte the pre-#273 behaviour.
 # ---------------------------------------------------------------------------
+def _configure_schwab(monkeypatch, *, quotes: bool):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "SCHWAB_APP_KEY", "k")
+    monkeypatch.setattr(settings, "SCHWAB_APP_SECRET", "s")
+    monkeypatch.setattr(settings, "SCHWAB_CALLBACK_URL", "https://x/cb")
+    monkeypatch.setattr(settings, "SCHWAB_QUOTES_ENABLED", quotes)
+
+
+class TestQuoteRoleDefaultOff:
+    """Default posture: connected Schwab, Yahoo quotes."""
+
+    async def test_default_setting_is_off(self):
+        from app.core.config import settings
+        from app.services.data_providers.schwab import schwab_quotes_enabled
+
+        assert settings.model_fields["SCHWAB_QUOTES_ENABLED"].default is False
+        assert schwab_quotes_enabled() is False
+
+    async def test_connected_fresh_token_still_returns_yahoo(
+        self, db, test_user, monkeypatch
+    ):
+        from app.services.data_providers import get_extended_quote_provider
+        from app.services.data_providers.yahoo import YahooFinanceProvider
+        from app.services.settings import SettingsService
+
+        _configure_schwab(monkeypatch, quotes=False)
+        service = SettingsService(db)
+        await service.set_setting(
+            SettingsService.SCHWAB_TOKEN,
+            json.dumps(_fresh_wrapped_token()),
+            test_user.id,
+        )
+
+        provider = await get_extended_quote_provider(db)
+        assert isinstance(provider, YahooFinanceProvider)
+
+    async def test_ingestion_still_sees_the_connection(
+        self, db, test_user, monkeypatch
+    ):
+        """The flag gates quotes ONLY — get_connected_provider is untouched."""
+        from app.services.schwab_ingestion import get_connected_provider
+        from app.services.settings import SettingsService
+
+        _configure_schwab(monkeypatch, quotes=False)
+        service = SettingsService(db)
+        await service.set_setting(
+            SettingsService.SCHWAB_TOKEN,
+            json.dumps(_fresh_wrapped_token()),
+            test_user.id,
+        )
+
+        provider = await get_connected_provider(db, test_user.id)
+        assert isinstance(provider, SchwabProvider)
+        assert provider.user_id == test_user.id
+
+    async def test_quote_role_off_short_circuits_before_config_check(
+        self, db, monkeypatch
+    ):
+        """Off means off even on a server that never configured Schwab."""
+        from app.core.config import settings
+        from app.services.data_providers import get_extended_quote_provider
+        from app.services.data_providers.yahoo import YahooFinanceProvider
+
+        monkeypatch.setattr(settings, "SCHWAB_QUOTES_ENABLED", False)
+        provider = await get_extended_quote_provider(db)
+        assert isinstance(provider, YahooFinanceProvider)
+
+    async def test_every_consumer_rides_the_gated_selector(
+        self, db, test_user, monkeypatch
+    ):
+        """The flag re-sources THREE surfaces, not just the briefing movers.
+
+        ``strategy_brief`` pulls up to ``MAX_QUOTE_SYMBOLS`` (30) symbols
+        through this same selector and consumes ``price`` (not just
+        ``session``), and ``scripts/premarket_pulse`` does too — so
+        default-off changes their quote source on upgrade exactly as it does
+        the movers'. The load-bearing assertion here is the IDENTITY one: it
+        fails the moment a consumer grows its own un-gated Schwab path, which
+        no selector-level test can catch. The behavioural tail then confirms
+        the default posture through the brief's own reference.
+        """
+        from app.services.agents import strategy_brief as sb
+        from app.services.data_providers import get_extended_quote_provider
+        from app.services.data_providers.yahoo import YahooFinanceProvider
+        from app.services.settings import SettingsService
+        from scripts import premarket_pulse
+
+        assert sb.get_extended_quote_provider is get_extended_quote_provider
+        assert (
+            premarket_pulse.get_extended_quote_provider
+            is get_extended_quote_provider
+        )
+
+        _configure_schwab(monkeypatch, quotes=False)
+        service = SettingsService(db)
+        await service.set_setting(
+            SettingsService.SCHWAB_TOKEN,
+            json.dumps(_fresh_wrapped_token()),
+            test_user.id,
+        )
+
+        provider = await sb.get_extended_quote_provider(db)
+        assert isinstance(provider, YahooFinanceProvider)
+
+
 class TestGetExtendedQuoteProvider:
+    """Selection with the quote role opted IN — the pre-#273 chain, intact."""
+
     async def test_unconfigured_returns_yahoo(self, db, monkeypatch):
         from app.core.config import settings
         from app.services.data_providers import get_extended_quote_provider
         from app.services.data_providers.yahoo import YahooFinanceProvider
 
+        _configure_schwab(monkeypatch, quotes=True)
         monkeypatch.setattr(settings, "SCHWAB_APP_KEY", "")
         provider = await get_extended_quote_provider(db)
         assert isinstance(provider, YahooFinanceProvider)
 
     async def test_configured_without_token_returns_yahoo(self, db, monkeypatch):
-        from app.core.config import settings
         from app.services.data_providers import get_extended_quote_provider
         from app.services.data_providers.yahoo import YahooFinanceProvider
 
-        monkeypatch.setattr(settings, "SCHWAB_APP_KEY", "k")
-        monkeypatch.setattr(settings, "SCHWAB_APP_SECRET", "s")
-        monkeypatch.setattr(settings, "SCHWAB_CALLBACK_URL", "https://x/cb")
+        _configure_schwab(monkeypatch, quotes=True)
         provider = await get_extended_quote_provider(db)
         assert isinstance(provider, YahooFinanceProvider)
 
     async def test_configured_with_fresh_token_returns_schwab(
         self, db, test_user, monkeypatch
     ):
-        from app.core.config import settings
         from app.services.data_providers import get_extended_quote_provider
         from app.services.settings import SettingsService
 
-        monkeypatch.setattr(settings, "SCHWAB_APP_KEY", "k")
-        monkeypatch.setattr(settings, "SCHWAB_APP_SECRET", "s")
-        monkeypatch.setattr(settings, "SCHWAB_CALLBACK_URL", "https://x/cb")
+        _configure_schwab(monkeypatch, quotes=True)
 
         service = SettingsService(db)
         await service.set_setting(
@@ -330,14 +438,11 @@ class TestGetExtendedQuoteProvider:
     async def test_expired_token_falls_back_to_yahoo(
         self, db, test_user, monkeypatch
     ):
-        from app.core.config import settings
         from app.services.data_providers import get_extended_quote_provider
         from app.services.data_providers.yahoo import YahooFinanceProvider
         from app.services.settings import SettingsService
 
-        monkeypatch.setattr(settings, "SCHWAB_APP_KEY", "k")
-        monkeypatch.setattr(settings, "SCHWAB_APP_SECRET", "s")
-        monkeypatch.setattr(settings, "SCHWAB_CALLBACK_URL", "https://x/cb")
+        _configure_schwab(monkeypatch, quotes=True)
 
         service = SettingsService(db)
         await service.set_setting(

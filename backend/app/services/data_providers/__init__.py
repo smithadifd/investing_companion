@@ -119,10 +119,35 @@ def reset_quote_provider() -> None:
 async def get_extended_quote_provider(db: AsyncSession):
     """Pick the extended-hours quote provider for briefings.
 
-    Schwab when the server is configured for it AND a user has connected a
-    still-valid token; otherwise the free Yahoo base from PR-A. Schwab is
-    opt-in depth — any missing piece degrades silently to Yahoo, never an
-    error. Returns an ExtendedQuoteProvider (see app.services.extended_movers).
+    **Yahoo by default, including when Schwab is connected (#273).** Schwab's
+    quote role is opt-in and default-off (``SCHWAB_QUOTES_ENABLED``): a Schwab
+    connection exists to ingest transactions and positions — the one thing no
+    market-data vendor sells — and wiring it into the quote chain as well only
+    handed a hard 7-day token expiry a blast radius over prices. Yahoo already
+    serves every surface below, and futures/forex/indices never reached Schwab
+    anyway (``_SCHWAB_SYMBOL_RE`` delegates them per-symbol).
+
+    THIS IS THE ONE SEAM THE FLAG MOVES, and it has three consumers — flipping
+    it re-sources all three, not just the movers:
+
+    1. ``tasks/alerts.py`` — the morning-pulse and EOD-wrap extended-hours
+       movers, via ``collect_extended_movers`` (reads ``session`` +
+       ``change_percent``).
+    2. ``services/agents/strategy_brief.py`` — the brief's extended-hours quote
+       block, up to ``MAX_QUOTE_SYMBOLS`` (30) symbols; unlike the movers it
+       consumes ``price``, so provider differences show up in the brief's
+       numbers directly.
+    3. ``scripts/premarket_pulse.py`` — the morning-brief market block.
+
+    With the opt-in ON, selection is exactly what it always was: Schwab when
+    the server is configured for it AND a user has connected a still-valid
+    token; otherwise the free Yahoo base. Schwab remains opt-in depth — any
+    missing piece degrades silently to Yahoo, never an error. Returns an
+    ExtendedQuoteProvider (see app.services.extended_movers).
+
+    Deliberately NOT the seam ingestion uses:
+    ``schwab_ingestion.get_connected_provider`` builds its own Schwab client
+    and is untouched by this flag — turning quotes off never turns sync off.
     """
     # Lazy import: schwab-py drags in heavy dependencies, and most installs
     # never configure it.
@@ -130,10 +155,20 @@ async def get_extended_quote_provider(db: AsyncSession):
         SchwabProvider,
         is_schwab_configured,
         parse_wrapped_token,
+        schwab_quotes_enabled,
         token_is_expired,
     )
 
     yahoo = YahooFinanceProvider()
+
+    if not schwab_quotes_enabled():
+        # Not a failure and not worth a per-call log line: this is the default
+        # posture, and briefings run this on every alert sweep.
+        logger.debug(
+            "Schwab quote role is off (SCHWAB_QUOTES_ENABLED); "
+            "using Yahoo for extended-hours quotes"
+        )
+        return yahoo
 
     if not is_schwab_configured():
         return yahoo

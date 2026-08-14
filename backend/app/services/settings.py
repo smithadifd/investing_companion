@@ -55,6 +55,10 @@ class SettingsService:
     EOD_NOTIFICATION_LAST_SENT = "EOD_NOTIFICATION_LAST_SENT"
     SCHWAB_TOKEN = "SCHWAB_TOKEN"
     SCHWAB_EXPIRY_LAST_NOTIFIED = "SCHWAB_EXPIRY_LAST_NOTIFIED"
+    # Separate from the expiry marker on purpose: the two conditions dedupe on
+    # different anchors (token instance vs last-sync timestamp), so sharing one
+    # key would let either ping clobber the other's memory and re-fire it.
+    SCHWAB_SYNC_LAG_LAST_NOTIFIED = "SCHWAB_SYNC_LAG_LAST_NOTIFIED"
     # Explicit install-owner pointer (a global row with user_id NULL). Replaces
     # the old implicit "oldest active user" resolution used by background tasks.
     OWNER_USER_ID = "OWNER_USER_ID"

@@ -243,7 +243,7 @@ def send_morning_pulse():
                 if not wl:
                     continue
                 watchlist_symbols.extend(item.equity.symbol for item in wl.items)
-            # Schwab (real-time, all-session) when connected, else Yahoo
+            # Yahoo, unless this server opted Schwab into the quote role
             extended_provider = await get_extended_quote_provider(session)
             try:
                 premarket_movers, movers_session = await collect_extended_movers(
@@ -447,7 +447,7 @@ def send_eod_wrap():
             # so the fallback is dropped instead of relabeled.
             postmarket_movers: list[dict] = []
             try:
-                # Schwab (real-time, all-session) when connected, else Yahoo
+                # Yahoo, unless this server opted Schwab into the quote role
                 extended_provider = await get_extended_quote_provider(session)
                 try:
                     movers, post_session = await collect_extended_movers(

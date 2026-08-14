@@ -748,13 +748,20 @@ export interface AppSettingsUpdate {
   strategy_agent_enabled?: boolean;
 }
 
-// Schwab connection (opt-in real-time quotes)
+// Schwab connection (opt-in brokerage transaction/position sync)
 export interface SchwabStatus {
   configured: boolean;
   connected: boolean;
   needs_reconnect: boolean;
   token_age_days: number | null;
   expires_in_days: number | null;
+  /**
+   * Whether the server also opted Schwab into the extended-hours quote role
+   * (SCHWAB_QUOTES_ENABLED, default off). Informational only — it decides
+   * what the settings copy can honestly claim connecting does, not what the
+   * connection is for.
+   */
+  quotes_enabled: boolean;
 }
 
 export interface SchwabConnectResponse {

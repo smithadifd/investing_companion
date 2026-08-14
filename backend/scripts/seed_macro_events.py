@@ -312,20 +312,24 @@ NFP_DATES_2026: list[date] = [
 # directly against https://www.bea.gov/news/2026/gdp-second-estimate-and-corporate-profits-1st-quarter-2026
 # and https://www.bea.gov/news/2026/gdp-third-estimate-industries-corporate-profits-state-gdp-and-state-personal-income-1st.
 #
-# STRUCTURAL COLLISION -- MECHANICS NOW FIXED (see fred.macro_recurrence_key's
-# ``ordinal`` param + the accompanying migration in this same PR): the
-# corrected Q4-2025 Third estimate (Apr 9, 2026) and Q1-2026's Advance
-# estimate (Apr 30, 2026, itself corrected by one day from a guessed Apr 29)
-# both land in April 2026, and the recurrence key now disambiguates same-month
-# GDP prints by estimate ordinal (e.g. "gdp_2026_04_third" vs
-# "gdp_2026_04_advance"), so encoding both would no longer collide.
+# STRUCTURAL COLLISION -- MECHANICS FIXED, AND NOW ENCODED. The corrected
+# Q4-2025 Third estimate (Apr 9, 2026) and Q1-2026's Advance estimate (Apr 30,
+# 2026, itself corrected by one day from a guessed Apr 29) both land in April
+# 2026. The recurrence key disambiguates same-month GDP prints by estimate
+# ordinal ("gdp_2026_04_third" vs "gdp_2026_04_advance"), so both are safe to
+# encode.
 #
-# Neither date is added below in THIS pass, though -- restoring two real
-# calendar entries is a data decision distinct from the mechanics fix, and is
-# left for a deliberate follow-up rather than bundled in here unasked. Both
-# citations are recorded so that follow-up doesn't have to re-derive them:
+# The mechanics landed first and the two calendar entries were deliberately
+# held back as a separate data decision. That decision was taken on 2026-08-14
+# (Andrew elected): both are RESTORED below, re-verified the same day against
+# bea.gov's own full-2026 schedule table, which lists them as
+#   "April 9 ... GDP (Third Estimate), Industries, Corporate Profits, State
+#    GDP, and State Personal Income, 4th Quarter and Year 2025"
+#   "April 30 ... GDP (Advance Estimate), 1st Quarter 2026"
+# Individual press pages for each, recorded when they were first derived:
 #   Apr 9, 2026 Q4-2025 Third -- https://www.bea.gov/news/2026/gdp-third-estimate-industries-corporate-profits-state-gdp-and-state-personal-income-4th
 #   Apr 30, 2026 Q1-2026 Advance -- https://www.bea.gov/news/2026/gdp-advance-estimate-1st-quarter-2026
+# April 2026 is now the only month in either year carrying two GDP entries.
 # ============================================================================
 
 GDP_DATES_2025: list[tuple[date, str]] = [
@@ -348,9 +352,8 @@ GDP_DATES_2026: list[tuple[date, str]] = [
     (date(2026, 1, 22), "Q3 2025 Updated Estimate"),  # NEW -- replaces the would-be Dec 19, 2025 Third estimate
     (date(2026, 2, 20), "Q4 2025 Advance"),   # CORRECTED -- moved from Jan 29, 2026 (shutdown)
     (date(2026, 3, 13), "Q4 2025 Second"),    # CORRECTED -- moved from Feb 26, 2026 (shutdown)
-    # April 2026 intentionally has no entry: Apr 9 "Q4 2025 Third" and
-    # Apr 30 "Q1 2026 Advance" both fall here -- a structural collision under
-    # the month-bucketed recurrence key. See STRUCTURAL COLLISION note above.
+    (date(2026, 4, 9), "Q4 2025 Third"),      # RESTORED 2026-08-14 -- moved from Mar 27 (shutdown)
+    (date(2026, 4, 30), "Q1 2026 Advance"),   # RESTORED 2026-08-14 -- April's second real release
     (date(2026, 5, 28), "Q1 2026 Second"),    # confirmed unchanged
     (date(2026, 6, 25), "Q1 2026 Third"),     # confirmed unchanged
     (date(2026, 7, 30), "Q2 2026 Advance"),   # confirmed unchanged

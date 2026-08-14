@@ -46,6 +46,30 @@ def _mock_quote(price: float, high: float | None = None, low: float | None = Non
     )
 
 
+async def _drive(service, mock_yahoo, alert, price, high, low):
+    """Run one full check (evaluate + persist state), return is_triggered."""
+    mock_yahoo.get_quote = AsyncMock(
+        return_value=_mock_quote(price, high=high, low=low)
+    )
+    fired, _ = await service.process_alert(alert)
+    return fired
+
+
+async def _peek(service, mock_yahoo, alert, price, high, low):
+    """Evaluate WITHOUT mutating state — would this fire right now?
+
+    process_alert's bool also goes False on an outbox idempotency-key
+    collision (the key buckets on max(cooldown_minutes or 1, 1) * 60 seconds),
+    so back-to-back checks in a test can share a bucket and mask the very
+    behaviour under test. check_alert is the pure evaluation.
+    """
+    mock_yahoo.get_quote = AsyncMock(
+        return_value=_mock_quote(price, high=high, low=low)
+    )
+    result = await service.check_alert(alert)
+    return result.is_triggered
+
+
 class _ConcurrencyError(RuntimeError):
     """Raised when a guarded AsyncSession op is entered while another is live."""
 
@@ -196,24 +220,6 @@ class TestIntradayWickReFire:
     advances where a test calls ``process_alert``.
     """
 
-    @staticmethod
-    async def _drive(service, mock_yahoo, alert, price, high, low):
-        """Run one full check (evaluate + persist state), return is_triggered."""
-        mock_yahoo.get_quote = AsyncMock(
-            return_value=_mock_quote(price, high=high, low=low)
-        )
-        fired, _ = await service.process_alert(alert)
-        return fired
-
-    @staticmethod
-    async def _peek(service, mock_yahoo, alert, price, high, low):
-        """Evaluate without mutating state — would this fire right now?"""
-        mock_yahoo.get_quote = AsyncMock(
-            return_value=_mock_quote(price, high=high, low=low)
-        )
-        result = await service.check_alert(alert)
-        return result.is_triggered
-
     @patch("app.services.alert.discord_service")
     async def test_crosses_below_wick_does_not_refire(
         self, mock_discord, db: AsyncSession
@@ -234,17 +240,17 @@ class TestIntradayWickReFire:
         service.yahoo = mock_yahoo
 
         # Price above the threshold, session low wicked through it.
-        assert await self._drive(service, mock_yahoo, alert, 52.25, 53.10, 51.80) is True
+        assert await _drive(service, mock_yahoo, alert, 52.25, 53.10, 51.80) is True
         assert alert.was_above_threshold is False, (
             "the intraday breach must be latched; leaving this True is #258"
         )
 
         # Same session, same session low, price still above: nothing new has
         # happened, so the evaluator must not see another crossing.
-        assert await self._peek(service, mock_yahoo, alert, 52.40, 53.10, 51.80) is False, (
+        assert await _peek(service, mock_yahoo, alert, 52.40, 53.10, 51.80) is False, (
             "re-evaluated as a fresh crossing on the same intraday low (#258)"
         )
-        assert await self._peek(service, mock_yahoo, alert, 52.60, 53.10, 51.80) is False, (
+        assert await _peek(service, mock_yahoo, alert, 52.60, 53.10, 51.80) is False, (
             "still re-evaluating as a crossing later in the same session (#258)"
         )
 
@@ -265,11 +271,11 @@ class TestIntradayWickReFire:
         mock_yahoo = AsyncMock()
         service.yahoo = mock_yahoo
 
-        assert await self._drive(service, mock_yahoo, alert, 49.50, 50.40, 49.00) is True
+        assert await _drive(service, mock_yahoo, alert, 49.50, 50.40, 49.00) is True
         assert alert.was_above_threshold is True, (
             "the intraday breach must be latched; leaving this False is #258"
         )
-        assert await self._peek(service, mock_yahoo, alert, 49.60, 50.40, 49.00) is False, (
+        assert await _peek(service, mock_yahoo, alert, 49.60, 50.40, 49.00) is False, (
             "re-evaluated as a fresh crossing on the same intraday high (#258)"
         )
 
@@ -295,16 +301,16 @@ class TestIntradayWickReFire:
         service.yahoo = mock_yahoo
 
         # Fire on the wick.
-        assert await self._drive(service, mock_yahoo, alert, 52.25, 53.10, 51.80) is True
+        assert await _drive(service, mock_yahoo, alert, 52.25, 53.10, 51.80) is True
         assert alert.was_above_threshold is False
 
         # New session: price recovered and the session low is back above the
         # threshold. The alert must re-arm.
-        assert await self._drive(service, mock_yahoo, alert, 54.00, 54.50, 53.20) is False
+        assert await _drive(service, mock_yahoo, alert, 54.00, 54.50, 53.20) is False
         assert alert.was_above_threshold is True, "must re-arm after recovery"
 
         # A genuine second excursion must evaluate as a crossing again.
-        assert await self._peek(service, mock_yahoo, alert, 51.00, 53.00, 50.90) is True, (
+        assert await _peek(service, mock_yahoo, alert, 51.00, 53.00, 50.90) is True, (
             "a real crossing after re-arming must still fire"
         )
 
@@ -384,7 +390,7 @@ class TestIntradayWickReFire:
         mock_yahoo = AsyncMock()
         service.yahoo = mock_yahoo
 
-        assert await self._drive(service, mock_yahoo, alert, 52.50, 53.00, 49.00) is False, (
+        assert await _drive(service, mock_yahoo, alert, 52.50, 53.00, 49.00) is False, (
             "the baseline check must not fire"
         )
         assert alert.was_above_threshold is True, (
@@ -393,7 +399,7 @@ class TestIntradayWickReFire:
         )
 
         # The next check is a genuine drop through the threshold.
-        assert await self._peek(service, mock_yahoo, alert, 51.00, 53.00, 49.00) is True, (
+        assert await _peek(service, mock_yahoo, alert, 51.00, 53.00, 49.00) is True, (
             "first real crossing after creation was swallowed"
         )
 
@@ -414,12 +420,12 @@ class TestIntradayWickReFire:
         mock_yahoo = AsyncMock()
         service.yahoo = mock_yahoo
 
-        assert await self._drive(service, mock_yahoo, alert, 49.50, 55.00, 49.00) is False
+        assert await _drive(service, mock_yahoo, alert, 49.50, 55.00, 49.00) is False
         assert alert.was_above_threshold is False, (
             "baseline must latch on check-time price (49.50 < 50), not on the "
             "stale session high it never evaluated"
         )
-        assert await self._peek(service, mock_yahoo, alert, 50.50, 55.00, 49.00) is True, (
+        assert await _peek(service, mock_yahoo, alert, 50.50, 55.00, 49.00) is True, (
             "first real crossing after creation was swallowed"
         )
 
@@ -520,7 +526,7 @@ class TestLatchInvalidatedOnConfigChange:
         # Check 1 after the clear: quiet on BOTH old and new code (baseline
         # here, stale-and-not-armed there). Not load-bearing on its own - what
         # matters is the latch it leaves behind.
-        assert await self._drive(service, mock_yahoo, alert, 52.40, 53.0, 51.0) is False
+        assert await _drive(service, mock_yahoo, alert, 52.40, 53.0, 51.0) is False
         assert alert.was_above_threshold is True, (
             "the baseline must latch 'above' from check-time price 52.40; the "
             "unfixed path re-derives 'below' from the session low and never re-arms"
@@ -528,7 +534,7 @@ class TestLatchInvalidatedOnConfigChange:
 
         # Check 2: a genuine drop through the threshold. THIS is where fixed
         # and unfixed diverge - unfixed suppresses it outright.
-        assert await self._peek(service, mock_yahoo, alert, 51.50, 53.0, 51.0) is True, (
+        assert await _peek(service, mock_yahoo, alert, 51.50, 53.0, 51.0) is True, (
             "genuine crossing suppressed by a latch carried across the "
             "sustained->crossing handoff (#263)"
         )
@@ -570,6 +576,6 @@ class TestLatchInvalidatedOnConfigChange:
         assert alert.notes == "unchanged config, new note"
 
         # So a genuine crossing on the very next check still fires.
-        assert await self._peek(service, mock_yahoo, alert, 51.0, 54.0, 50.5) is True, (
+        assert await _peek(service, mock_yahoo, alert, 51.0, 54.0, 50.5) is True, (
             "crossing swallowed after a PUT that changed nothing about the config"
         )

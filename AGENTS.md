@@ -213,7 +213,7 @@ the hosts.
 - **The macro calendar does not update itself, and deploying does not fix it.** `FRED_API_KEY` is unset
   in prod, so `FredCalendarProvider.is_configured` is False, the daily `events.refresh_macro_calendar`
   Celery task no-ops, and the hand-maintained date lists in `backend/scripts/seed_macro_events.py` are
-  the *only* thing that populates CPI/NFP/GDP/PCE/PPI. Correcting a date is therefore two steps: ship
+  the *only* thing that populates CPI/NFP/GDP/PCE/PPI/retail sales. Correcting a date is therefore two steps: ship
   the list change, then run `python -m scripts.seed_macro_events --all` against prod. A re-run
   self-cleans (rows update in place by recurrence key; entries dropped from a list are retired), so
   `--clear` is not needed. Adding a series the live FRED feed doesn't cover also means adding it to

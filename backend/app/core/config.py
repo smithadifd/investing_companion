@@ -227,7 +227,10 @@ class Settings(BaseSettings):
     FRED_API_KEY: str = ""
     DISCORD_WEBHOOK_URL: str = ""
 
-    # Schwab (opt-in real-time / all-session quotes via OAuth; never required)
+    # Schwab (opt-in OAuth integration; never required). Connecting Schwab is
+    # an INGESTION integration: brokerage transactions and positions, which no
+    # market-data vendor can supply. See SCHWAB_QUOTES_ENABLED below for its
+    # (now separate, default-off) quote role.
     SCHWAB_APP_KEY: str = ""
     SCHWAB_APP_SECRET: str = ""
     # Must exactly match the callback URL registered with the Schwab developer
@@ -235,6 +238,23 @@ class Settings(BaseSettings):
     SCHWAB_CALLBACK_URL: str = ""
     # Where the OAuth callback redirects the browser after the token exchange
     FRONTEND_URL: str = "http://localhost:3000"
+    # Opt-in, DEFAULT OFF: also use the Schwab connection as the extended-hours
+    # (pre/post-market) QUOTE provider for briefings.
+    #
+    # Schwab's two roles are deliberately decoupled (#273). Ingestion is the one
+    # thing only Schwab can do and is always on when connected. Quotes are not:
+    # Yahoo already serves pre/post-market data for the movers surfaces, and
+    # futures/forex/indices never routed through Schwab in the first place
+    # (``_SCHWAB_SYMBOL_RE`` delegates them per-symbol). Leaving the quote role
+    # on means an expired refresh token — which Schwab hard-caps at 7 days with
+    # no way to extend — has a blast radius over prices it has no business
+    # having.
+    #
+    # Set to true only if you specifically want Schwab's real-time all-session
+    # equity/ETF quotes and accept the weekly re-authorization that keeps them
+    # alive. Flipping it is reversible and affects nothing but the pre/post-
+    # market movers surfaces; ingestion is unaffected either way.
+    SCHWAB_QUOTES_ENABLED: bool = False
 
     # AI (fallback, users provide their own)
     CLAUDE_API_KEY: str = ""

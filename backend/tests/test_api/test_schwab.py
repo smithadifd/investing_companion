@@ -80,6 +80,23 @@ class TestSchwabStatus:
         assert data["connected"] is False
         assert data["needs_reconnect"] is True
 
+    async def test_quote_role_reported_and_off_by_default(
+        self, authed_client, db, test_user, schwab_configured
+    ):
+        """The settings page needs this to say honestly what connecting does
+        (#273): connecting is ingestion, quotes are a separate opt-in."""
+        await _store_token(db, test_user.id, age_seconds=3600)
+        response = await authed_client.get("/api/v1/schwab/status")
+        assert response.json()["data"]["quotes_enabled"] is False
+
+    async def test_quote_role_reported_when_opted_in(
+        self, authed_client, db, test_user, schwab_configured, monkeypatch
+    ):
+        monkeypatch.setattr(settings, "SCHWAB_QUOTES_ENABLED", True)
+        await _store_token(db, test_user.id, age_seconds=3600)
+        response = await authed_client.get("/api/v1/schwab/status")
+        assert response.json()["data"]["quotes_enabled"] is True
+
 
 class TestSchwabConnect:
     async def test_rejects_when_not_configured(

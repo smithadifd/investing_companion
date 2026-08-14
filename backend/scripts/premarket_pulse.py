@@ -1,10 +1,11 @@
 """premarket_pulse.py — emit a pre-open market pulse for the morning brief.
 
 Prints a single `### SOURCE: markets` block to stdout: the major index ETFs and
-all 11 SPDR sector ETFs via the extended-hours quote provider (Schwab premarket
-prints when a token is connected, honest "at close" otherwise), plus a few
-non-futures macro tells (VIX, 10Y yield, dollar, BTC) that the provider
-delegates to Yahoo. No equity-index/commodity *futures* — Schwab can't quote
+all 11 SPDR sector ETFs via the extended-hours quote provider (Yahoo premarket
+prints by default, or Schwab's when a server sets SCHWAB_QUOTES_ENABLED and a
+token is connected — honest "at close" either way when the session has no
+data), plus a few non-futures macro tells (VIX, 10Y yield, dollar, BTC) that
+Yahoo always serves. No equity-index/commodity *futures* — Schwab can't quote
 them and Yahoo's are unreliable; premarket ETF prints are the dependable read.
 
 Designed to be run inside the investing_api container, e.g. from the morning

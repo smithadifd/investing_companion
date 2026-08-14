@@ -119,10 +119,23 @@ def reset_quote_provider() -> None:
 async def get_extended_quote_provider(db: AsyncSession):
     """Pick the extended-hours quote provider for briefings.
 
-    Schwab when the server is configured for it AND a user has connected a
-    still-valid token; otherwise the free Yahoo base from PR-A. Schwab is
-    opt-in depth — any missing piece degrades silently to Yahoo, never an
-    error. Returns an ExtendedQuoteProvider (see app.services.extended_movers).
+    **Yahoo by default, including when Schwab is connected (#273).** Schwab's
+    quote role is opt-in and default-off (``SCHWAB_QUOTES_ENABLED``): a Schwab
+    connection exists to ingest transactions and positions — the one thing no
+    market-data vendor sells — and wiring it into the quote chain as well only
+    handed a hard 7-day token expiry a blast radius over prices. Yahoo already
+    serves the pre/post-market movers surfaces, and futures/forex/indices never
+    reached Schwab anyway (``_SCHWAB_SYMBOL_RE`` delegates them per-symbol).
+
+    With the opt-in ON, selection is exactly what it always was: Schwab when
+    the server is configured for it AND a user has connected a still-valid
+    token; otherwise the free Yahoo base. Schwab remains opt-in depth — any
+    missing piece degrades silently to Yahoo, never an error. Returns an
+    ExtendedQuoteProvider (see app.services.extended_movers).
+
+    Deliberately NOT the seam ingestion uses:
+    ``schwab_ingestion.get_connected_provider`` builds its own Schwab client
+    and is untouched by this flag — turning quotes off never turns sync off.
     """
     # Lazy import: schwab-py drags in heavy dependencies, and most installs
     # never configure it.
@@ -130,10 +143,20 @@ async def get_extended_quote_provider(db: AsyncSession):
         SchwabProvider,
         is_schwab_configured,
         parse_wrapped_token,
+        schwab_quotes_enabled,
         token_is_expired,
     )
 
     yahoo = YahooFinanceProvider()
+
+    if not schwab_quotes_enabled():
+        # Not a failure and not worth a per-call log line: this is the default
+        # posture, and briefings run this on every alert sweep.
+        logger.debug(
+            "Schwab quote role is off (SCHWAB_QUOTES_ENABLED); "
+            "using Yahoo for extended-hours quotes"
+        )
+        return yahoo
 
     if not is_schwab_configured():
         return yahoo

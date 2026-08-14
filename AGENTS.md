@@ -13,8 +13,9 @@ TimescaleDB; the frontend reads only from the API, never from external sources d
 
 - **Deployment posture**: single-user, self-hosted via Docker Compose. Andrew's prod is a Synology NAS
   behind Caddy; a separate public **demo** runs on EC2 at `invest.smithadifd.com`.
-- **Non-goals**: multi-tenant SaaS; a brokerage/order-execution system (Schwab is read-only quotes);
-  storing anyone else's credentials. Not a general-purpose charting platform.
+- **Non-goals**: multi-tenant SaaS; a brokerage/order-execution system (the Schwab integration is
+  read-only — it ingests transactions/positions and places no orders); storing anyone else's
+  credentials. Not a general-purpose charting platform.
 
 ## Tech stack
 
@@ -110,7 +111,7 @@ builds the chain — the sibling of `get_extended_quote_provider` (extended-hour
 | Stooq | Fallback | Quotes + daily history (`stooq.py`) | **No key**; US equities/ETFs; always active |
 | Alpha Vantage | Fallback (opt-in) | Quotes (`alpha_vantage.py`) | Free key `ALPHA_VANTAGE_API_KEY`, ~5 req/min; key-gated, inert without it |
 | Massive (Polygon.io) | Fallback (opt-in) | History, fundamentals, search + delayed quotes (`massive.py`) | Paid key `POLYGON_API_KEY`; quotes are 15-min delayed (`delayed_quotes=True`) so they rank below every live source. Per-product entitlements declared in `MASSIVE_ENTITLEMENTS` |
-| Schwab | Extended-hours | Real-time + pre/post-market quotes for briefings | Opt-in OAuth; tokens expire every 7 days |
+| Schwab | Ingestion (quotes opt-in, default OFF) | Brokerage transactions + positions (`schwab_ingestion.py`). Extended-hours quotes ONLY when `SCHWAB_QUOTES_ENABLED=true` | Opt-in OAuth; tokens expire every 7 days. The two roles are decoupled (#273): expiry stops transaction sync, not prices |
 
 **AI advisor contract** — an external Claude advisor reads a versioned context pack and writes changes
 back through a handoff loop. The single source of truth is `docs/api/handoff-schema.md` (pack shape,
@@ -195,15 +196,24 @@ the hosts.
 | `ALPHA_VANTAGE_API_KEY` / `POLYGON_API_KEY` | Optional providers |
 | `MASSIVE_ENTITLEMENTS` | Which Massive products the key holds (`quote,history,fundamentals,search`); unset/blank = all. A surface left off routes to the next provider |
 | `SCHWAB_APP_KEY` / `SCHWAB_APP_SECRET` / `SCHWAB_CALLBACK_URL` / `FRONTEND_URL` | Schwab OAuth (see gotchas) |
+| `SCHWAB_QUOTES_ENABLED` | Opt-in, **default false**: also use the Schwab connection as the extended-hours quote provider. Off = Yahoo serves pre/post-market quotes and a lapsed Schwab token can't degrade prices |
 | `NEXT_PUBLIC_API_URL` | Frontend → API base |
 | `DEMO_MODE` / `NEXT_PUBLIC_DEMO_MODE` | Demo restrictions / banner |
 
 ## Critical gotchas
 
+- **Schwab is an ingestion integration; its quote role is opt-in and default OFF (#273).**
+  `get_extended_quote_provider` returns Yahoo unless `SCHWAB_QUOTES_ENABLED=true`, while
+  `schwab_ingestion.get_connected_provider` (transactions/positions) is untouched by that flag —
+  turning quotes off never turns sync off. Don't "fix" a connected-but-not-quoting Schwab; that is
+  the default posture. Flipping the flag on restores the old chain exactly.
 - **Schwab OAuth is weekly, tailnet-only.** Tokens expire every 7 days — re-auth is a one-click
   Settings → API Keys → Connect Schwab flow; the callback is served on the tailnet, and
-  `SCHWAB_CALLBACK_URL` must exactly match the Schwab developer-portal registration. Missing/expired
-  token silently falls back to Yahoo by design.
+  `SCHWAB_CALLBACK_URL` must exactly match the Schwab developer-portal registration. What expiry
+  actually costs is **transaction/position sync**, which stops until reconnect and drifts toward
+  Schwab's unrecoverable 60-day history horizon — that is what `schwab.check_token_expiry` nags
+  about (plus a `sync_lag` tier for a healthy token whose imports have gone quiet). Quotes are
+  unaffected unless the opt-in above is on, in which case they silently fall back to Yahoo.
 - **`^VIX` and other indices/forex/futures don't come from Schwab** — they delegate per-symbol to Yahoo.
   Don't "fix" a missing Schwab quote for these; the fallback is intentional.
 - **TimescaleDB is mandatory** (see § Database) — a plain Postgres image is not a drop-in.

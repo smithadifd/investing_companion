@@ -1,5 +1,5 @@
 /**
- * Hooks for the Schwab connection (opt-in real-time quotes).
+ * Hooks for the Schwab connection (opt-in transaction/position sync).
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';

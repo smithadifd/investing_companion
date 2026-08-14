@@ -552,7 +552,14 @@ export interface NeedsAttentionResponse {
 // Trigger playbook types
 export type TriggerStatus = 'active' | 'executed' | 'retired';
 
-export type TriggerSignal = 'armed' | 'approaching' | 'hit' | 'unwatched';
+// 'disarmed' = linked alerts exist but every one is deactivated (nothing is
+// watching). Distinct from 'unwatched', which means no alerts were ever linked.
+export type TriggerSignal =
+  | 'armed'
+  | 'approaching'
+  | 'hit'
+  | 'unwatched'
+  | 'disarmed';
 
 export interface TriggerAlertSummary {
   id: number;
@@ -570,7 +577,8 @@ export interface Trigger {
   tier: string | null;
   display_order: number;
   status: TriggerStatus;
-  signal: TriggerSignal;
+  // Null on executed/retired triggers - closed history has no live signal
+  signal: TriggerSignal | null;
   executed_at: string | null;
   execution_note: string | null;
   alerts: TriggerAlertSummary[];

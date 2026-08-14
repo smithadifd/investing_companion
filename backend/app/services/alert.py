@@ -521,7 +521,7 @@ class AlertService:
 
             if not result.is_triggered:
                 # Update last checked value
-                alert.last_checked_value = result.current_value
+                self._mark_checked(alert, result.current_value)
                 await self.db.commit()
                 return False, None
 
@@ -530,7 +530,7 @@ class AlertService:
                     f"Alert {alert.id} triggered but in cooldown, skipping notification"
                 )
                 # Still update the threshold state after trigger
-                alert.last_checked_value = result.current_value
+                self._mark_checked(alert, result.current_value)
                 await self.db.commit()
                 return False, None
 
@@ -574,7 +574,7 @@ class AlertService:
                     )
                     self.db.add(history)
                     alert.last_triggered_at = now
-                    alert.last_checked_value = result.current_value
+                    self._mark_checked(alert, result.current_value, now=now)
                     if payload is not None:
                         await self._enqueue_delivery(
                             alert, history, payload,
@@ -1305,6 +1305,25 @@ class AlertService:
         """
         return (current_count or 0) + 1 if beyond else 0
 
+    @staticmethod
+    def _mark_checked(
+        alert: Alert, value: Decimal, now: datetime | None = None
+    ) -> None:
+        """Record an observed value and the moment it was observed.
+
+        The only writer of ``last_checked_value``. The value and its timestamp
+        MUST move together - a value written without one reads as ageless, and
+        downstream code cannot distinguish a live price from one frozen when
+        the alert was deactivated (#259). Routing every write through here is
+        what makes that pair impossible to split, the same reason
+        ``_next_sustained_count`` is a single helper.
+
+        ``now`` is passed in where the caller already stamped a trigger time,
+        so the check time and the fire time on the same row agree exactly.
+        """
+        alert.last_checked_value = value
+        alert.last_checked_at = now or datetime.now(timezone.utc)
+
     def _evaluate_sustained(
         self, alert: Alert, current_value: Decimal, above: bool
     ) -> tuple[bool, str]:
@@ -1520,7 +1539,7 @@ class AlertService:
                 # write and leaves the session usable (see process_alert).
                 async with self.db.begin_nested():
                     alert.zone_state = new_state
-                    alert.last_checked_value = current_value
+                    self._mark_checked(alert, current_value, now=now)
 
                     for zone in fired:
                         history = AlertHistory(

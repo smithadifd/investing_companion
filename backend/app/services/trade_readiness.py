@@ -57,8 +57,12 @@ async def build_trade_readiness(
     actionable: list[tuple[Trigger, list[Alert], TriggerSignal]] = []
     for trigger in triggers:
         alerts = [link.alert for link in trigger.alert_links if link.alert]
-        # derive_signal counts a recent fire from a since-disabled alert as HIT
-        # (playbook semantics); inactive_alert_count surfaces the degradation.
+        # derive_signal reads ACTIVE alerts only (#259), so a trigger whose
+        # rungs have all been switched off is DISARMED and drops out of
+        # readiness rather than arriving here as HIT off a since-disabled
+        # alert's fire, or as APPROACHING off a frozen distance. That is the
+        # point: readiness is for things actually being watched. The playbook
+        # page still shows it, flagged disarmed.
         signal = derive_signal(alerts)
         if signal in (TriggerSignal.HIT, TriggerSignal.APPROACHING):
             actionable.append((trigger, alerts, signal))

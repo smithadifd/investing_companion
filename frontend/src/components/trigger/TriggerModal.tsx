@@ -197,7 +197,8 @@ export function TriggerModal({ isOpen, onClose, trigger }: TriggerModalProps) {
             )}
           </label>
           <p className="text-xs text-neutral-500 mb-2">
-            Linked alerts drive the live signal (armed / approaching / hit)
+            Active linked alerts drive the live signal (armed / approaching /
+            hit). Deactivate them all and the trigger reads disarmed.
           </p>
           <div className="relative mb-2">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />

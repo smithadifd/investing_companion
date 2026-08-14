@@ -217,7 +217,7 @@ class TestContextPackLessons:
         )
 
         pack = await ContextPackService(db).build(test_user.id)
-        assert pack.schema_version == SCHEMA_VERSION == "1.6"
+        assert pack.schema_version == SCHEMA_VERSION == "1.7"
         assert any(les.symbol == "LSN3" for les in pack.lessons)
 
         markdown = render_markdown(pack)

@@ -92,6 +92,14 @@ class Alert(Base, TimestampMixin):
         Numeric(precision=18, scale=6), nullable=True
     )
 
+    # When last_checked_value was written. Only the scheduled check loop sets
+    # this pair, so it stops advancing the moment an alert goes inactive - which
+    # is what lets the read side tell a live price from one frozen at
+    # deactivation (#259). NULL = age unknown, treated as stale.
+    last_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # For cross alerts, track whether price was above threshold at last check
     # None = not yet established, True = was above, False = was below
     was_above_threshold: Mapped[bool | None] = mapped_column(

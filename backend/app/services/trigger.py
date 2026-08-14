@@ -25,6 +25,24 @@ logger = logging.getLogger(__name__)
 APPROACHING_THRESHOLD_PCT = Decimal("3")
 # An alert fire within this window counts as the trigger being "hit"
 HIT_WINDOW = timedelta(hours=48)
+# How old ``last_checked_value`` may be before its distance is withheld.
+# The check loop runs every 5 minutes, so a live alert is never near this;
+# the margin is for provider outages and quiet weekends, not for normal lag.
+# Anything past it is not "slightly behind", it is unattended.
+STALE_AFTER = timedelta(hours=24)
+
+
+def _is_stale(alert: Alert) -> bool:
+    """Whether ``last_checked_value`` is too old to present as current.
+
+    NULL ``last_checked_at`` counts as stale: the column was added after these
+    rows existed and was deliberately not backfilled, because the write time of
+    an existing value is unrecoverable and guessing it would stamp frozen
+    prices as fresh. Active alerts fill it in on their next check.
+    """
+    if alert.last_checked_at is None:
+        return True
+    return datetime.now(timezone.utc) - alert.last_checked_at > STALE_AFTER
 
 
 def _alert_distance(alert: Alert) -> Decimal | None:
@@ -35,6 +53,12 @@ def _alert_distance(alert: Alert) -> Decimal | None:
         return None
     if not alert.last_checked_value:
         return None
+    # Nothing refreshes last_checked_value once an alert stops being checked,
+    # so without this an inactive alert reports the distance it had at
+    # deactivation forever - a rung "2.78% away" while price sits 11% past it
+    # in the other direction (#259). No number beats a confident wrong one.
+    if _is_stale(alert):
+        return None
     last = Decimal(str(alert.last_checked_value))
     if last == 0:
         return None
@@ -43,17 +67,28 @@ def _alert_distance(alert: Alert) -> Decimal | None:
 
 
 def derive_signal(alerts: list[Alert]) -> TriggerSignal:
-    """Live signal for a trigger from its linked alerts."""
+    """Live signal for a trigger from its linked alerts.
+
+    Every state below the first two is derived from ACTIVE alerts only. An
+    inactive alert is not being evaluated by anything, so neither its fire
+    history nor its frozen last value describes the present.
+    """
     if not alerts:
         return TriggerSignal.UNWATCHED
 
+    active = [a for a in alerts if a.is_active]
+    if not active:
+        # Linked but entirely silenced. Distinct from UNWATCHED (never wired
+        # up) because this is a ladder the user deliberately built and which
+        # has since gone dark - the more alarming of the two, and previously
+        # indistinguishable from ARMED.
+        return TriggerSignal.DISARMED
+
     now = datetime.now(timezone.utc)
-    for a in alerts:
+    for a in active:
         if a.last_triggered_at and now - a.last_triggered_at <= HIT_WINDOW:
             return TriggerSignal.HIT
-    for a in alerts:
-        if not a.is_active:
-            continue
+    for a in active:
         distance = _alert_distance(a)
         if distance is not None and abs(distance) <= APPROACHING_THRESHOLD_PCT:
             return TriggerSignal.APPROACHING
@@ -223,6 +258,15 @@ class TriggerService:
 
     def _to_response(self, trigger: Trigger) -> TriggerResponse:
         alerts = [link.alert for link in trigger.alert_links if link.alert]
+        # Only a live standing order has a live signal. An executed or retired
+        # trigger is closed history, and deriving one anyway had retired
+        # trigger 9 reporting "armed" indefinitely (#259). None, not a value
+        # that invites the reader to act on a decision already closed.
+        signal = (
+            derive_signal(alerts)
+            if trigger.status == TriggerLifecycle.ACTIVE.value
+            else None
+        )
         return TriggerResponse(
             id=trigger.id,
             name=trigger.name,
@@ -231,7 +275,7 @@ class TriggerService:
             tier=trigger.tier,
             display_order=trigger.display_order,
             status=trigger.status,
-            signal=derive_signal(alerts),
+            signal=signal,
             executed_at=trigger.executed_at,
             execution_note=trigger.execution_note,
             alerts=[

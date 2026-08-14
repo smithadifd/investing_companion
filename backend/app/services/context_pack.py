@@ -40,7 +40,7 @@ from app.services.exposure import build_catalyst_clusters, catalyst_symbol_map
 from app.services.handoff import HandoffService
 from app.services.lesson import LessonService
 from app.services.trade import TradeService
-from app.services.trigger import TriggerService
+from app.services.trigger import TriggerService, _is_stale
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +130,8 @@ class ContextPackService:
                 action=t.action,
                 tier=t.tier,
                 status=t.status.value,
-                signal=t.signal.value,
+                # None on executed triggers - closed history has no live signal
+                signal=t.signal.value if t.signal else None,
                 executed_at=t.executed_at,
             )
             for t in await TriggerService(self.db, user_id).list_triggers()
@@ -254,7 +255,11 @@ class ContextPackService:
                 a.condition_type.startswith("percent")
                 or a.condition_type == "entry_zone"
             )
-            if last and last != 0 and not no_distance:
+            # Same staleness rule as the trigger playbook, deliberately: the
+            # documented workflow cross-checks a trigger's rungs against this
+            # list, so the two surfaces must not disagree about the same alert.
+            stale = _is_stale(a)
+            if last and last != 0 and not no_distance and not stale:
                 distance = ((threshold - last) / last * 100).quantize(Decimal("0.01"))
 
             if a.last_triggered_at and a.last_triggered_at >= recently:
@@ -272,6 +277,7 @@ class ContextPackService:
                     threshold_value=threshold,
                     comparison_period=a.comparison_period,
                     last_checked_value=last,
+                    last_checked_at=a.last_checked_at,
                     distance_percent=distance,
                     status=status,
                     last_triggered_at=a.last_triggered_at,
@@ -478,8 +484,11 @@ def render_markdown(pack: ContextPack) -> str:
         lines += ["", "## Trigger playbook (standing orders)"]
         for t in pack.triggers:
             tier = f" [{t.tier}]" if t.tier else ""
+            # A non-active trigger has no signal; render its status alone
+            # rather than the literal "None/executed".
+            state = f"{t.signal}/{t.status}" if t.signal else t.status
             lines.append(
-                f"- [{t.signal}/{t.status}]{tier} {t.name}: IF {t.rule} THEN {t.action}"
+                f"- [{state}]{tier} {t.name}: IF {t.rule} THEN {t.action}"
             )
 
     if pack.recent_handoffs:

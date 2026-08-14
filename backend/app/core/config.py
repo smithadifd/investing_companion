@@ -166,6 +166,12 @@ class Settings(BaseSettings):
 
     # External APIs
     ALPHA_VANTAGE_API_KEY: str = ""
+    # Massive (formerly Polygon.io). Keeps the POLYGON_ spelling so existing
+    # deployments keep working across the rebrand. Key-gated: when empty,
+    # ``get_quote_provider()`` never builds the provider. Serves history /
+    # fundamentals / search; its quotes are 15-minute delayed on the Starter
+    # plan and are ranked below every live source
+    # (see app/services/data_providers/massive.py).
     POLYGON_API_KEY: str = ""
     FINNHUB_API_KEY: str = ""
     # FRED (St. Louis Fed) — free API key gating the live macro-release calendar

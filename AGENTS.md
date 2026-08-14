@@ -109,7 +109,7 @@ builds the chain — the sibling of `get_extended_quote_provider` (extended-hour
 | Yahoo Finance | Primary | Quotes, fundamentals, history, search; `^VIX` and other index/forex/futures | Unofficial — be gentle; may break; now retry/backoff/breaker-wrapped |
 | Stooq | Fallback | Quotes + daily history (`stooq.py`) | **No key**; US equities/ETFs; always active |
 | Alpha Vantage | Fallback (opt-in) | Quotes (`alpha_vantage.py`) | Free key `ALPHA_VANTAGE_API_KEY`, ~5 req/min; key-gated, inert without it |
-| Polygon.io | — | Documented only | Paid; unimplemented |
+| Massive (Polygon.io) | Fallback (opt-in) | History, fundamentals, search + delayed quotes (`massive.py`) | Paid key `POLYGON_API_KEY`; quotes are 15-min delayed (`delayed_quotes=True`) so they rank below every live source. Per-product entitlements declared in `MASSIVE_ENTITLEMENTS` |
 | Schwab | Extended-hours | Real-time + pre/post-market quotes for briefings | Opt-in OAuth; tokens expire every 7 days |
 
 **AI advisor contract** — an external Claude advisor reads a versioned context pack and writes changes
@@ -193,6 +193,7 @@ the hosts.
 | `CLAUDE_API_KEY` | Optional; users provide their own (stored encrypted per-user) |
 | `DISCORD_WEBHOOK_URL` | Alert notifications |
 | `ALPHA_VANTAGE_API_KEY` / `POLYGON_API_KEY` | Optional providers |
+| `MASSIVE_ENTITLEMENTS` | Which Massive products the key holds (`quote,history,fundamentals,search`); unset/blank = all. A surface left off routes to the next provider |
 | `SCHWAB_APP_KEY` / `SCHWAB_APP_SECRET` / `SCHWAB_CALLBACK_URL` / `FRONTEND_URL` | Schwab OAuth (see gotchas) |
 | `NEXT_PUBLIC_API_URL` | Frontend → API base |
 | `DEMO_MODE` / `NEXT_PUBLIC_DEMO_MODE` | Demo restrictions / banner |

@@ -25,6 +25,7 @@ from app.services.data_providers.base import (
     MarketDataProvider,
     ProviderCapability,
     ProviderError,
+    ProviderUnentitledError,
 )
 from app.services.data_providers.massive import (
     MassiveProvider,
@@ -214,23 +215,30 @@ class TestStatusPolicy:
         with pytest.raises(ProviderError):
             await provider.search("AAPL")
 
-    async def test_unentitled_fundamentals_degrade_without_killing_the_provider(
+    async def test_unentitled_fundamentals_route_instead_of_returning_empty(
         self, monkeypatch
     ):
-        """A 403 on the financials dataset disables fundamentals only.
+        """A 403 on the financials dataset disables fundamentals only — and says so.
 
-        The circuit breaker is shared across a provider's capabilities, so
-        raising here would take history and search down with it every time the
-        plan simply doesn't include financials.
+        It used to return ``{}``, which is indistinguishable from "this ticker
+        has no fundamentals" and left the surface quietly blank. It now raises
+        ``ProviderUnentitledError`` so the chain routes to the next provider.
+        The original reasoning still holds: the breaker is shared across a
+        provider's capabilities, so this must not take history and search down
+        with it — see ``test_massive_entitlements.py`` for that guarantee.
         """
         _stub_http(monkeypatch, _StubResponse(403, {"status": "NOT_AUTHORIZED"}))
         provider = MassiveProvider(api_key=TEST_KEY)
-        assert await provider.get_fundamentals("AAPL") is None
+        with pytest.raises(ProviderUnentitledError):
+            await provider.get_fundamentals("AAPL")
 
-    async def test_403_on_an_entitled_surface_still_raises(self, monkeypatch):
+    async def test_403_on_any_surface_is_an_entitlement_answer_not_an_outage(
+        self, monkeypatch
+    ):
+        """403 is uniform across surfaces: a routing signal, never provider health."""
         _stub_http(monkeypatch, _StubResponse(403, {"status": "NOT_AUTHORIZED"}))
         provider = MassiveProvider(api_key=TEST_KEY)
-        with pytest.raises(ProviderError):
+        with pytest.raises(ProviderUnentitledError):
             await provider.get_history("AAPL")
 
     async def test_transport_failure_raises_provider_error(self, monkeypatch):

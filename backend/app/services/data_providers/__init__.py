@@ -46,6 +46,13 @@ def get_quote_provider() -> FailoverQuoteProvider:
          flaky Stooq is retried/broken independently.
       3. **Alpha Vantage** — a quote fallback added *only* when
          ``ALPHA_VANTAGE_API_KEY`` is set (key-gated; inert otherwise).
+      4. **Massive** (Polygon.io) — added *only* when ``POLYGON_API_KEY`` is
+         set. Appended last on purpose: the Starter plan is 15-minute delayed,
+         so it must never outrank a live quote source. That ordering is also
+         enforced structurally — ``MassiveProvider.delayed_quotes`` is ``True``
+         and ``FailoverQuoteProvider`` demotes any delayed provider below every
+         live one for quotes regardless of its position in this list. Appending
+         it here is the belt; the flag is the braces.
 
     A quote served by any fallback is stamped ``stale=True`` with its ``source``
     so the UI can show a degraded-data badge. Cached at module scope; call
@@ -72,6 +79,25 @@ def get_quote_provider() -> FailoverQuoteProvider:
             logger.info("Alpha Vantage fallback enabled (API key configured)")
     except Exception as exc:  # noqa: BLE001 — a bad optional provider must not break the chain
         logger.warning("Alpha Vantage fallback unavailable: %s", exc)
+
+    # Key-gated, and appended LAST: Massive's Starter plan serves 15-minute
+    # delayed quotes, which must never be preferred over a live source. Its
+    # history / fundamentals / search are delay-insensitive and benefit from
+    # being in the chain at all.
+    try:
+        from app.services.data_providers.massive import (
+            MassiveProvider,
+            is_massive_configured,
+        )
+
+        if is_massive_configured():
+            chain.append(ResilientProvider(MassiveProvider()))
+            logger.info(
+                "Massive (Polygon.io) provider enabled (API key configured); "
+                "quotes are delayed and rank below every live source"
+            )
+    except Exception as exc:  # noqa: BLE001 — a bad optional provider must not break the chain
+        logger.warning("Massive provider unavailable: %s", exc)
 
     _quote_provider = FailoverQuoteProvider(chain)
     return _quote_provider

@@ -382,3 +382,78 @@ class TestFailover:
     def test_empty_provider_list_rejected(self):
         with pytest.raises(ValueError):
             FailoverQuoteProvider([])
+
+
+class TestDelayedQuoteDemotion:
+    """``delayed_quotes`` ordering — the generic machinery (Wave AT row AT7).
+
+    A provider on a contractually delayed plan (Massive/Polygon's 15-minute
+    Starter tier) must never be consulted for a quote ahead of a live source.
+    The provider-specific end of this lives in ``test_massive_provider.py``;
+    these pin the behavior of the failover layer itself.
+    """
+
+    @staticmethod
+    def _delayed(name="delayed", quote=None, caps=ALL_CAPS):
+        provider = StaticProvider(name, quote, caps=caps)
+        provider.delayed_quotes = True
+        return provider
+
+    async def test_delayed_provider_is_demoted_below_every_live_one(self):
+        delayed = self._delayed(quote=_quote(price="90"))
+        live = StaticProvider("yahoo", _quote(price="100"))
+        # Delayed placed FIRST — the layer must correct it.
+        failover = FailoverQuoteProvider([delayed, live])
+
+        assert [p.name for p in failover.quote_order()] == ["yahoo", "delayed"]
+        quote = await failover.get_quote("AAPL")
+        assert quote.source == "yahoo"
+
+    async def test_delayed_quote_is_always_stamped_stale(self):
+        delayed = self._delayed(quote=_quote(price="90"))
+        failover = FailoverQuoteProvider([delayed])
+        quote = await failover.get_quote("AAPL")
+        assert quote.source == "delayed"
+        assert quote.stale is True
+
+    async def test_delayed_still_answers_when_live_sources_have_nothing(self):
+        dead = StaticProvider("yahoo", None)
+        delayed = self._delayed(quote=_quote(price="90"))
+        failover = FailoverQuoteProvider([dead, delayed])
+        quote = await failover.get_quote("AAPL")
+        assert quote.source == "delayed"
+
+    async def test_live_provider_relative_order_is_preserved(self):
+        first = StaticProvider("yahoo")
+        second = StaticProvider("stooq")
+        delayed = self._delayed()
+        failover = FailoverQuoteProvider([first, delayed, second])
+        assert [p.name for p in failover.quote_order()] == [
+            "yahoo",
+            "stooq",
+            "delayed",
+        ]
+
+    async def test_demotion_does_not_apply_to_history(self):
+        """History is delay-insensitive, so its ordering is untouched."""
+        bar = OHLCVData(
+            timestamp=datetime(2026, 6, 9),
+            open=Decimal("1"),
+            high=Decimal("1"),
+            low=Decimal("1"),
+            close=Decimal("1"),
+            volume=1,
+        )
+        delayed = self._delayed()
+        delayed._history = [bar]
+        live = StaticProvider("yahoo", history=[])
+        failover = FailoverQuoteProvider([delayed, live])
+        assert await failover.get_history("AAPL") == [bar]
+
+    def test_resilient_wrapper_propagates_the_flag(self):
+        delayed = self._delayed()
+        wrapped = ResilientProvider(delayed)
+        assert wrapped.delayed_quotes is True
+
+    def test_providers_are_live_by_default(self):
+        assert StaticProvider("plain").delayed_quotes is False

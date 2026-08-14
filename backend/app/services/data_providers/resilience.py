@@ -166,6 +166,12 @@ class ResilientProvider(MarketDataProvider):
         self._provider = provider
         self.name = getattr(provider, "name", provider.__class__.__name__)
         self.capabilities = getattr(provider, "capabilities", frozenset())
+        # The quote-freshness contract must survive wrapping: a delayed
+        # provider wrapped in retry/breaker is still delayed, and
+        # ``FailoverQuoteProvider`` orders on this attribute. Dropping it here
+        # would silently promote a delayed feed ahead of a live one.
+        self.delayed_quotes = getattr(provider, "delayed_quotes", False)
+        self.quote_delay_minutes = getattr(provider, "quote_delay_minutes", 0)
         self.max_retries = max_retries
         self.base_delay = base_delay
         self.max_delay = max_delay
@@ -243,6 +249,11 @@ def _stamp_stale(quote: QuoteResponse, source: str, *, stale: bool) -> QuoteResp
     return quote
 
 
+def _is_delayed(provider: MarketDataProvider) -> bool:
+    """True when ``provider`` declares a contractually delayed quote feed."""
+    return bool(getattr(provider, "delayed_quotes", False))
+
+
 class FailoverQuoteProvider(MarketDataProvider):
     """Health-based failover across an ordered list of providers.
 
@@ -252,6 +263,20 @@ class FailoverQuoteProvider(MarketDataProvider):
     first provider to return data wins. Anything served by a fallback (not the
     primary) is stamped ``stale=True`` with ``source`` set to the winning
     provider so the UI can show a "delayed / fallback data" badge.
+
+    **Quotes carry one extra, non-negotiable ordering rule.** A provider that
+    declares ``delayed_quotes = True`` (a plan contracted to serve prices behind
+    a fixed delay — Massive/Polygon's 15-minute Starter tier) is consulted only
+    after *every* live provider, no matter where the caller placed it in the
+    list, and any quote it wins is always stamped ``stale=True``. The ordering
+    is enforced here rather than left to the chain builder because getting it
+    wrong is silent: the UI would render a 15-minute-old price as current. See
+    ``_quote_candidates``.
+
+    The rule is scoped to quotes on purpose. History, fundamentals and search
+    are delay-insensitive — a daily bar or a P/E ratio from a delayed plan is
+    exactly as good as a live one — so those capabilities keep the caller's
+    ordering untouched.
     """
 
     name = "failover"
@@ -269,8 +294,32 @@ class FailoverQuoteProvider(MarketDataProvider):
             if provider.supports(capability):
                 yield index, provider
 
+    def _quote_candidates(self):
+        """Yield ``(index, provider)`` for quotes, delayed providers demoted.
+
+        ``index`` stays the provider's position in the original list so the
+        existing "stale unless it came from the head of the chain" rule is
+        untouched; only the *consult order* changes.
+        """
+        supported = list(self._candidates(ProviderCapability.QUOTE))
+        live = [pair for pair in supported if not _is_delayed(pair[1])]
+        delayed = [pair for pair in supported if _is_delayed(pair[1])]
+        # Stable partition: only ever demotes a delayed provider, never
+        # reshuffles the live providers among themselves.
+        yield from live
+        yield from delayed
+
+    def quote_order(self) -> list[MarketDataProvider]:
+        """Quote-capable providers in the order ``get_quote`` will consult them.
+
+        Exposed so the ordering guarantee is directly assertable in tests and
+        inspectable at runtime, rather than being an emergent property of a
+        loop.
+        """
+        return [provider for _index, provider in self._quote_candidates()]
+
     async def get_quote(self, symbol: str) -> QuoteResponse | None:
-        for index, provider in self._candidates(ProviderCapability.QUOTE):
+        for index, provider in self._quote_candidates():
             try:
                 quote = await provider.get_quote(symbol)
             except ProviderError as exc:
@@ -280,7 +329,11 @@ class FailoverQuoteProvider(MarketDataProvider):
                 logger.warning("failover: %s quote error (%s)", provider.name, exc)
                 continue
             if quote is not None:
-                return _stamp_stale(quote, provider.name, stale=index > 0)
+                # Stale when it came from a fallback OR from a contractually
+                # delayed feed — a delayed price is never "fresh", even in the
+                # degenerate case where it is the only quote source configured.
+                stale = index > 0 or _is_delayed(provider)
+                return _stamp_stale(quote, provider.name, stale=stale)
         return None
 
     async def get_history(

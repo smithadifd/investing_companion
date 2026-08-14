@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, time
 
@@ -164,6 +165,46 @@ def gdp_estimate_ordinal(d: date) -> str:
     return _GDP_ORDINAL_BY_MONTH_MOD3[d.month % 3]
 
 
+def monthly_release_ordinals(dates: Iterable[date]) -> dict[date, str | None]:
+    """Recurrence-key ordinals for a *monthly* release series.
+
+    A monthly series normally publishes once per calendar month, so the plain
+    ``<type>_<year>_<month>`` key already identifies a release uniquely and
+    this returns ``None`` for every date — the legacy key, byte-for-byte.
+
+    A disrupted cadence breaks that assumption, and the 2025-26 shutdown
+    cascade broke it twice (issue #265):
+      * BLS published two PPI releases in January 2026 — Nov-2025 data on
+        Jan 14, Dec-2025 data on Jan 30.
+      * BEA published two Personal Income and Outlays releases in April
+        2026 — Feb-2026 data on Apr 9, Mar-2026 data on Apr 30.
+    Under month-only keys the second write silently overwrites the first and
+    one real release vanishes from the calendar — the same bug class already
+    fixed for GDP, which only ever got fixed for GDP.
+
+    A colliding month's dates get stable positional ordinals (``release_1``,
+    ``release_2``, … in date order), the same scheme
+    ``_gdp_dates_to_specs`` uses. Position, not the reference month, because
+    position is derivable from bare dates alone — so the live FRED feed and
+    the hand-maintained seed lists compute the SAME key for the same real
+    release, which is the property that keeps a live refresh updating a
+    seeded row in place instead of duplicating it.
+    """
+    by_month: dict[tuple[int, int], list[date]] = {}
+    for d in dates:
+        by_month.setdefault((d.year, d.month), []).append(d)
+
+    ordinals: dict[date, str | None] = {}
+    for month_dates in by_month.values():
+        unique = sorted(set(month_dates))
+        if len(unique) == 1:
+            ordinals[unique[0]] = None
+        else:
+            for idx, d in enumerate(unique, start=1):
+                ordinals[d] = f"release_{idx}"
+    return ordinals
+
+
 class FredCalendarProvider:
     """Fetches scheduled macro-release dates from the FRED API."""
 
@@ -215,12 +256,16 @@ class FredCalendarProvider:
             return self._gdp_dates_to_specs(dates, year)
 
         meta = _EVENT_META[event_type]
+        in_year = [d for d in dates if d.year == year]
+        # Two releases of the same monthly series in one calendar month used to
+        # collapse onto one key here (last-write-wins silently dropped one real
+        # release). ``monthly_release_ordinals`` disambiguates that case and
+        # returns None — the unchanged legacy key — for every ordinary month.
+        ordinals = monthly_release_ordinals(in_year)
         specs: dict[str, MacroEventSpec] = {}
-        for d in dates:
-            if d.year != year:
-                continue
-            key = macro_recurrence_key(event_type, d)
-            # Last-write-wins within a run; keys are stable so this is idempotent.
+        for d in sorted(set(in_year)):
+            key = macro_recurrence_key(event_type, d, ordinal=ordinals[d])
+            # Keys are stable, so re-running is idempotent.
             specs[key] = MacroEventSpec(
                 event_type=event_type.value,
                 event_date=d,

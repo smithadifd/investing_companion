@@ -73,6 +73,7 @@ services:
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
       - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}
       - FINNHUB_API_KEY=${FINNHUB_API_KEY:-}
+      - POLYGON_API_KEY=${POLYGON_API_KEY:-}
       - REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-true}
       # Schwab OAuth (optional all-session quotes). FRONTEND_URL is also where the
       # OAuth callback bounces the browser back to after a successful connect.

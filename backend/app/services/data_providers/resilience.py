@@ -14,8 +14,12 @@ and has no built-in protection. This module hardens *any* ``MarketDataProvider``
   flag degraded / delayed data.
 
 A "symbol not found" (``None`` / ``[]``) is a legitimate answer, not a failure:
-it does not consume the retry budget and never trips the breaker. Only raised
-exceptions count against provider health.
+it does not consume the retry budget and never trips the breaker. Raised
+exceptions count against provider health, with one deliberate exception:
+``ProviderUnentitledError`` (the provider's plan doesn't include the requested
+surface) is re-raised untouched — it routes like a failure but is a fact about
+the subscription, not about the upstream, so retrying it is pointless and
+counting it would take that provider's *entitled* surfaces down with it.
 """
 
 import asyncio
@@ -36,6 +40,7 @@ from app.services.data_providers.base import (
     MarketDataProvider,
     ProviderCapability,
     ProviderError,
+    ProviderUnentitledError,
 )
 
 logger = logging.getLogger(__name__)
@@ -215,6 +220,15 @@ class ResilientProvider(MarketDataProvider):
         for attempt in range(self.max_retries + 1):
             try:
                 result = await method(*args)
+            except ProviderUnentitledError:
+                # Not a health event and not retryable: the plan does not
+                # include this surface, and no amount of retrying will change
+                # that. Re-raised untouched so the failover chain routes past
+                # it, while the breaker — shared across every capability of
+                # this provider — stays exactly where it was. Counting an
+                # unowned dataset as a failure would take the surfaces we *do*
+                # own down with it.
+                raise
             except Exception as exc:  # noqa: BLE001 — any upstream failure retries
                 last_exc = exc
                 logger.warning(

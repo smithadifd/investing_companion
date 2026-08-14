@@ -73,9 +73,15 @@ echo ""
 # If `alembic current` == `alembic heads` before this deploy (no pending
 # migrations), `alembic upgrade head` is a no-op and the check below passes
 # immediately — no behavior change beyond this cheap verification.
+#
+# COMPOSE_HTTP_TIMEOUT=300 here for the same reason as Step 4/5 (see above): a
+# long DDL migration that outruns compose v1's 60s default would make `exec`
+# return non-zero client-side while the migration is still running in the
+# container — which would print the DEPLOY FAILED banner over a migration that
+# actually succeeded. A false alarm here is as corrosive as a missed one.
 echo "Step 5/5: Running database migrations..."
 sleep 10
-if ! ssh "$SYNOLOGY_HOST" "export PATH=/usr/local/bin:\$PATH && cd $DEPLOY_PATH && $DOCKER_COMPOSE -f $COMPOSE_FILE --env-file $ENV_FILE exec -T $API_SERVICE python -m alembic upgrade head"; then
+if ! ssh "$SYNOLOGY_HOST" "export PATH=/usr/local/bin:\$PATH && export COMPOSE_HTTP_TIMEOUT=300 && cd $DEPLOY_PATH && $DOCKER_COMPOSE -f $COMPOSE_FILE --env-file $ENV_FILE exec -T $API_SERVICE python -m alembic upgrade head"; then
     echo ""
     echo "=========================================="
     echo "✗ DEPLOY FAILED: alembic upgrade head failed on the Synology host."
@@ -87,8 +93,8 @@ if ! ssh "$SYNOLOGY_HOST" "export PATH=/usr/local/bin:\$PATH && cd $DEPLOY_PATH 
     exit 1
 fi
 
-CURRENT_REV=$(ssh "$SYNOLOGY_HOST" "export PATH=/usr/local/bin:\$PATH && cd $DEPLOY_PATH && $DOCKER_COMPOSE -f $COMPOSE_FILE --env-file $ENV_FILE exec -T $API_SERVICE python -m alembic current" | awk 'NF { print $1; exit }')
-HEAD_REV=$(ssh "$SYNOLOGY_HOST" "export PATH=/usr/local/bin:\$PATH && cd $DEPLOY_PATH && $DOCKER_COMPOSE -f $COMPOSE_FILE --env-file $ENV_FILE exec -T $API_SERVICE python -m alembic heads" | awk 'NF { print $1; exit }')
+CURRENT_REV=$(ssh "$SYNOLOGY_HOST" "export PATH=/usr/local/bin:\$PATH && export COMPOSE_HTTP_TIMEOUT=300 && cd $DEPLOY_PATH && $DOCKER_COMPOSE -f $COMPOSE_FILE --env-file $ENV_FILE exec -T $API_SERVICE python -m alembic current" | awk 'NF { print $1; exit }')
+HEAD_REV=$(ssh "$SYNOLOGY_HOST" "export PATH=/usr/local/bin:\$PATH && export COMPOSE_HTTP_TIMEOUT=300 && cd $DEPLOY_PATH && $DOCKER_COMPOSE -f $COMPOSE_FILE --env-file $ENV_FILE exec -T $API_SERVICE python -m alembic heads" | awk 'NF { print $1; exit }')
 
 if [ -z "$CURRENT_REV" ] || [ "$CURRENT_REV" != "$HEAD_REV" ]; then
     echo ""

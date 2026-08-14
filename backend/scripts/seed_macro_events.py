@@ -7,7 +7,8 @@ Creates events for:
 - CPI releases (monthly)
 - NFP/Jobs reports (monthly)
 - GDP releases (quarterly)
-- Other major economic indicators
+- PCE releases (monthly, BEA "Personal Income and Outlays")
+- PPI releases (monthly, 2026 only -- see the PPI block below)
 
 Data source
 -----------
@@ -43,6 +44,16 @@ schedule pages (web.archive.org mirrors of bls.gov/schedule/news_release/
 cpi.htm and .../empsit.htm) -- see the source/citation blocks above
 ``CPI_DATES_2025`` and ``NFP_DATES_2025`` below for the exact capture URLs.
 
+PCE/PPI follow-up (2026-08-14, issue #265): PCE was the one series the two
+passes above never re-derived, so it still carried pre-audit guesses AND had
+no 2026 table at all -- ``seed_statistical_specs`` gated it behind
+``if year == 2025:``, silently producing no PCE row for any month of 2026.
+PPI was absent from this pipeline entirely. Both are now derived from primary
+sources (bea.gov directly; bls.gov via Wayback, still 403 live) and the
+year-gate is replaced by the declared ``_MONTHLY_SERIES`` coverage table, whose
+gaps every run prints. Retail sales (``EventType.RETAIL_SALES``, a Census
+release) remains unseeded -- recorded in #265, deliberately out of scope here.
+
 Usage:
     cd backend
     python -m scripts.seed_macro_events
@@ -62,9 +73,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import AsyncSessionLocal
 from app.db.models.economic_event import EconomicEvent, EventSource, EventType
 from app.services.data_providers.fred import (
+    RELEASE_IDS,
     FredCalendarProvider,
     MacroEventSpec,
     macro_recurrence_key,
+    monthly_release_ordinals,
 )
 from app.services.economic_event import EconomicEventService
 
@@ -350,23 +363,125 @@ GDP_DATES_2026: list[tuple[date, str]] = [
 
 
 # ============================================================================
-# PCE (Personal Consumption Expenditures) - Fed's preferred inflation measure
-# Usually released ~1 week after CPI
+# PCE (Personal Consumption Expenditures) — Fed's preferred inflation measure.
+# BEA publishes it in the "Personal Income and Outlays" release.
+# Source: https://www.bea.gov/news/schedule -- full-2025 and full-2026 tabs
+# (https://www.bea.gov/news/schedule/full-2025 and .../full, which list every
+# release of the year including ones already published, not just upcoming).
+# Retrieved: 2026-08-14 (issue #265). bea.gov is reachable directly, so unlike
+# CPI/NFP these needed no Wayback archaeology.
+#
+# 2025 corrected (issue #265): the 2025 list was never re-derived in the
+# 2026-07-21 issue-015 audit -- that pass covered FOMC/GDP, and the 2026-07-23
+# follow-up covered CPI/NFP. So PCE alone still carried the pre-audit guesses,
+# and the Oct-Nov 2025 shutdown broke its last three exactly the way it broke
+# CPI's, NFP's and GDP's:
+#   - Sep-2025 data: Oct 31 -> Dec 5, 2025 (shutdown-delayed, released 10:00 AM)
+#   - Oct-2025 + Nov-2025 data: NOT released separately in 2025 at all. BEA
+#     COMBINED them into a single Jan 22, 2026 release (see PCE_DATES_2026),
+#     so the guessed Nov 26 and Dec 23, 2025 entries are removed here rather
+#     than moved. This mirrors the CPI/NFP/GDP cancellation pattern.
+#
+# 2026 (NEW -- the issue's headline gap): PCE_DATES_2026 never existed, so
+# ``seed_statistical_specs`` gated PCE behind ``if year == 2025:`` and the
+# 2026 calendar silently carried no PCE rows for the whole year. The early
+# 2026 dates are shutdown-shifted and are NOT derivable from the normal
+# end-of-following-month cadence:
+#   - Oct+Nov 2025 data: combined catch-up release, Jan 22, 2026 (10:00 AM)
+#   - Dec-2025 data: Feb 20, 2026 (co-released with Q4-2025 GDP Advance)
+#   - Jan-2026 data: Mar 13, 2026, moved from Feb 26 --
+#     https://www.bea.gov/index.php/news/blog/2026-01-15/economic-release-schedule-updates-gdp-personal-income-and-outlays
+#   - Feb-2026 data: Apr 9, 2026, moved from Mar 27 (same BEA notice)
+# From Mar-2026 data (Apr 30) onward the cadence is back to normal and each
+# PCE release is co-released with that month's GDP estimate -- every date from
+# Apr 30 on matches GDP_DATES_2026 exactly, which is a useful cross-check.
+#
+# SAME-MONTH COLLISION (resolved, not deferred): April 2026 carries TWO real
+# releases -- Apr 9 (Feb-2026 data) and Apr 30 (Mar-2026 data). Under the
+# month-bucketed recurrence key those collide. Unlike the GDP April-2026
+# collision (still deliberately unencoded -- see the GDP block above), these
+# are resolved here via ``monthly_release_ordinals``, so both real releases
+# are seeded. See that helper in fred.py for why positional ordinals.
 # ============================================================================
 
 PCE_DATES_2025: list[date] = [
-    date(2025, 1, 31),
-    date(2025, 2, 28),
-    date(2025, 3, 28),
-    date(2025, 4, 30),
-    date(2025, 5, 30),
-    date(2025, 6, 27),
-    date(2025, 7, 31),
-    date(2025, 8, 29),
-    date(2025, 9, 26),
-    date(2025, 10, 31),
-    date(2025, 11, 26),
-    date(2025, 12, 23),
+    date(2025, 1, 31),   # Dec 2024 data
+    date(2025, 2, 28),   # Jan 2025 data
+    date(2025, 3, 28),   # Feb
+    date(2025, 4, 30),   # Mar (released 10:00 AM)
+    date(2025, 5, 30),   # Apr
+    date(2025, 6, 27),   # May
+    date(2025, 7, 31),   # Jun
+    date(2025, 8, 29),   # Jul
+    date(2025, 9, 26),   # Aug
+    date(2025, 12, 5),   # Sep -- CORRECTED (was Oct 31; shutdown-delayed)
+    # Oct-2025 and Nov-2025 data were NOT released separately in 2025 -- BEA
+    # combined them into the Jan 22, 2026 release in PCE_DATES_2026. The old
+    # guesses (Nov 26 and Dec 23, 2025) are removed, not moved. See above.
+]
+
+PCE_DATES_2026: list[date] = [
+    date(2026, 1, 22),   # Oct + Nov 2025 data, combined catch-up (10:00 AM)
+    date(2026, 2, 20),   # Dec 2025 data
+    date(2026, 3, 13),   # Jan 2026 -- moved from Feb 26 (BEA notice)
+    date(2026, 4, 9),    # Feb -- moved from Mar 27; April collision 1 of 2
+    date(2026, 4, 30),   # Mar -- back on cadence; April collision 2 of 2
+    date(2026, 5, 28),   # Apr
+    date(2026, 6, 25),   # May
+    date(2026, 7, 30),   # Jun
+    date(2026, 8, 26),   # Jul
+    date(2026, 9, 30),   # Aug
+    date(2026, 10, 29),  # Sep
+    date(2026, 11, 25),  # Oct
+    date(2026, 12, 23),  # Nov
+]
+
+
+# ============================================================================
+# PPI (Producer Price Index) — wholesale/input inflation, often a leading
+# indicator for CPI.
+# Source: https://www.bls.gov/schedule/news_release/ppi.htm -- unreachable
+# live (the same HTTP 403 blocker as CPI/NFP above, still in force from this
+# egress on 2026-08-14), so derived from Wayback Machine mirrors:
+#   https://web.archive.org/web/20260731041441/https://www.bls.gov/schedule/news_release/ppi.htm
+#     (captured 2026-07-31 -- the most recent capture, full-year coverage)
+#   https://web.archive.org/web/20260213183648/https://www.bls.gov/schedule/news_release/ppi.htm
+#     (captured 2026-02-13 -- earliest 2026 capture)
+# The two captures agree on every row below, and the Wayback CDX digest is
+# byte-identical across the 2026-03-19, 05-01, 05-15, 06-12 and 07-31
+# captures, so the schedule has been stable since mid-March 2026.
+#
+# NEW in issue #265: PPI had no date table, no meta, no seeder call and no
+# entry in MACRO_SEED_EVENT_TYPES -- ``EventType.PPI`` existed in the enum and
+# was accepted by ADD_CALENDAR_EVENT, but the seeding pipeline had never heard
+# of it, so the calendar carried no PPI row in any month of 2026.
+#
+# SAME-MONTH COLLISION (resolved): January 2026 carries TWO real releases --
+# Jan 14 (Nov-2025 data) and Jan 30 (Dec-2025 data), the shutdown catch-up.
+# Handled by ``monthly_release_ordinals``, same as PCE's April above.
+#
+# Deliberately 2026-only: there is no PPI_DATES_2025. Back-filling 2025 would
+# need its own shutdown-era derivation (the Oct-2025 release was canceled
+# outright, matching CPI) for events that are entirely in the past and gate no
+# decision. The gap is declared in ``_MONTHLY_SERIES`` and printed by every
+# seeder run rather than hidden behind a year check -- which is exactly the
+# failure mode this issue was filed about.
+# ============================================================================
+
+PPI_DATES_2026: list[date] = [
+    date(2026, 1, 14),   # Nov 2025 data -- January collision 1 of 2
+    date(2026, 1, 30),   # Dec 2025 data -- January collision 2 of 2
+    date(2026, 2, 27),   # Jan 2026 data
+    date(2026, 3, 18),   # Feb
+    date(2026, 4, 14),   # Mar
+    date(2026, 5, 13),   # Apr
+    date(2026, 6, 11),   # May
+    date(2026, 7, 15),   # Jun
+    date(2026, 8, 13),   # Jul
+    date(2026, 9, 10),   # Aug
+    date(2026, 10, 15),  # Sep
+    date(2026, 11, 13),  # Oct
+    date(2026, 12, 15),  # Nov
 ]
 
 
@@ -397,6 +512,32 @@ _PCE_META = dict(
     importance="medium",
     event_time=time(8, 30),
 )
+_PPI_META = dict(
+    title="PPI Report",
+    description=(
+        "Producer Price Index release. Wholesale/input inflation — often "
+        "leads CPI at the consumer level."
+    ),
+    importance="medium",
+    event_time=time(8, 30),
+)
+
+
+# Every monthly statistical series this script hand-maintains, and which years
+# it actually has dates for. A year absent from a series' dict is a DECLARED
+# gap: ``series_coverage`` reports it and every seeder run prints it.
+#
+# This table replaces a bare ``if year == 2025:`` around PCE, which is how PCE
+# came to produce nothing at all for 2026 for a year without anyone noticing
+# (issue #265). A missing year is now data, printed on every run — not
+# control flow buried in a function.
+_MONTHLY_SERIES: list[tuple[EventType, dict[int, list[date]], dict]] = [
+    (EventType.CPI, {2025: CPI_DATES_2025, 2026: CPI_DATES_2026}, _CPI_META),
+    (EventType.NFP, {2025: NFP_DATES_2025, 2026: NFP_DATES_2026}, _NFP_META),
+    (EventType.PCE, {2025: PCE_DATES_2025, 2026: PCE_DATES_2026}, _PCE_META),
+    # 2025 deliberately absent — see the PPI block comment above.
+    (EventType.PPI, {2026: PPI_DATES_2026}, _PPI_META),
+]
 
 
 def _fomc_specs(year: int) -> list[MacroEventSpec]:
@@ -425,12 +566,22 @@ def _fomc_specs(year: int) -> list[MacroEventSpec]:
 def _monthly_specs(
     event_type: EventType, dates: list[date], meta: dict
 ) -> list[MacroEventSpec]:
-    """Build specs for a monthly release from a flat date list."""
+    """Build specs for a monthly release from a flat date list.
+
+    Ordinals come from the shared ``monthly_release_ordinals`` helper so a
+    month carrying two real releases (PPI's Jan 2026, PCE's Apr 2026) keys
+    both instead of silently collapsing them onto one row — and so these keys
+    stay identical to the ones the live FRED path computes for the same
+    releases.
+    """
+    ordinals = monthly_release_ordinals(dates)
     return [
         MacroEventSpec(
             event_type=event_type.value,
             event_date=d,
-            recurrence_key=macro_recurrence_key(event_type, d),
+            recurrence_key=macro_recurrence_key(
+                event_type, d, ordinal=ordinals[d]
+            ),
             **meta,
         )
         for d in dates
@@ -502,18 +653,50 @@ def _gdp_specs(year: int) -> list[MacroEventSpec]:
 
 
 def seed_statistical_specs(year: int) -> list[MacroEventSpec]:
-    """Hand-maintained CPI/NFP/GDP/PCE specs — the fallback when FRED is off."""
+    """Hand-maintained CPI/NFP/GDP/PCE/PPI specs — the fallback when FRED is off."""
     specs: list[MacroEventSpec] = []
-    specs += _monthly_specs(
-        EventType.CPI, CPI_DATES_2025 if year == 2025 else CPI_DATES_2026, _CPI_META
-    )
-    specs += _monthly_specs(
-        EventType.NFP, NFP_DATES_2025 if year == 2025 else NFP_DATES_2026, _NFP_META
-    )
+    for event_type, dates_by_year, meta in _MONTHLY_SERIES:
+        specs += _monthly_specs(event_type, dates_by_year.get(year, []), meta)
     specs += _gdp_specs(year)
-    if year == 2025:  # Only 2025 PCE dates are hand-maintained.
-        specs += _monthly_specs(EventType.PCE, PCE_DATES_2025, _PCE_META)
     return specs
+
+
+def seed_only_specs(year: int) -> list[MacroEventSpec]:
+    """Specs for the series the live FRED feed does NOT cover.
+
+    ``resolve_macro_specs`` swaps the WHOLE statistical batch over to FRED
+    when a key is configured. Any series FRED doesn't return would therefore
+    vanish from the calendar the moment ``FRED_API_KEY`` is set — PPI is one
+    today, because its FRED release id could not be verified from this egress
+    (fred.stlouisfed.org is 403-blocked here, same as bls.gov) and guessing an
+    id would risk pulling some other release's dates into a calendar that
+    gates trade decisions. So these are always seeded alongside the live feed.
+
+    Membership is derived from ``RELEASE_IDS``, so adding a series to the live
+    feed empties this automatically rather than leaving a duplicate behind.
+    """
+    specs: list[MacroEventSpec] = []
+    for event_type, dates_by_year, meta in _MONTHLY_SERIES:
+        if event_type in RELEASE_IDS:
+            continue
+        specs += _monthly_specs(event_type, dates_by_year.get(year, []), meta)
+    return specs
+
+
+def series_coverage(year: int) -> tuple[list[str], list[str]]:
+    """``(covered, declared_gaps)`` event-type values for ``year``.
+
+    Printed by every seeding run so a series producing nothing is visible in
+    the output instead of being silently absent — the failure mode of issue
+    #265, where PCE was gated to 2025 by an ``if`` and the 2026 calendar
+    carried no PCE row for a year without anyone noticing.
+    """
+    covered: list[str] = []
+    gaps: list[str] = []
+    for event_type, dates_by_year, _meta in _MONTHLY_SERIES:
+        target = covered if dates_by_year.get(year) else gaps
+        target.append(event_type.value)
+    return covered, gaps
 
 
 # ============================================================================
@@ -548,6 +731,7 @@ MACRO_SEED_EVENT_TYPES: list[str] = [
     EventType.NFP.value,
     EventType.GDP.value,
     EventType.PCE.value,
+    EventType.PPI.value,
 ]
 
 
@@ -576,6 +760,9 @@ async def resolve_macro_specs(
       * FOMC is always seeded.
       * CPI/NFP/GDP/PCE come from the live FRED feed when configured and it
         returns data; otherwise they gracefully fall back to the seed lists.
+      * Series FRED doesn't cover (PPI today) are ALWAYS seeded — including on
+        the live path, where the FRED batch replaces the statistical seed
+        batch wholesale and would otherwise drop them. See ``seed_only_specs``.
     """
     batches: list[tuple[list[MacroEventSpec], str]] = [
         (_fomc_specs(year), EventSource.SEED.value)
@@ -587,6 +774,9 @@ async def resolve_macro_specs(
 
     if live_specs:
         batches.append((live_specs, EventSource.FRED.value))
+        uncovered = seed_only_specs(year)
+        if uncovered:
+            batches.append((uncovered, EventSource.SEED.value))
     else:
         batches.append((seed_statistical_specs(year), EventSource.SEED.value))
 
@@ -637,6 +827,22 @@ async def seed_macro_events(
 
         print(f"  Processed {total_seen} events ({total_created} created, "
               f"{total_seen - total_created} updated in place)")
+
+        # Per-type counts + declared gaps. A series that produced nothing is
+        # printed here rather than silently missing -- issue #265's actual
+        # failure mode was a year-gate nobody could see from the output.
+        counts: dict[str, int] = {}
+        for specs, _source in batches:
+            for spec in specs:
+                counts[spec.event_type] = counts.get(spec.event_type, 0) + 1
+        print("  Seeded per type: " + ", ".join(
+            f"{event_type}={counts.get(event_type, 0)}"
+            for event_type in MACRO_SEED_EVENT_TYPES
+        ))
+        _covered, gaps = series_coverage(year)
+        if gaps:
+            print(f"  No hand-maintained {year} dates on file for: "
+                  f"{', '.join(gaps)} (declared gap, not a failure)")
 
         # Orphan retirement (mechanics fix): see the module comment above
         # SEED_SPEC_YEARS. Scoped to SEED-source rows of the event types this

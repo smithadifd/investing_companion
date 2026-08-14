@@ -148,14 +148,42 @@ class TestDatesToSpecs:
             assert s.event_time == time(8, 30)
             assert s.all_day is False
 
-    def test_same_month_dates_collapse_to_one_spec(self):
+    def test_same_month_dates_both_persist(self):
+        """BEHAVIOR CHANGE (issue #265). This test previously asserted the
+        OPPOSITE -- that two same-month dates of a monthly series collapse to
+        one spec -- on the assumption that a monthly series publishes once per
+        calendar month, so a second date had to be noise.
+
+        The 2025-26 shutdown cascade falsified that assumption twice with real
+        releases: BLS published PPI for Nov-2025 data on Jan 14, 2026 AND for
+        Dec-2025 data on Jan 30, 2026; BEA published Personal Income and
+        Outlays for Feb-2026 data on Apr 9, 2026 AND for Mar-2026 data on
+        Apr 30, 2026. Collapsing silently threw away one real, decision-gating
+        release -- the same bug already fixed for GDP, and only for GDP.
+
+        The failure modes are not symmetric: collapsing loses a release with
+        no trace, whereas splitting a genuinely spurious duplicate shows one
+        extra calendar row. The visible failure is the right one to prefer.
+        """
         provider = FredCalendarProvider(api_key="test")
-        # Two dates in the same month must not produce two specs (monthly key).
-        # Non-GDP types are unaffected by the GDP grain fix.
         specs = provider._dates_to_specs(
             EventType.CPI, [date(2026, 2, 11), date(2026, 2, 12)], 2026
         )
-        assert len(specs) == 1
+        assert len(specs) == 2
+        assert {s.event_date for s in specs} == {date(2026, 2, 11), date(2026, 2, 12)}
+        assert {s.recurrence_key for s in specs} == {
+            "cpi_2026_02_release_1",
+            "cpi_2026_02_release_2",
+        }
+
+    def test_ordinary_single_release_month_keeps_the_legacy_key(self):
+        """The disambiguation is purely additive: a month with exactly one
+        release keeps the plain ``<type>_<year>_<month>`` key byte-for-byte,
+        so no existing CPI/NFP/PCE row is re-keyed and no migration is needed.
+        """
+        provider = FredCalendarProvider(api_key="test")
+        specs = provider._dates_to_specs(EventType.CPI, [date(2026, 2, 13)], 2026)
+        assert [s.recurrence_key for s in specs] == ["cpi_2026_02"]
 
     def test_gdp_specs_get_ordinal_suffixed_keys(self):
         provider = FredCalendarProvider(api_key="test")

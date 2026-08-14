@@ -37,6 +37,7 @@ from app.services.data_providers.massive import (
 from app.services.data_providers.resilience import (
     FailoverQuoteProvider,
     ResilientProvider,
+    _stamp_stale,
 )
 
 # A fake key. Never a real credential — the provider is never given one in tests.
@@ -329,6 +330,7 @@ class TestSnapshotParsing:
                 "ticker": "AAPL",
                 "day": {"c": 0, "h": 0, "l": 0, "o": 0, "v": 0},
                 "prevDay": {"c": 119.49, "h": 119.63, "l": 116.44, "o": 117.19, "v": 110597265},
+                "updated": 1605195918306274000,
             }
         }
         quote = parse_snapshot("AAPL", payload)
@@ -343,6 +345,7 @@ class TestSnapshotParsing:
                 "ticker": "AAPL",
                 "day": {"c": 110.0, "o": 105.0, "h": 111.0, "l": 104.0, "v": 10},
                 "prevDay": {"c": 100.0},
+                "updated": 1605195918306274000,
             }
         }
         quote = parse_snapshot("AAPL", payload)
@@ -353,8 +356,117 @@ class TestSnapshotParsing:
         assert parse_snapshot("NOPE", {}) is None
         assert parse_snapshot("NOPE", {"ticker": {}}) is None
 
-    def test_parser_leaves_stale_to_the_failover_layer(self):
-        assert parse_snapshot("AAPL", _SNAPSHOT).stale is False
+
+class TestSnapshotTimestampIsNeverFabricated:
+    """A price of unknown age must not be presented as current.
+
+    The parser used to fall back to ``datetime.now()`` when every timestamp
+    field was missing, stamping a possibly-previous-session price with the
+    fetch time. ``QuoteResponse.timestamp`` is a required non-null ``datetime``
+    the UI renders verbatim as "as of", so there is no value that means
+    "unknown" — and the snapshot's ``day``/``prevDay`` bars carry no time field
+    to derive one from. Refusing to quote is the only answer that cannot
+    mislead, and it is a clean not-found, so the chain just moves on.
+    """
+
+    _PRICED_BUT_TIMELESS = {
+        "ticker": {
+            "ticker": "AAPL",
+            "day": {"c": 120.42, "h": 120.53, "l": 118.81, "o": 119.62, "v": 28727868},
+            "prevDay": {"c": 119.49},
+        }
+    }
+
+    def test_a_snapshot_with_no_usable_timestamp_is_not_quoted(self):
+        assert parse_snapshot("AAPL", self._PRICED_BUT_TIMELESS) is None
+
+    def test_it_is_a_clean_not_found_not_a_provider_failure(self):
+        """A degenerate payload must not count against provider health, exactly
+        like an unknown ticker — otherwise it could trip the breaker."""
+        try:
+            result = parse_snapshot("AAPL", self._PRICED_BUT_TIMELESS)
+        except ProviderError as exc:  # pragma: no cover - guards a regression
+            pytest.fail(f"a timeless snapshot raised instead of returning None: {exc}")
+        assert result is None
+
+    @pytest.mark.parametrize(
+        "field,payload",
+        [
+            ("lastTrade.t", {"lastTrade": {"p": 120.47, "t": 1605195918306274000}}),
+            ("updated", {"updated": 1605195918306274000}),
+            ("min.t", {"min": {"c": 120.42, "t": 1605195900000}}),
+        ],
+    )
+    def test_any_one_real_timestamp_field_is_enough(self, field, payload):
+        """Falling back to ``None`` must not make the provider useless — any one
+        of the three documented time fields still yields a quote."""
+        merged = {"ticker": {**self._PRICED_BUT_TIMELESS["ticker"], **payload}}
+        quote = parse_snapshot("AAPL", merged)
+        assert quote is not None, f"{field} alone should have been enough"
+        assert quote.timestamp.year == 2020
+
+    def test_the_timestamp_is_data_age_not_fetch_time(self):
+        """The whole point: the 2020 trade time survives, un-refreshed."""
+        quote = parse_snapshot("AAPL", _SNAPSHOT)
+        assert quote.timestamp == datetime(2020, 11, 12, 15, 45, 18, 306000)
+        assert quote.timestamp < datetime.now(), "the trade time was refreshed"
+
+
+class TestSourceStampsItsOwnStaleness:
+    """A contractually delayed provider tells the truth about itself.
+
+    ``stale`` used to be left ``False`` here on the theory that the failover
+    layer owns the flag. That made the guarantee conditional on being wrapped
+    in a ``FailoverQuoteProvider``: used directly, or wrapped only in
+    ``ResilientProvider``, a 15-minute-delayed quote came back marked fresh.
+    """
+
+    def test_the_parser_marks_a_delayed_quote_stale(self):
+        assert parse_snapshot("AAPL", _SNAPSHOT).stale is True
+
+    async def test_stale_survives_a_direct_call_with_no_failover_layer(self, monkeypatch):
+        _stub_http(monkeypatch, _StubResponse(200, _SNAPSHOT), {})
+        quote = await MassiveProvider(api_key=TEST_KEY).get_quote("AAPL")
+        assert quote.stale is True
+
+    async def test_stale_survives_a_resilient_wrapper_alone(self, monkeypatch):
+        """``ResilientProvider`` adds retry/breaker and no freshness logic at
+        all — the flag has to come from underneath it."""
+        _stub_http(monkeypatch, _StubResponse(200, _SNAPSHOT), {})
+        wrapped = ResilientProvider(MassiveProvider(api_key=TEST_KEY))
+        quote = await wrapped.get_quote("AAPL")
+        assert quote.stale is True
+
+    async def test_it_composes_with_the_monotonic_failover_stamp(self):
+        """Proof the two layers agree instead of fighting.
+
+        ``_stamp_stale`` is ``quote.stale or stale``, so the source's ``True``
+        is preserved whichever way the failover layer would have computed it —
+        including the case where the delayed provider is the chain's head
+        (index 0), where the failover layer's own argument would have said
+        ``False`` before the delayed-provider rule was added. No double-marking
+        is possible: the flag is a bool, not a counter.
+        """
+        parsed = parse_snapshot("AAPL", _SNAPSHOT)
+        assert parsed.stale is True
+
+        stamped = _stamp_stale(parsed, "massive", stale=False)
+        assert stamped.stale is True, "the source's own staleness was downgraded"
+        assert _stamp_stale(stamped, "massive", stale=True).stale is True
+
+    async def test_the_chain_reports_it_once_and_from_the_head(self, monkeypatch):
+        """End to end: Massive alone in a chain, at index 0, still stale."""
+        _stub_http(monkeypatch, _StubResponse(200, _SNAPSHOT), {})
+        chain = FailoverQuoteProvider(
+            [ResilientProvider(MassiveProvider(api_key=TEST_KEY))]
+        )
+        quote = await chain.get_quote("AAPL")
+        assert quote.stale is True
+        assert quote.source == "massive"
+
+    def test_live_siblings_still_report_themselves_fresh(self):
+        """Not sticky — self-stamping is scoped to the delayed provider."""
+        assert _quote("yahoo", "100").stale is False
 
 
 # ---------------------------------------------------------------------------

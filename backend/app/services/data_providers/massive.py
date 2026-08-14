@@ -16,13 +16,22 @@ keeps working. That is the entire point of the integration.
   yesterday, a trailing-twelve-month P/E, or a symbol lookup are exactly as
   correct on a delayed plan as on a real-time one. Those are the surfaces this
   first slice targets.
-- Quotes are **not** delay-insensitive. This provider therefore declares
-  ``delayed_quotes = True``, which ``FailoverQuoteProvider`` treats as a hard
-  ordering constraint: Massive is consulted for quotes only after every live
-  source, and any quote it does win is always stamped ``stale=True``. Serving a
-  15-minute-old price as if it were current is a silent correctness bug, so the
-  guarantee lives in the failover machinery rather than in the chain-building
-  call order (which a later edit could quietly get wrong).
+- Quotes are **not** delay-insensitive. Serving a 15-minute-old price as if it
+  were current is a silent correctness bug, so the guarantee is defended twice,
+  at different layers:
+
+  1. *Here.* Every quote this provider produces is stamped ``stale=True`` at
+     the source, and a snapshot with no usable timestamp is not quoted at all.
+     Both hold however the provider is composed — wrapped in the failover
+     chain, wrapped only in ``ResilientProvider``, or called directly.
+  2. *In the chain.* ``delayed_quotes = True`` is a hard ordering constraint
+     ``FailoverQuoteProvider`` enforces: Massive is consulted for quotes only
+     after every live source, wherever the chain builder happens to place it.
+
+  The two are independent on purpose. Ordering that lived only in the
+  chain-building call order could be quietly undone by a later edit; staleness
+  that lived only in the failover layer evaporated the moment this provider was
+  used outside one.
 
 Key handling: the key is sent as an ``Authorization: Bearer`` header, never as
 the ``apiKey`` query parameter Massive also accepts, so it cannot leak into
@@ -263,12 +272,19 @@ def parse_snapshot(symbol: str, payload: dict) -> QuoteResponse | None:
 
     ``None`` (a clean "can't quote this") when no positive price can be found —
     an unknown symbol, or a ticker whose session bar and previous bar are both
-    empty. That is deliberately *not* a ``ProviderError``: a bad ticker must not
-    count against provider health or trip the circuit breaker.
+    empty — or when the payload carries no usable timestamp (see below). That
+    is deliberately *not* a ``ProviderError``: a bad ticker must not count
+    against provider health or trip the circuit breaker.
 
-    ``stale`` is left ``False`` here to match the sibling providers; the
-    failover layer owns the flag and will force it ``True`` for this provider
-    because the feed is contractually delayed.
+    ``stale=True`` is stamped **here, at the source**. The Starter plan is
+    contractually 15 minutes behind, which is a fact about this provider, not a
+    conclusion the chain above it computes. Leaving the flag to
+    ``FailoverQuoteProvider`` made the guarantee depend on being wrapped in one:
+    used directly, or wrapped only in ``ResilientProvider``, a 15-minute-old
+    price came back marked fresh. This composes with the failover layer rather
+    than fighting it — ``_stamp_stale`` is monotonic (``quote.stale or stale``),
+    so a ``True`` set here survives every layer above and the failover stamp
+    becomes a no-op for this provider.
     """
     ticker = (payload or {}).get("ticker") or {}
     day = ticker.get("day") or {}
@@ -300,12 +316,31 @@ def parse_snapshot(symbol: str, payload: dict) -> QuoteResponse | None:
 
     # Data age, not fetch time: on a delayed plan these differ by ~15 minutes,
     # and the UI's "as of" must show the age of the data.
+    #
+    # No usable timestamp -> no quote. This used to fall back to
+    # ``datetime.now()``, which presents a price of unknown age — possibly the
+    # previous session's — as current. That is the same class of harm the
+    # delayed-quote ordering exists to prevent, and it is worse here because it
+    # is unfalsifiable downstream: ``QuoteResponse.timestamp`` is a required
+    # non-null ``datetime`` that the UI renders verbatim as "as of", so there is
+    # no value that means "unknown" and nothing left to derive from (the
+    # snapshot's ``day``/``prevDay`` bars carry no time field at all). Refusing
+    # to quote is the only answer that cannot mislead, and it is cheap: it is a
+    # clean not-found, so the failover chain simply moves on to the next
+    # provider, and this provider is already ranked last for quotes.
     timestamp = (
         _ns_to_naive_utc(last_trade.get("t"))
         or _ns_to_naive_utc(ticker.get("updated"))
         or _ms_to_naive_utc((ticker.get("min") or {}).get("t"))
-        or datetime.now(timezone.utc).replace(tzinfo=None)
     )
+    if timestamp is None:
+        logger.warning(
+            "Massive snapshot for %s carries no usable timestamp "
+            "(lastTrade.t / updated / min.t all absent); refusing to quote a "
+            "price of unknown age",
+            symbol,
+        )
+        return None
 
     return QuoteResponse(
         symbol=normalize_symbol(symbol) or symbol,
@@ -320,7 +355,10 @@ def parse_snapshot(symbol: str, payload: dict) -> QuoteResponse | None:
         market_cap=None,
         timestamp=timestamp,
         source="massive",
-        stale=False,  # the failover layer owns the degraded/delayed flag
+        # Contractually 15 minutes behind — true regardless of what wraps this
+        # provider. ``_stamp_stale`` is monotonic, so the failover layer can
+        # only re-affirm this, never downgrade it.
+        stale=True,
     )
 
 
@@ -549,8 +587,9 @@ class MassiveProvider(MarketDataProvider):
         """Snapshot quote — **15 minutes delayed on the Starter plan**.
 
         Implemented, but ranked last for quotes: ``delayed_quotes = True`` makes
-        ``FailoverQuoteProvider`` consult every live source first and stamp
-        anything served from here ``stale=True``.
+        ``FailoverQuoteProvider`` consult every live source first. The returned
+        quote is stamped ``stale=True`` by ``parse_snapshot`` itself, so it is
+        honest about its age even with no failover layer above it.
         """
         path = f"/v2/snapshot/locale/us/markets/stocks/tickers/{normalize_symbol(symbol)}"
         payload = await self._fetch_json(path)

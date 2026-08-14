@@ -287,8 +287,13 @@ class StaticProvider(MarketDataProvider):
         self.capabilities = caps
         self._quote = quote
         self._history = history or []
+        # Counts quote calls so "this provider was never even consulted" is
+        # directly assertable — the ordering guarantee is about who gets asked,
+        # not only about who wins.
+        self.calls = 0
 
     async def get_quote(self, symbol):
+        self.calls += 1
         return self._quote
 
     async def get_history(self, symbol, period="1y", interval="1d"):
@@ -528,7 +533,9 @@ class TestNestedFailoverChains:
         live = StaticProvider("yahoo", _quote(price="100"))
         outer = FailoverQuoteProvider([live, inner])
 
-        assert [p.name for p in outer.quote_order()] == ["yahoo", "failover"]
+        # Nested chains are flattened, so the order names real data sources
+        # rather than the anonymous ``failover`` box the delayed one sits in.
+        assert [p.name for p in outer.quote_order()] == ["yahoo", "massive"]
         won = await outer.get_quote("AAPL")
         assert won.source == "yahoo"
         assert won.price == Decimal("100")
@@ -539,7 +546,7 @@ class TestNestedFailoverChains:
         mis_ordered = FailoverQuoteProvider(
             [inner2, StaticProvider("yahoo", _quote(price="100"))]
         )
-        assert [p.name for p in mis_ordered.quote_order()] == ["yahoo", "failover"]
+        assert [p.name for p in mis_ordered.quote_order()] == ["yahoo", "massive"]
         corrected = await mis_ordered.get_quote("AAPL")
         assert corrected.source == "yahoo"
         assert corrected.price == Decimal("100")
@@ -562,7 +569,7 @@ class TestNestedFailoverChains:
         outer = FailoverQuoteProvider([wrapped, live])
 
         assert wrapped.delayed_quotes is True
-        assert [p.name for p in outer.quote_order()] == ["yahoo", "failover"]
+        assert [p.name for p in outer.quote_order()] == ["yahoo", "massive"]
 
         outer_dead = FailoverQuoteProvider(
             [
@@ -584,10 +591,146 @@ class TestNestedFailoverChains:
         other = StaticProvider("stooq", _quote(price="99"))
         outer = FailoverQuoteProvider([inner, other])
 
-        assert [p.name for p in outer.quote_order()] == ["failover", "stooq"]
+        assert [p.name for p in outer.quote_order()] == ["yahoo", "stooq"]
         quote = await outer.get_quote("AAPL")
         assert quote.price == Decimal("100")
+        # Still fresh: a leaf inherits the priority of the top-level entry it
+        # was reached through, so the primary's contents are still "the head of
+        # the chain" and flattening does not demote them into fallback status.
         assert quote.stale is False
+        assert quote.source == "yahoo"
+
+
+class TestMixedInnerChainFlattening:
+    """The case a per-level ``delayed_quotes`` derivation cannot reach.
+
+    A **mixed** inner chain — one live child, one delayed child — truthfully
+    reports itself live, so the outer chain consults it first. If its own live
+    child then fails, the inner chain hands back its *delayed* child before the
+    outer chain ever reaches a perfectly healthy live sibling. Every local rule
+    holds; the global property ("no delayed quote while any live provider could
+    answer") is violated anyway.
+
+    The fix is to flatten nested quote candidates so live/delayed selection is
+    one global decision over every reachable leaf.
+    """
+
+    @staticmethod
+    def _delayed(name="massive", quote=None):
+        provider = StaticProvider(name, quote)
+        provider.delayed_quotes = True
+        provider.quote_delay_minutes = 15
+        return provider
+
+    def _mixed_inner(self):
+        """inner = [live-that-fails, delayed]. Reports itself live, correctly."""
+        dying = RaisingProvider(ProviderError("yahoo is down"))
+        delayed = self._delayed(quote=_quote(price="90"))
+        inner = FailoverQuoteProvider([dying, delayed])
+        assert inner.delayed_quotes is False, (
+            "the inner chain genuinely holds a live source — the bug is not a "
+            "mis-reported flag, which is exactly why per-level derivation "
+            "cannot catch it"
+        )
+        return inner, dying, delayed
+
+    async def test_healthy_live_sibling_beats_a_delayed_quote_from_inside(self):
+        """THE regression: outer = [inner(mixed), healthy-live]."""
+        inner, dying, delayed = self._mixed_inner()
+        healthy = StaticProvider("stooq", _quote(price="100"))
+        outer = FailoverQuoteProvider([inner, healthy])
+
+        # Flattened: the delayed leaf is demoted below BOTH live leaves, even
+        # though one of them is buried inside a nested chain.
+        assert [p.name for p in outer.quote_order()] == ["raiser", "stooq", "massive"]
+
+        quote = await outer.get_quote("AAPL")
+
+        assert quote.source == "stooq", "a delayed quote was served over a live one"
+        assert quote.price == Decimal("100")
+        assert delayed.calls == 0, (
+            "the 15-minute-delayed leaf was consulted while a healthy live "
+            "provider could still answer"
+        )
+        assert dying.calls > 0, "the failing live leaf should still be tried first"
+        # Served by a fallback (the primary entry failed), so honestly degraded.
+        assert quote.stale is True
+
+    async def test_the_delayed_leaf_is_demoted_not_disabled(self):
+        """Same shape, but nothing live can answer: the delayed leaf still wins,
+        stamped stale and carrying its true origin."""
+        inner, _dying, delayed = self._mixed_inner()
+        dead_live = StaticProvider("stooq", None)
+        outer = FailoverQuoteProvider([inner, dead_live])
+
+        quote = await outer.get_quote("AAPL")
+
+        assert quote is not None
+        assert quote.price == Decimal("90")
+        assert quote.source == "massive"
+        assert quote.stale is True
+        assert delayed.calls == 1
+
+    async def test_holds_when_the_healthy_live_sibling_is_also_nested(self):
+        """Both sides nested — the flattening is recursive, not one level deep."""
+        inner, _dying, delayed = self._mixed_inner()
+        healthy_inner = FailoverQuoteProvider(
+            [FailoverQuoteProvider([StaticProvider("stooq", _quote(price="100"))])]
+        )
+        outer = FailoverQuoteProvider([inner, healthy_inner])
+
+        assert [p.name for p in outer.quote_order()] == ["raiser", "stooq", "massive"]
+        quote = await outer.get_quote("AAPL")
+
+        assert quote.source == "stooq"
+        assert delayed.calls == 0
+
+    async def test_holds_through_resilient_wrappers_on_both_levels(self):
+        """The realistic shape: the chain builder wraps every element."""
+        dying = RaisingProvider(ProviderError("yahoo is down"))
+        delayed = self._delayed(quote=_quote(price="90"))
+        inner = FailoverQuoteProvider(
+            [ResilientProvider(dying, max_retries=0), ResilientProvider(delayed)]
+        )
+        healthy = StaticProvider("stooq", _quote(price="100"))
+        outer = FailoverQuoteProvider(
+            [ResilientProvider(inner), ResilientProvider(healthy)]
+        )
+
+        assert [p.name for p in outer.quote_order()] == ["raiser", "stooq", "massive"]
+        quote = await outer.get_quote("AAPL")
+
+        assert quote.source == "stooq"
+        assert delayed.calls == 0
+
+    def test_flattening_preserves_each_leafs_own_breaker(self):
+        """Leaves come back wrapped. Flattening reaches *into* nested chains; it
+        must not strip the retry budget and circuit breaker off the providers it
+        finds there."""
+        delayed = self._delayed(quote=_quote(price="90"))
+        wrapped_leaf = ResilientProvider(delayed)
+        outer = FailoverQuoteProvider(
+            [FailoverQuoteProvider([wrapped_leaf]), StaticProvider("stooq")]
+        )
+
+        leaves = outer.quote_order()
+        assert wrapped_leaf in leaves, "the leaf was unwrapped out of its breaker"
+        assert all(not isinstance(p, FailoverQuoteProvider) for p in leaves)
+
+    async def test_a_self_referential_chain_does_not_recurse_forever(self):
+        """Defensive: a chain that contains itself is a construction error, but
+        it must terminate with a weird answer, not blow the stack.
+
+        The repeat is handed back as an opaque leaf — which is the one case
+        that still reaches ``_winning_source``'s nested-chain branch, so the
+        provenance guard there is not dead code.
+        """
+        outer = FailoverQuoteProvider([StaticProvider("yahoo", _quote())])
+        outer.providers.append(outer)
+
+        assert [p.name for p in outer.quote_order()] == ["yahoo", "yahoo", "failover"]
+        quote = await outer.get_quote("AAPL")
+        assert quote is not None
         assert quote.source == "yahoo"
 
 

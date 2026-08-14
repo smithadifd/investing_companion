@@ -284,13 +284,62 @@ def _unwrap(provider: MarketDataProvider) -> MarketDataProvider:
     return provider
 
 
+def _flatten_quote_providers(
+    provider: MarketDataProvider,
+    _seen: frozenset[int] = frozenset(),
+) -> list[MarketDataProvider]:
+    """Expand nested chains into the **leaf** quote providers they contain.
+
+    Ordering delayed providers last only works if the ordering can see every
+    quote source. A nested ``FailoverQuoteProvider`` hides its children behind
+    a single ``delayed_quotes`` answer, and for a *mixed* inner chain (one live
+    child, one delayed child) that answer is ``False`` — truthfully, since the
+    chain does hold a live source. The outer chain therefore consults it first,
+    and if the inner chain's own live child fails, the inner chain returns its
+    **delayed** child's quote before the outer chain ever reaches a perfectly
+    healthy live sibling. Every local rule holds; the global guarantee does not.
+
+    Flattening removes the hiding place: selection runs once, over every leaf,
+    so "no delayed quote while any live provider could answer" is decided
+    across the whole tree instead of independently at each level.
+
+    Two deliberate details:
+
+    - A leaf is returned **as passed in**, wrappers intact. The
+      ``ResilientProvider`` around a leaf carries that leaf's retry budget and
+      circuit breaker, and flattening must not strip it.
+    - Only chains are expanded. Unwrapping a ``ResilientProvider`` that wraps a
+      *chain* costs nothing: ``FailoverQuoteProvider.get_quote`` never raises
+      (it swallows provider errors and returns ``None``), so the retry and
+      breaker around it can never fire in the first place.
+    """
+    if id(provider) in _seen:
+        # Defensive: a chain that transitively contains itself would recurse
+        # forever. Treat the repeat as an opaque leaf instead of looping.
+        return [provider]
+    seen = _seen | {id(provider)}
+
+    inner = _unwrap(provider)
+    if not isinstance(inner, FailoverQuoteProvider):
+        return [provider]
+
+    leaves: list[MarketDataProvider] = []
+    for child in inner.providers:
+        if child.supports(ProviderCapability.QUOTE):
+            leaves.extend(_flatten_quote_providers(child, seen))
+    return leaves
+
+
 def _winning_source(provider: MarketDataProvider, quote: QuoteResponse) -> str:
     """The provider name to stamp as the quote's ``source``.
 
-    Normally the provider that answered. The exception is a *nested* chain:
-    an inner ``FailoverQuoteProvider`` has already stamped the real origin
-    (e.g. ``massive``), and overwriting that with the generic ``failover`` name
-    would throw away the provenance the UI badge depends on.
+    Normally the provider that answered. The guard is for a *nested* chain: an
+    inner ``FailoverQuoteProvider`` has already stamped the real origin (e.g.
+    ``massive``), and overwriting that with the generic ``failover`` name would
+    throw away the provenance the UI badge depends on. Flattening usually makes
+    this moot — the candidates are leaves, so ``provider.name`` *is* the origin
+    — but the cycle guard in ``_flatten_quote_providers`` can still hand back a
+    chain, so the guard stays.
     """
     inner = _unwrap(provider)
     if isinstance(inner, FailoverQuoteProvider) and quote.source:
@@ -322,14 +371,22 @@ class FailoverQuoteProvider(MarketDataProvider):
     exactly as good as a live one — so those capabilities keep the caller's
     ordering untouched.
 
-    **This class is itself a ``MarketDataProvider``, so chains nest.** A nested
-    chain must not launder its children's freshness: ``delayed_quotes`` is
-    derived from the children below (see the property) rather than inherited as
-    ``False``, so an inner chain whose only quote sources are delayed presents
-    as delayed to the chain above it and is demoted there too. Combined with
-    the monotonic stamp in ``_stamp_stale``, that makes the guarantee hold at
-    any nesting depth: a delayed price can never be served ahead of a live one,
-    and can never be un-marked on the way back up.
+    **This class is itself a ``MarketDataProvider``, so chains nest — and for
+    quotes the nesting is flattened away before anything is ordered.** Quote
+    candidates are the *leaves* reachable through any nested chain (see
+    ``_flatten_quote_providers``), so live/delayed selection is one global
+    decision over every reachable source.
+
+    Deriving ``delayed_quotes`` per level is not enough on its own. It fixes
+    the all-delayed inner chain, but a **mixed** inner chain (a live child and
+    a delayed child) correctly reports itself live, gets consulted first, and —
+    when its own live child fails — hands back its delayed child's quote before
+    the outer chain ever reaches a healthy live sibling. Every local rule is
+    satisfied and the global property is still broken. Flattening is what
+    closes that: there is no "inside" left for a delayed source to be chosen
+    from. Combined with the monotonic stamp in ``_stamp_stale``, the guarantee
+    then holds at any nesting depth — a delayed price can never be served ahead
+    of a live one, and can never be un-marked on the way back up.
     """
 
     name = "failover"
@@ -342,21 +399,43 @@ class FailoverQuoteProvider(MarketDataProvider):
             *(getattr(p, "capabilities", frozenset()) for p in self.providers)
         )
 
+    def _quote_leaves(self) -> list[tuple[int, MarketDataProvider]]:
+        """``(priority, leaf)`` for every reachable quote source, caller order.
+
+        ``priority`` is the position in ``self.providers`` of the top-level
+        entry the leaf was reached through — deliberately *not* a re-numbering
+        of the flattened list. That keeps the pre-existing "fresh only from the
+        head of the chain" rule byte-identical: a flat chain gets exactly the
+        indices ``_candidates(QUOTE)`` used to yield (including the detail that
+        a provider lacking QUOTE capability still consumes its position), and a
+        leaf inside the primary inherits the primary's priority rather than
+        being promoted or demoted by an accident of nesting depth.
+        """
+        pairs: list[tuple[int, MarketDataProvider]] = []
+        for index, provider in enumerate(self.providers):
+            if provider.supports(ProviderCapability.QUOTE):
+                for leaf in _flatten_quote_providers(provider):
+                    pairs.append((index, leaf))
+        return pairs
+
     def _quote_capable(self) -> list[MarketDataProvider]:
-        return [
-            provider
-            for provider in self.providers
-            if provider.supports(ProviderCapability.QUOTE)
-        ]
+        """Every leaf quote source reachable from this chain, in caller order.
+
+        Flattened, so nesting is invisible to everything downstream: ordering,
+        the derived freshness properties and ``quote_order()`` all read the
+        same set. See ``_flatten_quote_providers`` for why the leaves — rather
+        than the direct children — are the right unit.
+        """
+        return [leaf for _index, leaf in self._quote_leaves()]
 
     @property
     def delayed_quotes(self) -> bool:
         """True when this chain has no *live* quote source to fall back on.
 
         Derived, never inherited. A chain is only as fresh as the best quote
-        source in it: one live child makes the chain live (the delayed children
+        source in it: one live leaf makes the chain live (the delayed leaves
         are demoted below it internally), and a chain of nothing but delayed
-        children is delayed, full stop. A chain with no quote-capable child at
+        leaves is delayed, full stop. A chain with no quote-capable leaf at
         all is reported live because it is not a quote candidate in the first
         place — it is filtered out by capability before ordering ever runs, and
         claiming delayedness for a provider that serves no quotes would be a
@@ -391,11 +470,16 @@ class FailoverQuoteProvider(MarketDataProvider):
     def _quote_candidates(self):
         """Yield ``(index, provider)`` for quotes, delayed providers demoted.
 
-        ``index`` stays the provider's position in the original list so the
-        existing "stale unless it came from the head of the chain" rule is
-        untouched; only the *consult order* changes.
+        The candidate set is the **flattened** one, so the live/delayed
+        partition is a single global decision over every reachable quote source
+        rather than a per-level one that a nested chain can defeat.
+
+        ``index`` is the caller-declared priority from ``_quote_leaves`` — the
+        top-level position, not a re-numbering — so the existing "stale unless
+        it came from the head of the chain" rule is untouched; only the
+        *consult order* changes.
         """
-        supported = list(self._candidates(ProviderCapability.QUOTE))
+        supported = self._quote_leaves()
         live = [pair for pair in supported if not _is_delayed(pair[1])]
         delayed = [pair for pair in supported if _is_delayed(pair[1])]
         # Stable partition: only ever demotes a delayed provider, never
@@ -404,11 +488,13 @@ class FailoverQuoteProvider(MarketDataProvider):
         yield from delayed
 
     def quote_order(self) -> list[MarketDataProvider]:
-        """Quote-capable providers in the order ``get_quote`` will consult them.
+        """Leaf quote providers in the order ``get_quote`` will consult them.
 
         Exposed so the ordering guarantee is directly assertable in tests and
         inspectable at runtime, rather than being an emergent property of a
-        loop.
+        loop. Nested chains appear as their leaves, which is also what makes
+        the ordering readable: the list names real data sources, not the
+        anonymous ``failover`` boxes they happen to sit in.
         """
         return [provider for _index, provider in self._quote_candidates()]
 

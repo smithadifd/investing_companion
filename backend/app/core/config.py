@@ -153,6 +153,29 @@ class Settings(BaseSettings):
             return [entry.strip() for entry in v.split(",") if entry.strip()]
         return v
 
+    @field_validator("MASSIVE_ENTITLEMENTS", mode="before")
+    @classmethod
+    def parse_massive_entitlements(cls, v):
+        """Parse MASSIVE_ENTITLEMENTS from a comma-separated string or list.
+
+        Normalizes to lower-case, whitespace-stripped names. **An empty value
+        falls back to the full default set** rather than to "nothing entitled":
+        ``MASSIVE_ENTITLEMENTS=`` is what a copied ``.env.example`` looks like,
+        and silently disabling every Massive surface on a blank line would be
+        exactly the invisible capability loss this declaration exists to
+        prevent. "Nothing" is spelled by clearing ``POLYGON_API_KEY``.
+
+        Unknown names are *not* rejected here — the surface vocabulary belongs
+        to the provider layer, which validates them and logs loudly (importing
+        ``ProviderCapability`` into core config would be a circular import).
+        """
+        if isinstance(v, str):
+            v = [entry.strip() for entry in v.split(",") if entry.strip()]
+        if isinstance(v, (list, tuple, set, frozenset)):
+            names = [str(entry).strip().lower() for entry in v if str(entry).strip()]
+            return names or ["quote", "history", "fundamentals", "search"]
+        return v
+
     # Authentication
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
@@ -173,6 +196,29 @@ class Settings(BaseSettings):
     # plan and are ranked below every live source
     # (see app/services/data_providers/massive.py).
     POLYGON_API_KEY: str = ""
+    # Which Massive products the key above actually holds, comma-separated, in
+    # the app's own surface vocabulary: quote, history, fundamentals, search.
+    # Massive sells these as separate products (a plan can include stock
+    # aggregates but not Stocks Financials), and the app has no way to ask —
+    # so it is declared here rather than discovered one 403 at a time.
+    #
+    # A surface left out of this list is treated exactly like a provider
+    # failure: the call never leaves the process and the request falls through
+    # to the next provider in the chain (Yahoo), instead of returning an empty
+    # result that is indistinguishable from "this ticker has no data".
+    #
+    # UNSET or EMPTY means "not declared" and entitles every surface — i.e. the
+    # historical behaviour, where reality is discovered from 403s at runtime.
+    # To turn Massive off entirely, clear POLYGON_API_KEY; that is the key gate
+    # and it is the only way to declare "nothing". The runtime 403 handler stays
+    # as the backstop and corrects a wrong declaration loudly
+    # (see app/services/data_providers/massive.py).
+    MASSIVE_ENTITLEMENTS: list[str] | str = [
+        "quote",
+        "history",
+        "fundamentals",
+        "search",
+    ]
     FINNHUB_API_KEY: str = ""
     # FRED (St. Louis Fed) — free API key gating the live macro-release calendar
     # (CPI/NFP/GDP/PCE). Get one at https://fredaccount.stlouisfed.org/apikeys.

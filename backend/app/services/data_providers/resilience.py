@@ -166,12 +166,6 @@ class ResilientProvider(MarketDataProvider):
         self._provider = provider
         self.name = getattr(provider, "name", provider.__class__.__name__)
         self.capabilities = getattr(provider, "capabilities", frozenset())
-        # The quote-freshness contract must survive wrapping: a delayed
-        # provider wrapped in retry/breaker is still delayed, and
-        # ``FailoverQuoteProvider`` orders on this attribute. Dropping it here
-        # would silently promote a delayed feed ahead of a live one.
-        self.delayed_quotes = getattr(provider, "delayed_quotes", False)
-        self.quote_delay_minutes = getattr(provider, "quote_delay_minutes", 0)
         self.max_retries = max_retries
         self.base_delay = base_delay
         self.max_delay = max_delay
@@ -181,6 +175,26 @@ class ResilientProvider(MarketDataProvider):
         )
         self._jitter = jitter
         self._sleep = sleep
+
+    # The quote-freshness contract must survive wrapping: a delayed provider
+    # wrapped in retry/breaker is still delayed, and ``FailoverQuoteProvider``
+    # orders on this attribute. Dropping it would silently promote a delayed
+    # feed ahead of a live one.
+    #
+    # These *delegate* rather than snapshot the wrapped provider's values at
+    # construction. A snapshot is correct only while delayedness is a static
+    # class attribute; the Massive provider already parses a per-response
+    # ``status: DELAYED``, so the day any provider derives the flag at runtime
+    # a copied value would silently disagree with its source — and disagree in
+    # the unsafe direction (wrapper says live, upstream says delayed). Reading
+    # through keeps one source of truth.
+    @property
+    def delayed_quotes(self) -> bool:
+        return bool(getattr(self._provider, "delayed_quotes", False))
+
+    @property
+    def quote_delay_minutes(self) -> int:
+        return int(getattr(self._provider, "quote_delay_minutes", 0))
 
     def _backoff(self, attempt: int) -> float:
         delay = min(self.base_delay * (2 ** attempt), self.max_delay)
@@ -243,15 +257,45 @@ class ResilientProvider(MarketDataProvider):
 
 
 def _stamp_stale(quote: QuoteResponse, source: str, *, stale: bool) -> QuoteResponse:
-    """Stamp the winning provider name and the degraded flag onto a quote."""
+    """Stamp the winning provider name and the degraded flag onto a quote.
+
+    Staleness is **monotonic**: this only ever raises the flag. A provider that
+    already knows its own answer is behind (an inner failover chain that served
+    from a delayed source, or a provider that reads a per-response "delayed"
+    marker) has ``quote.stale`` set before this layer sees it, and no ordering
+    argument computed out here may downgrade that to fresh. Only the
+    provider closest to the data can say "this is current"; every layer above
+    it can only add doubt.
+    """
     quote.source = source
-    quote.stale = stale
+    quote.stale = bool(quote.stale) or stale
     return quote
 
 
 def _is_delayed(provider: MarketDataProvider) -> bool:
     """True when ``provider`` declares a contractually delayed quote feed."""
     return bool(getattr(provider, "delayed_quotes", False))
+
+
+def _unwrap(provider: MarketDataProvider) -> MarketDataProvider:
+    """Peel ``ResilientProvider`` wrappers off to reach the real provider."""
+    while isinstance(provider, ResilientProvider):
+        provider = provider._provider
+    return provider
+
+
+def _winning_source(provider: MarketDataProvider, quote: QuoteResponse) -> str:
+    """The provider name to stamp as the quote's ``source``.
+
+    Normally the provider that answered. The exception is a *nested* chain:
+    an inner ``FailoverQuoteProvider`` has already stamped the real origin
+    (e.g. ``massive``), and overwriting that with the generic ``failover`` name
+    would throw away the provenance the UI badge depends on.
+    """
+    inner = _unwrap(provider)
+    if isinstance(inner, FailoverQuoteProvider) and quote.source:
+        return quote.source
+    return provider.name
 
 
 class FailoverQuoteProvider(MarketDataProvider):
@@ -277,6 +321,15 @@ class FailoverQuoteProvider(MarketDataProvider):
     are delay-insensitive — a daily bar or a P/E ratio from a delayed plan is
     exactly as good as a live one — so those capabilities keep the caller's
     ordering untouched.
+
+    **This class is itself a ``MarketDataProvider``, so chains nest.** A nested
+    chain must not launder its children's freshness: ``delayed_quotes`` is
+    derived from the children below (see the property) rather than inherited as
+    ``False``, so an inner chain whose only quote sources are delayed presents
+    as delayed to the chain above it and is demoted there too. Combined with
+    the monotonic stamp in ``_stamp_stale``, that makes the guarantee hold at
+    any nesting depth: a delayed price can never be served ahead of a live one,
+    and can never be un-marked on the way back up.
     """
 
     name = "failover"
@@ -287,6 +340,47 @@ class FailoverQuoteProvider(MarketDataProvider):
         self.providers: list[MarketDataProvider] = list(providers)
         self.capabilities = frozenset().union(
             *(getattr(p, "capabilities", frozenset()) for p in self.providers)
+        )
+
+    def _quote_capable(self) -> list[MarketDataProvider]:
+        return [
+            provider
+            for provider in self.providers
+            if provider.supports(ProviderCapability.QUOTE)
+        ]
+
+    @property
+    def delayed_quotes(self) -> bool:
+        """True when this chain has no *live* quote source to fall back on.
+
+        Derived, never inherited. A chain is only as fresh as the best quote
+        source in it: one live child makes the chain live (the delayed children
+        are demoted below it internally), and a chain of nothing but delayed
+        children is delayed, full stop. A chain with no quote-capable child at
+        all is reported live because it is not a quote candidate in the first
+        place — it is filtered out by capability before ordering ever runs, and
+        claiming delayedness for a provider that serves no quotes would be a
+        lie with no upside.
+
+        Computed on read rather than snapshotted at construction, for the same
+        reason ``ResilientProvider`` delegates: the children own this fact.
+        """
+        quote_capable = self._quote_capable()
+        return bool(quote_capable) and all(_is_delayed(p) for p in quote_capable)
+
+    @property
+    def quote_delay_minutes(self) -> int:
+        """Worst-case nominal delay across the chain's quote sources.
+
+        Documentation/UI copy only, like the base-class attribute — but kept
+        coherent with ``delayed_quotes`` so a delayed chain never reports a
+        0-minute delay.
+        """
+        if not self.delayed_quotes:
+            return 0
+        return max(
+            (int(getattr(p, "quote_delay_minutes", 0)) for p in self._quote_capable()),
+            default=0,
         )
 
     def _candidates(self, capability: ProviderCapability):
@@ -332,8 +426,12 @@ class FailoverQuoteProvider(MarketDataProvider):
                 # Stale when it came from a fallback OR from a contractually
                 # delayed feed — a delayed price is never "fresh", even in the
                 # degenerate case where it is the only quote source configured.
+                # ``_stamp_stale`` additionally preserves a provider's own
+                # ``stale=True``; this expression can only add staleness.
                 stale = index > 0 or _is_delayed(provider)
-                return _stamp_stale(quote, provider.name, stale=stale)
+                return _stamp_stale(
+                    quote, _winning_source(provider, quote), stale=stale
+                )
         return None
 
     async def get_history(

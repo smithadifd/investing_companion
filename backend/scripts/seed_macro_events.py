@@ -9,6 +9,8 @@ Creates events for:
 - GDP releases (quarterly)
 - PCE releases (monthly, BEA "Personal Income and Outlays")
 - PPI releases (monthly, 2026 only -- see the PPI block below)
+- Retail sales releases (monthly, 2026 only -- Census "Advance Monthly Sales
+  for Retail and Food Services"; see the retail-sales block below)
 
 Data source
 -----------
@@ -51,8 +53,16 @@ no 2026 table at all -- ``seed_statistical_specs`` gated it behind
 PPI was absent from this pipeline entirely. Both are now derived from primary
 sources (bea.gov directly; bls.gov via Wayback, still 403 live) and the
 year-gate is replaced by the declared ``_MONTHLY_SERIES`` coverage table, whose
-gaps every run prints. Retail sales (``EventType.RETAIL_SALES``, a Census
-release) remains unseeded -- recorded in #265, deliberately out of scope here.
+gaps every run prints.
+
+Retail-sales follow-up (2026-08-14, issue #265 continued): the third gap #265
+recorded and left out of scope. ``EventType.RETAIL_SALES`` was already in the
+enum, the macro-type lists and the frontend's calendar wiring -- only this
+pipeline had never heard of it. Its dates come from Census's own release
+calendar, fetched DIRECTLY (census.gov is reachable from this egress, unlike
+bls.gov and fred.stlouisfed.org) -- see the block above
+``RETAIL_SALES_DATES_2026``. Like PPI it has no FRED release id here, so it is
+seeded on both the live and fallback paths via ``seed_only_specs``.
 
 Usage:
     cd backend
@@ -489,6 +499,63 @@ PPI_DATES_2026: list[date] = [
 
 
 # ============================================================================
+# Retail Sales Release Schedule (Census "Advance Monthly Sales for Retail and
+# Food Services", MARTS)
+# Source: https://www.census.gov/economic-indicators/calendar-listview.html
+# Retrieved: 2026-08-14 (fetched DIRECTLY -- census.gov is reachable from this
+# egress, unlike bls.gov and fred.stlouisfed.org, which are both still
+# HTTP-403-blocked and forced the Wayback derivations used for CPI/NFP/PPI).
+# Read twice by different means (rendered page + raw HTML parse) and both
+# agree on all 13 rows. Census's own machine-readable codes on each row pin
+# both halves independently: the release stamp (A202601140830 = 2026-01-14
+# 08:30) and the reference period (A202511 = Nov 2025 data).
+#
+# NEW in issue #265: retail sales was the third gap that issue recorded and
+# the one it deliberately left out of scope. ``EventType.RETAIL_SALES``
+# existed in the enum, in ``MACRO_EVENT_TYPES``, in ``is_macro_event``, and
+# the frontend already had its label/color/filter wiring -- only this seeding
+# pipeline had never heard of it, so the calendar carried no retail-sales row
+# in any month of 2026.
+#
+# Not a FRED release here: unlike CPI/NFP/GDP/PCE this is a Census indicator,
+# and it has no entry in ``RELEASE_IDS`` (fred.stlouisfed.org is 403-blocked
+# from this egress, so its release id could not be verified, and guessing one
+# would risk pulling another release's dates into a calendar that gates trade
+# decisions). It is therefore seeded on BOTH paths via ``seed_only_specs``,
+# exactly like PPI.
+#
+# SAME-MONTH COLLISION (resolved): April 2026 carries TWO real releases --
+# Apr 1 (Feb-2026 data) and Apr 21 (Mar-2026 data), the shutdown catch-up
+# finally closing. Handled by ``monthly_release_ordinals``, same as PCE's
+# April and PPI's January. The cadence is back to normal from May onward
+# (May 14 for Apr data).
+#
+# Deliberately 2026-only: there is no RETAIL_SALES_DATES_2025. The Census
+# calendar above publishes 2026 rows ONLY -- no 2025 release date appears on
+# it at all -- so a 2025 table would need its own separate (and shutdown-era)
+# derivation for events that are entirely in the past and gate no decision.
+# The gap is declared in ``_MONTHLY_SERIES`` and printed by every seeder run
+# rather than hidden behind a year check.
+# ============================================================================
+
+RETAIL_SALES_DATES_2026: list[date] = [
+    date(2026, 1, 14),   # Nov 2025 data
+    date(2026, 2, 10),   # Dec 2025 data
+    date(2026, 3, 6),    # Jan 2026
+    date(2026, 4, 1),    # Feb -- April collision 1 of 2
+    date(2026, 4, 21),   # Mar -- April collision 2 of 2
+    date(2026, 5, 14),   # Apr
+    date(2026, 6, 17),   # May
+    date(2026, 7, 16),   # Jun
+    date(2026, 8, 14),   # Jul
+    date(2026, 9, 16),   # Aug
+    date(2026, 10, 15),  # Sep
+    date(2026, 11, 17),  # Oct
+    date(2026, 12, 16),  # Nov
+]
+
+
+# ============================================================================
 # Seed-list -> MacroEventSpec builders (the fallback source)
 #
 # These turn the hand-maintained date lists above into the same source-agnostic
@@ -524,6 +591,15 @@ _PPI_META = dict(
     importance="medium",
     event_time=time(8, 30),
 )
+_RETAIL_SALES_META = dict(
+    title="Retail Sales",
+    description=(
+        "Census Advance Monthly Sales for Retail and Food Services. The "
+        "first read on consumer spending for the month."
+    ),
+    importance="medium",
+    event_time=time(8, 30),
+)
 
 
 # Every monthly statistical series this script hand-maintains, and which years
@@ -540,6 +616,12 @@ _MONTHLY_SERIES: list[tuple[EventType, dict[int, list[date]], dict]] = [
     (EventType.PCE, {2025: PCE_DATES_2025, 2026: PCE_DATES_2026}, _PCE_META),
     # 2025 deliberately absent — see the PPI block comment above.
     (EventType.PPI, {2026: PPI_DATES_2026}, _PPI_META),
+    # 2025 deliberately absent — see the retail-sales block comment above.
+    (
+        EventType.RETAIL_SALES,
+        {2026: RETAIL_SALES_DATES_2026},
+        _RETAIL_SALES_META,
+    ),
 ]
 
 
@@ -656,7 +738,8 @@ def _gdp_specs(year: int) -> list[MacroEventSpec]:
 
 
 def seed_statistical_specs(year: int) -> list[MacroEventSpec]:
-    """Hand-maintained CPI/NFP/GDP/PCE/PPI specs — the fallback when FRED is off."""
+    """Hand-maintained CPI/NFP/GDP/PCE/PPI/retail-sales specs — the fallback
+    when FRED is off."""
     specs: list[MacroEventSpec] = []
     for event_type, dates_by_year, meta in _MONTHLY_SERIES:
         specs += _monthly_specs(event_type, dates_by_year.get(year, []), meta)
@@ -669,11 +752,12 @@ def seed_only_specs(year: int) -> list[MacroEventSpec]:
 
     ``resolve_macro_specs`` swaps the WHOLE statistical batch over to FRED
     when a key is configured. Any series FRED doesn't return would therefore
-    vanish from the calendar the moment ``FRED_API_KEY`` is set — PPI is one
-    today, because its FRED release id could not be verified from this egress
-    (fred.stlouisfed.org is 403-blocked here, same as bls.gov) and guessing an
-    id would risk pulling some other release's dates into a calendar that
-    gates trade decisions. So these are always seeded alongside the live feed.
+    vanish from the calendar the moment ``FRED_API_KEY`` is set — PPI and
+    retail sales are the two today, because their FRED release ids could not
+    be verified from this egress (fred.stlouisfed.org is 403-blocked here,
+    same as bls.gov) and guessing an id would risk pulling some other
+    release's dates into a calendar that gates trade decisions. So these are
+    always seeded alongside the live feed.
 
     Membership is derived from ``RELEASE_IDS``, so adding a series to the live
     feed empties this automatically rather than leaving a duplicate behind.
@@ -735,6 +819,7 @@ MACRO_SEED_EVENT_TYPES: list[str] = [
     EventType.GDP.value,
     EventType.PCE.value,
     EventType.PPI.value,
+    EventType.RETAIL_SALES.value,
 ]
 
 

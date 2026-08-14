@@ -35,6 +35,7 @@ from scripts.seed_macro_events import (
     PCE_DATES_2025,
     PCE_DATES_2026,
     PPI_DATES_2026,
+    RETAIL_SALES_DATES_2026,
     _gdp_ordinal,
     _is_advance_equivalent,
     seed_only_specs,
@@ -481,6 +482,49 @@ class TestPpi2026Dates:
         assert date(2026, 8, 13) in PPI_DATES_2026
 
 
+class TestRetailSales2026Dates:
+    """Source: https://www.census.gov/economic-indicators/calendar-listview.html
+    (retrieved 2026-08-14, fetched directly -- census.gov is reachable from
+    this egress, unlike bls.gov and fred.stlouisfed.org). Read twice by
+    different means (rendered page + raw HTML parse), agreeing on all 13 rows,
+    and each row carries Census's own machine-readable release stamp and
+    reference-period code (e.g. A202601140830 / A202511 = released
+    2026-01-14 08:30, Nov-2025 data)."""
+
+    def test_matches_census_calendar_exactly(self):
+        assert RETAIL_SALES_DATES_2026 == [
+            date(2026, 1, 14),
+            date(2026, 2, 10),
+            date(2026, 3, 6),
+            date(2026, 4, 1),
+            date(2026, 4, 21),
+            date(2026, 5, 14),
+            date(2026, 6, 17),
+            date(2026, 7, 16),
+            date(2026, 8, 14),
+            date(2026, 9, 16),
+            date(2026, 10, 15),
+            date(2026, 11, 17),
+            date(2026, 12, 16),
+        ]
+
+    def test_thirteen_releases_because_of_the_catch_up(self):
+        assert len(RETAIL_SALES_DATES_2026) == 13
+
+    def test_april_carries_both_real_releases(self):
+        """Feb-2026 data (Apr 1) and Mar-2026 data (Apr 21) -- the shutdown
+        catch-up closing out, two real retail-sales prints in one calendar
+        month. Same shape as PCE's April and PPI's January."""
+        april = [d for d in RETAIL_SALES_DATES_2026 if d.month == 4]
+        assert april == [date(2026, 4, 1), date(2026, 4, 21)]
+
+    def test_cadence_is_normal_again_after_the_catch_up(self):
+        """From May onward it is one release per month, mid-month -- the
+        tell that the catch-up is finished rather than still unwinding."""
+        after_april = [d for d in RETAIL_SALES_DATES_2026 if d.month >= 5]
+        assert [d.month for d in after_april] == list(range(5, 13))
+
+
 class TestSeriesCoverageIsDeclaredNotSilent:
     """Issue #265's root cause was shape, not data: PCE produced nothing for
     2026 because of an ``if year == 2025:`` nobody could see from the seeder's
@@ -488,16 +532,18 @@ class TestSeriesCoverageIsDeclaredNotSilent:
 
     def test_2026_covers_every_monthly_series(self):
         covered, gaps = series_coverage(2026)
-        assert set(covered) == {"cpi", "nfp", "pce", "ppi"}
+        assert set(covered) == {"cpi", "nfp", "pce", "ppi", "retail_sales"}
         assert gaps == []
 
-    def test_2025_declares_its_ppi_gap_rather_than_hiding_it(self):
-        """2025 PPI is deliberately not back-filled (past events, no decision
-        rides on them, and it would need its own shutdown-era derivation).
-        The point is that the gap is reported, not silent."""
+    def test_2025_declares_its_gaps_rather_than_hiding_them(self):
+        """2025 PPI and retail sales are deliberately not back-filled (past
+        events, no decision rides on them, and each would need its own
+        shutdown-era derivation -- Census does not even publish 2025 rows on
+        the calendar the 2026 dates came from). The point is that the gaps
+        are reported, not silent."""
         covered, gaps = series_coverage(2025)
         assert set(covered) == {"cpi", "nfp", "pce"}
-        assert gaps == ["ppi"]
+        assert gaps == ["ppi", "retail_sales"]
 
     def test_pce_is_actually_seeded_for_2026(self):
         """The regression that would reintroduce the bug: PCE specs present
@@ -509,22 +555,34 @@ class TestSeriesCoverageIsDeclaredNotSilent:
         ppi = [s for s in seed_statistical_specs(2026) if s.event_type == "ppi"]
         assert len(ppi) == 13
 
+    def test_retail_sales_is_actually_seeded_for_2026(self):
+        rs = [
+            s for s in seed_statistical_specs(2026)
+            if s.event_type == "retail_sales"
+        ]
+        assert len(rs) == 13
+
     def test_ppi_is_in_the_retirement_scope(self):
         """PPI must be in MACRO_SEED_EVENT_TYPES or orphan retirement would
         never be able to clean up a corrected PPI date."""
         assert "ppi" in MACRO_SEED_EVENT_TYPES
 
+    def test_retail_sales_is_in_the_retirement_scope(self):
+        """Same for retail sales -- without this, a corrected Census date
+        would leave the old row behind forever."""
+        assert "retail_sales" in MACRO_SEED_EVENT_TYPES
+
 
 class TestSeedOnlySpecsSurviveTheLivePath:
     """``resolve_macro_specs`` replaces the whole statistical batch with the
-    FRED feed when a key is configured. PPI is not in the live feed's
-    ``RELEASE_IDS``, so without a seed-only batch it would vanish from the
-    calendar the moment FRED_API_KEY was set -- a silent regression of exactly
-    the kind this issue is about."""
+    FRED feed when a key is configured. Neither PPI nor retail sales is in the
+    live feed's ``RELEASE_IDS``, so without a seed-only batch they would
+    vanish from the calendar the moment FRED_API_KEY was set -- a silent
+    regression of exactly the kind this issue is about."""
 
-    def test_ppi_is_seeded_alongside_the_live_feed(self):
+    def test_ppi_and_retail_sales_are_seeded_alongside_the_live_feed(self):
         types = {s.event_type for s in seed_only_specs(2026)}
-        assert types == {"ppi"}
+        assert types == {"ppi", "retail_sales"}
 
     def test_fred_covered_series_are_not_duplicated(self):
         """CPI/NFP/GDP/PCE come from FRED on the live path, so they must NOT
@@ -558,16 +616,26 @@ class TestMonthlyCollisionKeys:
         assert keys[date(2026, 1, 14)] == "ppi_2026_01_release_1"
         assert keys[date(2026, 1, 30)] == "ppi_2026_01_release_2"
 
+    def test_retail_sales_april_2026_keys_are_distinct(self):
+        keys = {
+            s.event_date: s.recurrence_key
+            for s in seed_statistical_specs(2026)
+            if s.event_type == "retail_sales"
+        }
+        assert keys[date(2026, 4, 1)] == "retail_sales_2026_04_release_1"
+        assert keys[date(2026, 4, 21)] == "retail_sales_2026_04_release_2"
+
     def test_ordinary_months_keep_legacy_month_only_keys(self):
         """Purely additive: no existing row is re-keyed, so this change needs
         no migration (unlike the GDP grain fix, which did)."""
         by_date = {
             s.event_date: s.recurrence_key
             for s in seed_statistical_specs(2026)
-            if s.event_type in {"pce", "ppi"}
+            if s.event_type in {"pce", "ppi", "retail_sales"}
         }
         assert by_date[date(2026, 8, 26)] == "pce_2026_08"
         assert by_date[date(2026, 8, 13)] == "ppi_2026_08"
+        assert by_date[date(2026, 8, 14)] == "retail_sales_2026_08"
 
     def test_existing_pce_2025_keys_are_unchanged(self):
         """The 2025 PCE corrections move dates within their month, so every

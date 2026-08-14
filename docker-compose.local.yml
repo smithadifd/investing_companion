@@ -76,12 +76,17 @@ services:
       - POLYGON_API_KEY=${POLYGON_API_KEY:-}
       - MASSIVE_ENTITLEMENTS=${MASSIVE_ENTITLEMENTS:-}
       - REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-true}
-      # Schwab OAuth (optional all-session quotes). FRONTEND_URL is also where the
-      # OAuth callback bounces the browser back to after a successful connect.
+      # Schwab OAuth (optional brokerage transaction/position ingestion).
+      # FRONTEND_URL is also where the OAuth callback bounces the browser back
+      # to after a successful connect.
       - SCHWAB_APP_KEY=${SCHWAB_APP_KEY:-}
       - SCHWAB_APP_SECRET=${SCHWAB_APP_SECRET:-}
       - SCHWAB_CALLBACK_URL=${SCHWAB_CALLBACK_URL:-}
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      # Opt-in, default off (#273): also use Schwab as the extended-hours quote
+      # provider. Must be passed through here or the documented opt-in is inert
+      # on this host and /status reports quotes_enabled=false regardless.
+      - SCHWAB_QUOTES_ENABLED=${SCHWAB_QUOTES_ENABLED:-false}
       # Advisor outbox: leave CONTEXT_PACK_OUTBOX_DIR empty to disable the feature.
       # Set it to /app/outbox (the mount below) to enable publishing; a host-side
       # rclone job then syncs CONTEXT_PACK_OUTBOX_HOST_DIR up to Google Drive.
@@ -112,17 +117,24 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
-      # The worker decrypts SCHWAB_TOKEN (token-expiry check + briefing quotes),
-      # so it needs the same dedicated key as the api or v2 ciphertext is
-      # unreadable here. See backend/app/services/settings.py.
+      # The worker decrypts SCHWAB_TOKEN (ingestion-health check, broker
+      # imports, and briefing quotes when the quote role is opted in), so it
+      # needs the same dedicated key as the api or v2 ciphertext is unreadable
+      # here. See backend/app/services/settings.py.
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
       - ENVIRONMENT=production
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
-      # Schwab token refresh happens in the worker too (briefing movers), so it
-      # needs the same credentials. No FRONTEND_URL — the worker never serves OAuth.
+      # Schwab token refresh happens in the worker too (transaction/position
+      # ingestion, and briefing movers when the quote role is on), so it needs
+      # the same credentials. No FRONTEND_URL — the worker never serves OAuth.
       - SCHWAB_APP_KEY=${SCHWAB_APP_KEY:-}
       - SCHWAB_APP_SECRET=${SCHWAB_APP_SECRET:-}
       - SCHWAB_CALLBACK_URL=${SCHWAB_CALLBACK_URL:-}
+      # Same opt-in as the api (#273). The worker is where the quote provider
+      # is actually selected for briefings, and where the ingestion nag decides
+      # whether to mention the price side at all — a value set only on the api
+      # would make the nag's copy lie.
+      - SCHWAB_QUOTES_ENABLED=${SCHWAB_QUOTES_ENABLED:-false}
       # The daily advisor drop runs here, so the worker needs the same outbox.
       - CONTEXT_PACK_OUTBOX_DIR=${CONTEXT_PACK_OUTBOX_DIR:-}
       - CONTEXT_PACK_REFERENCE_DIR=${CONTEXT_PACK_REFERENCE_DIR:-}

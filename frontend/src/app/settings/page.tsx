@@ -392,19 +392,35 @@ export default function SettingsPage() {
                   <div className="flex items-center gap-2">
                     <Link2 className="h-4 w-4 text-blue-500" />
                     <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
-                      Schwab (real-time quotes)
+                      Schwab (trades &amp; positions)
                     </h3>
                   </div>
                   <p className="text-xs text-neutral-500">
-                    Optional. Connect a Schwab account for real-time and pre/post-market
-                    quotes in briefings. Without it, quotes use the free Yahoo Finance
-                    base. Schwab requires re-authorizing every 7 days.
+                    Optional. Connect a Schwab account to import your brokerage
+                    transactions and positions for trade tracking and reconciliation —
+                    that is what connecting does.{' '}
+                    {!schwabStatus?.quotes_enabled && (
+                      <>
+                        Quotes are unaffected: they come from the free Yahoo Finance
+                        base whether or not Schwab is connected.{' '}
+                      </>
+                    )}
+                    Schwab requires re-authorizing every 7 days, and transaction sync
+                    pauses while it is disconnected.
                   </p>
+                  {schwabStatus?.quotes_enabled && (
+                    <p className="text-xs text-neutral-500">
+                      This server has also opted Schwab into extended-hours quotes
+                      (<code className="text-xs">SCHWAB_QUOTES_ENABLED</code>), so
+                      pre/post-market briefing quotes use Schwab while connected and fall
+                      back to Yahoo when it lapses.
+                    </p>
+                  )}
 
                   {schwabBanner === 'connected' && (
                     <div className="flex items-center gap-2 p-3 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 text-sm">
                       <Check className="h-4 w-4 shrink-0" />
-                      Schwab connected. Briefings now use real-time quotes.
+                      Schwab connected. Transaction and position sync is now available.
                     </div>
                   )}
                   {schwabBanner === 'error' && (
@@ -447,7 +463,7 @@ export default function SettingsPage() {
                         <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
                           <AlertCircle className="h-4 w-4" />
                           Connection expired — Schwab tokens last 7 days. Reconnect to
-                          resume real-time quotes.
+                          resume transaction and position sync.
                         </div>
                       )}
                       <button

@@ -41,6 +41,9 @@ const connectedStatus: SchwabStatus = {
   needs_reconnect: false,
   token_age_days: 1.5,
   expires_in_days: 5.5,
+  // Connecting Schwab is transaction/position sync; the quote role is a
+  // separate server-side opt-in, off by default (#273).
+  quotes_enabled: false,
 };
 
 describe('useSchwab hooks', () => {

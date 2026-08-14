@@ -45,6 +45,24 @@ class CircuitOpenError(ProviderError):
     """Raised when a call is short-circuited because the breaker is open."""
 
 
+class ProviderUnentitledError(ProviderError):
+    """The provider's plan does not include the requested surface.
+
+    A ``ProviderError`` so the failover chain **routes** past it exactly as it
+    routes past a failure — the caller gets the next provider's answer, never an
+    empty result that reads as "this ticker has no data".
+
+    Deliberately *not* a health event, and that is the whole reason it is its
+    own class: an unowned dataset is a fact about the subscription, not about
+    the upstream's health, so ``ResilientProvider`` re-raises it immediately
+    without spending the retry budget and without counting it against the
+    shared circuit breaker. Retrying cannot make a plan include a product, and
+    letting fundamentals-you-don't-own trip the breaker would take history and
+    search down with it — which is exactly what the 403-to-empty handling was
+    written to avoid in the first place.
+    """
+
+
 class MarketDataProvider(ABC):
     """Async, capability-declaring market-data provider.
 

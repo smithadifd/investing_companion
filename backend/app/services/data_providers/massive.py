@@ -33,6 +33,14 @@ keeps working. That is the entire point of the integration.
   that lived only in the failover layer evaporated the moment this provider was
   used outside one.
 
+**Entitlements are declared, not discovered.** Massive sells its surfaces as
+separate products — a key can hold stock aggregates and not Stocks Financials —
+and the API offers no way to ask which ones a key holds. ``MASSIVE_ENTITLEMENTS``
+(one env var; see ``MassiveEntitlements``) names them, an unentitled surface
+raises ``ProviderUnentitledError`` so the chain routes to the next provider, and
+the 403 handler stays as the runtime backstop that corrects a wrong declaration
+loudly.
+
 Key handling: the key is sent as an ``Authorization: Bearer`` header, never as
 the ``apiKey`` query parameter Massive also accepts, so it cannot leak into
 request logs, error strings or proxy access logs.
@@ -45,6 +53,7 @@ Endpoints used:
 """
 
 import logging
+from collections.abc import Iterable
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -62,6 +71,7 @@ from app.services.data_providers.base import (
     MarketDataProvider,
     ProviderCapability,
     ProviderError,
+    ProviderUnentitledError,
 )
 
 logger = logging.getLogger(__name__)
@@ -131,6 +141,149 @@ _ASSET_TYPES: dict[str, str] = {
 def is_massive_configured() -> bool:
     """True when the app-level Massive/Polygon API key is configured."""
     return bool(settings.POLYGON_API_KEY)
+
+
+# ---------------------------------------------------------------------------
+# Entitlements
+# ---------------------------------------------------------------------------
+
+#: The declaration vocabulary: the app's own ``ProviderCapability`` names.
+#: Massive markets its plans by product ("Stocks Starter", "Stocks Financials"),
+#: but the app consumes exactly one endpoint family per capability, and routing
+#: is per-capability — so declaring in capability terms makes the config line
+#: read as what it controls. ``_MASSIVE_PRODUCT`` carries the marketing name
+#: into the log messages, which is where a human needs it.
+_ENTITLEMENT_NAMES: dict[str, ProviderCapability] = {
+    capability.value: capability for capability in ProviderCapability
+}
+
+#: Capability -> the Massive product/endpoint family it buys. Log copy only.
+_MASSIVE_PRODUCT: dict[ProviderCapability, str] = {
+    ProviderCapability.QUOTE: "stocks snapshots",
+    ProviderCapability.HISTORY: "stocks aggregates",
+    ProviderCapability.FUNDAMENTALS: "Stocks Financials (ratios)",
+    ProviderCapability.SEARCH: "reference tickers",
+}
+
+
+class MassiveEntitlements:
+    """Which Massive surfaces this key holds — declared in config, corrected at runtime.
+
+    Two states per capability:
+
+    - **declared** — read once from ``settings.MASSIVE_ENTITLEMENTS``, the one
+      place to read and the one place to change. ``None`` means *undeclared*
+      and entitles everything (the historical behaviour: discover reality from
+      403s); an explicit empty sequence means nothing is entitled, which only
+      tests construct — a real install spells that by clearing the API key.
+    - **revoked** — a runtime correction written by the 403 backstop when the
+      declaration and reality disagree. Process-local and deliberately not
+      persisted: config stays the source of truth, so a restart re-reads the
+      declaration and (if it is still wrong) re-learns the correction loudly
+      rather than accumulating hidden state no one can see or reset.
+
+    Drift is only observable in one direction. A surface declared *unentitled*
+    is never called, so the reverse drift — a plan upgrade that quietly grants
+    a product back — cannot be detected here and needs the config edit it
+    deserves. Anything else would mean speculatively calling endpoints we have
+    just been told we do not own.
+    """
+
+    def __init__(self, declared: Iterable[str] | None = None) -> None:
+        self._declared = self._parse(declared)
+        self._revoked: set[ProviderCapability] = set()
+
+    @classmethod
+    def from_settings(cls) -> "MassiveEntitlements":
+        """Build from ``settings.MASSIVE_ENTITLEMENTS`` (the one place to read)."""
+        return cls(settings.MASSIVE_ENTITLEMENTS)
+
+    @staticmethod
+    def _parse(declared: Iterable[str] | None) -> frozenset[ProviderCapability]:
+        if declared is None:
+            return frozenset(ProviderCapability)
+        known: set[ProviderCapability] = set()
+        unknown: list[str] = []
+        for name in declared:
+            capability = _ENTITLEMENT_NAMES.get(str(name).strip().lower())
+            if capability is None:
+                unknown.append(str(name))
+            else:
+                known.add(capability)
+        if unknown:
+            # Loud: a typo here silently routes a surface away from Massive
+            # forever, which is the failure mode this whole declaration exists
+            # to make visible.
+            logger.error(
+                "MASSIVE_ENTITLEMENTS names %d unrecognised surface(s): %s. "
+                "Valid names are: %s. The unrecognised entries are ignored, so "
+                "those surfaces are treated as NOT entitled and will route to "
+                "the next provider.",
+                len(unknown),
+                ", ".join(sorted(unknown)),
+                ", ".join(sorted(_ENTITLEMENT_NAMES)),
+            )
+        return frozenset(known)
+
+    @property
+    def declared(self) -> frozenset[ProviderCapability]:
+        """What config says the key holds."""
+        return self._declared
+
+    @property
+    def revoked(self) -> frozenset[ProviderCapability]:
+        """Surfaces a runtime 403 corrected away from the declaration."""
+        return frozenset(self._revoked)
+
+    @property
+    def effective(self) -> frozenset[ProviderCapability]:
+        """Declared minus runtime corrections — what is actually callable."""
+        return self._declared - self._revoked
+
+    def allows(self, capability: ProviderCapability) -> bool:
+        """True when ``capability`` may be called on this key."""
+        return capability in self._declared and capability not in self._revoked
+
+    def revoke(self, capability: ProviderCapability, *, path: str = "") -> bool:
+        """Record a 403: correct the declared state and say so loudly.
+
+        Returns ``True`` when this was genuine drift (a surface the config
+        claimed we owned), which is the case worth shouting about — the
+        declaration is wrong and every call to this surface has been paying an
+        HTTP round trip to find that out.
+        """
+        drift = capability in self._declared and capability not in self._revoked
+        self._revoked.add(capability)
+        if drift:
+            corrected = ",".join(sorted(c.value for c in self.effective)) or (
+                "(nothing — clear POLYGON_API_KEY instead)"
+            )
+            logger.error(
+                "MASSIVE ENTITLEMENT DRIFT: %s (%s) is declared entitled but "
+                "Massive answered 403 NOT_AUTHORIZED for %s. Correcting at "
+                "runtime — this surface now routes to the next provider for "
+                "the life of this process. Fix the declaration so it stops "
+                "costing a round trip: MASSIVE_ENTITLEMENTS=%s",
+                capability.value,
+                _MASSIVE_PRODUCT.get(capability, capability.value),
+                path or "the endpoint",
+                corrected,
+            )
+        else:
+            logger.debug(
+                "Massive 403 for %s on an already-corrected surface (%s)",
+                path or "an endpoint",
+                capability.value,
+            )
+        return drift
+
+    def describe(self) -> str:
+        """One-line summary for startup logs and runtime inspection."""
+        effective = ",".join(sorted(c.value for c in self.effective)) or "none"
+        corrected = sorted(c.value for c in self._revoked)
+        if corrected:
+            return f"{effective} (403-corrected: {','.join(corrected)})"
+        return effective
 
 
 # ---------------------------------------------------------------------------
@@ -465,6 +618,7 @@ class MassiveProvider(MarketDataProvider):
         api_key: str | None = None,
         timeout: float = _HTTP_TIMEOUT,
         base_url: str = MASSIVE_BASE_URL,
+        entitlements: MassiveEntitlements | None = None,
     ) -> None:
         key = api_key if api_key is not None else settings.POLYGON_API_KEY
         if not key:
@@ -475,31 +629,57 @@ class MassiveProvider(MarketDataProvider):
         self._api_key = key
         self._timeout = timeout
         self._base_url = base_url.rstrip("/")
+        #: Public so the declared/corrected state is inspectable at runtime
+        #: rather than only visible in logs.
+        self.entitlements = entitlements or MassiveEntitlements.from_settings()
 
     async def _fetch_json(
         self,
         path: str,
         params: dict | None = None,
         *,
-        unentitled_is_empty: bool = False,
+        capability: ProviderCapability,
     ) -> dict:
         """GET a Massive endpoint and return its JSON body.
 
+        ``capability`` is mandatory and names the surface being bought. Every
+        request goes through here, so requiring it is what keeps entitlement
+        coverage complete: a new endpoint cannot be added without declaring
+        which product pays for it.
+
+        Entitlement is checked **before** the request. A surface the config does
+        not claim never leaves the process — it raises
+        ``ProviderUnentitledError``, which the failover chain routes past
+        exactly as it routes past a failure, so the caller gets the next
+        provider's answer instead of an empty result that would read as "this
+        ticker has no data".
+
         Status handling is deliberate about which failures count against
         provider health (``ProviderError`` -> retry budget -> circuit breaker)
-        and which are honest empties:
+        and which do not:
 
         - **404** -> ``{}``. An unknown ticker is a clean not-found, not an
           outage; a watchlist full of typos must never look like a dead
           provider.
-        - **403 NOT_AUTHORIZED** -> ``{}`` when ``unentitled_is_empty``. A plan
-          that doesn't include one dataset should disable that *surface*, not
-          trip the shared breaker and take history and search down with it.
+        - **403 NOT_AUTHORIZED** -> ``ProviderUnentitledError``, and the
+          declared state is corrected loudly (see ``MassiveEntitlements``).
+          This is the backstop for a declaration that has drifted from the
+          plan. It still does not trip the shared breaker — that reasoning was
+          always right, and it now lives in the exception class rather than in
+          an empty return value that lied to the caller.
         - **401 / 429 / 5xx / transport faults** -> ``ProviderError``. A bad
           key, a rate limit or an upstream fault are real provider problems.
         - **200 with ``status`` outside {OK, DELAYED}** -> ``ProviderError``.
           ``DELAYED`` is the normal success status on the 15-minute plan.
         """
+        if not self.entitlements.allows(capability):
+            raise ProviderUnentitledError(
+                f"Massive is not entitled to {capability.value} "
+                f"({_MASSIVE_PRODUCT.get(capability, capability.value)}); "
+                "routing to the next provider "
+                "(declare it in MASSIVE_ENTITLEMENTS if the plan includes it)"
+            )
+
         url = f"{self._base_url}{path}"
         # Bearer header, never the ``apiKey`` query param: keeps the secret out
         # of URLs, and therefore out of logs and error messages.
@@ -512,13 +692,16 @@ class MassiveProvider(MarketDataProvider):
 
         if response.status_code == 404:
             return {}
-        if response.status_code == 403 and unentitled_is_empty:
-            logger.warning(
-                "Massive returned 403 for %s — the configured plan likely does "
-                "not include this dataset; treating it as unavailable",
-                path,
+        if response.status_code == 403:
+            # The backstop. Correct the declaration (loudly, when it was wrong)
+            # and route, rather than absorbing the 403 into an empty forever.
+            self.entitlements.revoke(capability, path=path)
+            raise ProviderUnentitledError(
+                f"Massive answered 403 NOT_AUTHORIZED for {path}: the plan does "
+                f"not include {capability.value} "
+                f"({_MASSIVE_PRODUCT.get(capability, capability.value)}); "
+                "routing to the next provider"
             )
-            return {}
         if response.status_code == 401:
             raise ProviderError("Massive rejected the API key (HTTP 401)")
         if response.status_code == 429:
@@ -555,17 +738,21 @@ class MassiveProvider(MarketDataProvider):
         payload = await self._fetch_json(
             path,
             {"adjusted": "true", "sort": "asc", "limit": 50000},
+            capability=ProviderCapability.HISTORY,
         )
         return parse_aggregates(payload)
 
     async def get_fundamentals(self, symbol: str) -> FundamentalsResponse | None:
-        """TTM valuation ratios. Delay-insensitive — a safe surface."""
+        """TTM valuation ratios. Delay-insensitive — a safe surface.
+
+        Stocks Financials is a separately sold product, so this is the surface
+        most likely to be unentitled — which is why it must fall through to the
+        next provider rather than hand the UI a blank card.
+        """
         payload = await self._fetch_json(
             "/stocks/financials/v1/ratios",
             {"ticker": normalize_symbol(symbol), "limit": 1},
-            # A plan without the financials dataset should lose fundamentals
-            # only, not the whole provider.
-            unentitled_is_empty=True,
+            capability=ProviderCapability.FUNDAMENTALS,
         )
         return parse_ratios(payload)
 
@@ -580,6 +767,7 @@ class MassiveProvider(MarketDataProvider):
                 "active": "true",
                 "limit": capped,
             },
+            capability=ProviderCapability.SEARCH,
         )
         return parse_ticker_search(payload, capped)
 
@@ -592,5 +780,5 @@ class MassiveProvider(MarketDataProvider):
         honest about its age even with no failover layer above it.
         """
         path = f"/v2/snapshot/locale/us/markets/stocks/tickers/{normalize_symbol(symbol)}"
-        payload = await self._fetch_json(path)
+        payload = await self._fetch_json(path, capability=ProviderCapability.QUOTE)
         return parse_snapshot(symbol, payload)

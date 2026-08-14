@@ -52,7 +52,10 @@ def get_quote_provider() -> FailoverQuoteProvider:
          enforced structurally — ``MassiveProvider.delayed_quotes`` is ``True``
          and ``FailoverQuoteProvider`` demotes any delayed provider below every
          live one for quotes regardless of its position in this list. Appending
-         it here is the belt; the flag is the braces.
+         it here is the belt; the flag is the braces. Which of its surfaces are
+         usable is declared in ``MASSIVE_ENTITLEMENTS``; an unentitled surface
+         raises ``ProviderUnentitledError`` and the chain routes past it exactly
+         as it would past a failure.
 
     A quote served by any fallback is stamped ``stale=True`` with its ``source``
     so the UI can show a degraded-data badge. Cached at module scope; call
@@ -91,10 +94,14 @@ def get_quote_provider() -> FailoverQuoteProvider:
         )
 
         if is_massive_configured():
-            chain.append(ResilientProvider(MassiveProvider()))
+            massive = MassiveProvider()
+            chain.append(ResilientProvider(massive))
             logger.info(
                 "Massive (Polygon.io) provider enabled (API key configured); "
-                "quotes are delayed and rank below every live source"
+                "quotes are delayed and rank below every live source. "
+                "Entitled surfaces: %s (MASSIVE_ENTITLEMENTS) — anything else "
+                "routes to the next provider",
+                massive.entitlements.describe(),
             )
     except Exception as exc:  # noqa: BLE001 — a bad optional provider must not break the chain
         logger.warning("Massive provider unavailable: %s", exc)

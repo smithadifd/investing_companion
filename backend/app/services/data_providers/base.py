@@ -58,6 +58,27 @@ class MarketDataProvider(ABC):
     name: str = "provider"
     capabilities: frozenset = frozenset()
 
+    # --- Quote freshness contract -------------------------------------------
+    # ``True`` marks a provider whose *plan* contractually serves quotes behind
+    # a fixed delay (e.g. Massive/Polygon's 15-minute-delayed Starter tier).
+    # ``FailoverQuoteProvider`` treats this as a hard ordering constraint: a
+    # delayed provider is only ever consulted AFTER every live one, and any
+    # quote it wins is always stamped ``stale=True``. Serving a contractually
+    # delayed price ahead of an available live price is a correctness bug — the
+    # UI would show a 15-minute-old number with no indication it was behind.
+    #
+    # This is deliberately narrower than "the data might lag". Stooq's quote is
+    # built from an end-of-day bar and can trail the live print, but that lag is
+    # already surfaced honestly (its ``timestamp`` is the bar date, and the
+    # failover layer stamps it stale as a fallback), so Stooq stays ``False``
+    # and the existing chain order is unchanged. This flag exists for the
+    # narrower case: a provider that is *contracted* to be behind.
+    delayed_quotes: bool = False
+
+    #: Nominal quote delay in minutes, for logs/UI copy. Documentation only —
+    #: the ordering decision is driven by ``delayed_quotes`` alone.
+    quote_delay_minutes: int = 0
+
     def supports(self, capability: ProviderCapability) -> bool:
         """True when this provider declares it can serve ``capability``."""
         return capability in self.capabilities

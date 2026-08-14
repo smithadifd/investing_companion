@@ -206,7 +206,10 @@ the hosts.
   `get_extended_quote_provider` returns Yahoo unless `SCHWAB_QUOTES_ENABLED=true`, while
   `schwab_ingestion.get_connected_provider` (transactions/positions) is untouched by that flag —
   turning quotes off never turns sync off. Don't "fix" a connected-but-not-quoting Schwab; that is
-  the default posture. Flipping the flag on restores the old chain exactly.
+  the default posture. Flipping the flag on restores the old chain exactly. **It moves one seam
+  with three consumers** — briefing extended-hours movers (`tasks/alerts.py`), the strategy brief's
+  quote block (`agents/strategy_brief.py`, up to 30 symbols, consumes `price`), and
+  `scripts/premarket_pulse.py`. All three are re-sourced together; there is no per-surface toggle.
 - **Schwab OAuth is weekly, tailnet-only.** Tokens expire every 7 days — re-auth is a one-click
   Settings → API Keys → Connect Schwab flow; the callback is served on the tailnet, and
   `SCHWAB_CALLBACK_URL` must exactly match the Schwab developer-portal registration. What expiry

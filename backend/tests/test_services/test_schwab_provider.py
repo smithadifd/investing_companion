@@ -357,6 +357,43 @@ class TestQuoteRoleDefaultOff:
         provider = await get_extended_quote_provider(db)
         assert isinstance(provider, YahooFinanceProvider)
 
+    async def test_every_consumer_rides_the_gated_selector(
+        self, db, test_user, monkeypatch
+    ):
+        """The flag re-sources THREE surfaces, not just the briefing movers.
+
+        ``strategy_brief`` pulls up to ``MAX_QUOTE_SYMBOLS`` (30) symbols
+        through this same selector and consumes ``price`` (not just
+        ``session``), and ``scripts/premarket_pulse`` does too — so
+        default-off changes their quote source on upgrade exactly as it does
+        the movers'. The load-bearing assertion here is the IDENTITY one: it
+        fails the moment a consumer grows its own un-gated Schwab path, which
+        no selector-level test can catch. The behavioural tail then confirms
+        the default posture through the brief's own reference.
+        """
+        from app.services.agents import strategy_brief as sb
+        from app.services.data_providers import get_extended_quote_provider
+        from app.services.data_providers.yahoo import YahooFinanceProvider
+        from app.services.settings import SettingsService
+        from scripts import premarket_pulse
+
+        assert sb.get_extended_quote_provider is get_extended_quote_provider
+        assert (
+            premarket_pulse.get_extended_quote_provider
+            is get_extended_quote_provider
+        )
+
+        _configure_schwab(monkeypatch, quotes=False)
+        service = SettingsService(db)
+        await service.set_setting(
+            SettingsService.SCHWAB_TOKEN,
+            json.dumps(_fresh_wrapped_token()),
+            test_user.id,
+        )
+
+        provider = await sb.get_extended_quote_provider(db)
+        assert isinstance(provider, YahooFinanceProvider)
+
 
 class TestGetExtendedQuoteProvider:
     """Selection with the quote role opted IN — the pre-#273 chain, intact."""

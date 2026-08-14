@@ -4,9 +4,12 @@ TWO ROLES, DECOUPLED (#273). Connecting Schwab is an **ingestion** integration
 — transactions and positions, which no market-data vendor can supply and which
 ``services/schwab_ingestion.py`` drives. Serving **quotes** is a separate,
 opt-in role gated by ``SCHWAB_QUOTES_ENABLED`` (default off, see
-:func:`schwab_quotes_enabled`): Yahoo already covers the pre/post-market movers
-surfaces, so leaving the quote role on only gave a 7-day token expiry a blast
-radius over prices. The class below still implements both; which one is live
+:func:`schwab_quotes_enabled`): Yahoo already covers all three extended-quote
+surfaces (briefing movers, the strategy brief's quote block, and
+``scripts/premarket_pulse.py`` — enumerated on
+``get_extended_quote_provider``), so leaving the quote role on only gave a
+7-day token expiry a blast radius over prices. The class below still
+implements both; which one is live
 is a wiring decision made in ``data_providers/__init__.py`` (quotes) and
 ``schwab_ingestion.get_connected_provider`` (ingestion), never here.
 

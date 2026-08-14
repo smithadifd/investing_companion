@@ -124,8 +124,20 @@ async def get_extended_quote_provider(db: AsyncSession):
     connection exists to ingest transactions and positions — the one thing no
     market-data vendor sells — and wiring it into the quote chain as well only
     handed a hard 7-day token expiry a blast radius over prices. Yahoo already
-    serves the pre/post-market movers surfaces, and futures/forex/indices never
-    reached Schwab anyway (``_SCHWAB_SYMBOL_RE`` delegates them per-symbol).
+    serves every surface below, and futures/forex/indices never reached Schwab
+    anyway (``_SCHWAB_SYMBOL_RE`` delegates them per-symbol).
+
+    THIS IS THE ONE SEAM THE FLAG MOVES, and it has three consumers — flipping
+    it re-sources all three, not just the movers:
+
+    1. ``tasks/alerts.py`` — the morning-pulse and EOD-wrap extended-hours
+       movers, via ``collect_extended_movers`` (reads ``session`` +
+       ``change_percent``).
+    2. ``services/agents/strategy_brief.py`` — the brief's extended-hours quote
+       block, up to ``MAX_QUOTE_SYMBOLS`` (30) symbols; unlike the movers it
+       consumes ``price``, so provider differences show up in the brief's
+       numbers directly.
+    3. ``scripts/premarket_pulse.py`` — the morning-brief market block.
 
     With the opt-in ON, selection is exactly what it always was: Schwab when
     the server is configured for it AND a user has connected a still-valid

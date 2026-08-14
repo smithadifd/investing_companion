@@ -243,17 +243,30 @@ class Settings(BaseSettings):
     #
     # Schwab's two roles are deliberately decoupled (#273). Ingestion is the one
     # thing only Schwab can do and is always on when connected. Quotes are not:
-    # Yahoo already serves pre/post-market data for the movers surfaces, and
-    # futures/forex/indices never routed through Schwab in the first place
+    # Yahoo already serves pre/post-market data everywhere this flag reaches,
+    # and futures/forex/indices never routed through Schwab in the first place
     # (``_SCHWAB_SYMBOL_RE`` delegates them per-symbol). Leaving the quote role
     # on means an expired refresh token — which Schwab hard-caps at 7 days with
     # no way to extend — has a blast radius over prices it has no business
     # having.
     #
+    # WHAT IT REACHES: the flag governs one thing — which provider
+    # ``get_extended_quote_provider`` returns — and that selector has exactly
+    # three consumers, all of which this flag therefore moves between Schwab
+    # and Yahoo:
+    #   1. the briefing extended-hours movers (``tasks/alerts.py``, morning
+    #      pulse + EOD wrap, via ``collect_extended_movers``);
+    #   2. the strategy brief's extended-hours quote block
+    #      (``services/agents/strategy_brief.py``, up to MAX_QUOTE_SYMBOLS=30
+    #      symbols, which consumes ``price`` and not just ``session``);
+    #   3. ``scripts/premarket_pulse.py``, the morning-brief market block.
+    # Ingestion (``schwab_ingestion.get_connected_provider``) is not a consumer
+    # and never consults this flag.
+    #
     # Set to true only if you specifically want Schwab's real-time all-session
     # equity/ETF quotes and accept the weekly re-authorization that keeps them
-    # alive. Flipping it is reversible and affects nothing but the pre/post-
-    # market movers surfaces; ingestion is unaffected either way.
+    # alive. Flipping it is reversible and touches nothing but those three
+    # extended-quote surfaces; ingestion is unaffected either way.
     SCHWAB_QUOTES_ENABLED: bool = False
 
     # AI (fallback, users provide their own)

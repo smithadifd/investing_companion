@@ -99,6 +99,11 @@ def _import_link() -> str:
     return f"{base}/trades" if base else "the Trades page"
 
 
+def _as_utc(value: datetime) -> datetime:
+    """A naive row is read as UTC, never as local."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
 async def _transaction_sync_lag(
     session: AsyncSession, user_id
 ) -> _SyncLag | None:
@@ -106,37 +111,64 @@ async def _transaction_sync_lag(
 
     None means "nothing is linked": no ACTIVE Schwab ``AccountLink``, so no
     ingestion is expected and no lag exists to report.
+
+    PER ACCOUNT, THEN WORST-CASE. A user can hold several active links at once
+    (the schema's partial unique index is per ``account_id``, not per user), and
+    a hash rotation leaves an ORPHANED link whose completed runs must stop
+    counting for the fresh one that replaced it. So each active hash gets its
+    own reference — its newest COMPLETE transactions run, else when that link
+    was created — and the reported lag is the *oldest* of them. Aggregating
+    across the whole user instead would let one healthy account vouch for a
+    silently drifting one, which is precisely the drift this nag exists to
+    catch, and the error would only ever be in the direction of staying quiet.
     """
-    oldest_link = (
+    links = (
         await session.execute(
-            select(func.min(AccountLink.created_at)).where(
+            select(AccountLink.account_hash, func.min(AccountLink.created_at))
+            .where(
                 AccountLink.user_id == user_id,
                 AccountLink.source == SCHWAB_SOURCE,
                 AccountLink.status == AccountLinkStatus.ACTIVE,
             )
+            .group_by(AccountLink.account_hash)
         )
-    ).scalar_one_or_none()
-    if oldest_link is None:
+    ).all()
+    if not links:
         return None
 
-    last_sync = (
-        await session.execute(
-            select(func.max(BrokerImportRun.created_at)).where(
-                BrokerImportRun.user_id == user_id,
-                BrokerImportRun.source == SCHWAB_SOURCE,
-                BrokerImportRun.kind == ImportKind.TRANSACTIONS,
-                BrokerImportRun.status == ImportStatus.COMPLETE,
+    last_by_hash = dict(
+        (
+            await session.execute(
+                select(
+                    BrokerImportRun.account_hash,
+                    func.max(BrokerImportRun.created_at),
+                )
+                .where(
+                    BrokerImportRun.user_id == user_id,
+                    BrokerImportRun.source == SCHWAB_SOURCE,
+                    BrokerImportRun.account_hash.in_(
+                        [account_hash for account_hash, _ in links]
+                    ),
+                    BrokerImportRun.kind == ImportKind.TRANSACTIONS,
+                    BrokerImportRun.status == ImportStatus.COMPLETE,
+                )
+                .group_by(BrokerImportRun.account_hash)
             )
-        )
-    ).scalar_one_or_none()
+        ).all()
+    )
 
-    reference = last_sync or oldest_link
-    if reference.tzinfo is None:  # a naive row is read as UTC, never as local
-        reference = reference.replace(tzinfo=timezone.utc)
+    worst: tuple[datetime, bool] | None = None
+    for account_hash, linked_at in links:
+        last_sync = last_by_hash.get(account_hash)
+        reference = _as_utc(last_sync or linked_at)
+        if worst is None or reference < worst[0]:
+            worst = (reference, last_sync is not None)
+
+    reference, ever_synced = worst
     elapsed = (datetime.now(timezone.utc) - reference).total_seconds() / 86400
     return _SyncLag(
         days=max(0.0, elapsed),
-        ever_synced=last_sync is not None,
+        ever_synced=ever_synced,
         reference=reference,
     )
 

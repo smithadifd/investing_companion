@@ -65,11 +65,19 @@ async def _connect(db, user, age_days: float) -> None:
     )
 
 
-async def _link(db, user, *, created_days_ago: float = 1.0, active: bool = True):
-    account = await create_test_account(db, user, name="Roth")
+async def _link(
+    db,
+    user,
+    *,
+    created_days_ago: float = 1.0,
+    active: bool = True,
+    account_hash: str = HASH,
+    account_name: str = "Roth",
+):
+    account = await create_test_account(db, user, name=account_name)
     link = AccountLink(
         user_id=user.id,
-        account_hash=HASH,
+        account_hash=account_hash,
         source="schwab_api",
         account_id=account.id,
         status=AccountLinkStatus.ACTIVE if active else AccountLinkStatus.ORPHANED,
@@ -87,10 +95,11 @@ async def _transactions_run(
     days_ago: float,
     status: ImportStatus = ImportStatus.COMPLETE,
     kind: ImportKind = ImportKind.TRANSACTIONS,
+    account_hash: str = HASH,
 ):
     run = BrokerImportRun(
         user_id=user.id,
-        account_hash=HASH,
+        account_hash=account_hash,
         source="schwab_api",
         kind=kind,
         status=status,
@@ -139,6 +148,62 @@ class TestTransactionSyncLag:
         assert lag is not None
         assert lag.ever_synced is True
         assert 2.5 < lag.days < 3.5
+
+    async def test_a_healthy_account_cannot_vouch_for_a_drifting_one(
+        self, db, test_user
+    ):
+        """Regression: lag is per-account, worst-case.
+
+        Aggregating MAX(created_at) across the whole user let an account that
+        synced yesterday hide one that has never synced at all — and the error
+        only ever pointed at "healthy", i.e. a suppressed notification.
+        """
+        await _link(db, test_user, created_days_ago=90, account_hash="HASH-A")
+        await _link(
+            db,
+            test_user,
+            created_days_ago=90,
+            account_hash="HASH-B",
+            account_name="Taxable",
+        )
+        await _transactions_run(db, test_user, days_ago=1, account_hash="HASH-A")
+
+        lag = await _transaction_sync_lag(db, test_user.id)
+
+        assert lag is not None
+        assert lag.ever_synced is False  # HASH-B is the worst case
+        assert lag.days > 89
+
+    async def test_an_orphaned_links_runs_do_not_cover_its_replacement(
+        self, db, test_user
+    ):
+        """Regression: a hash rotation must not inherit the old hash's sync.
+
+        Orphan-then-activate is a first-class flow, so a completed run under
+        the retired hash would otherwise make a brand-new, never-synced link
+        look freshly synced.
+        """
+        await _link(
+            db,
+            test_user,
+            created_days_ago=90,
+            active=False,
+            account_hash="HASH-OLD",
+        )
+        await _transactions_run(db, test_user, days_ago=1, account_hash="HASH-OLD")
+        await _link(
+            db,
+            test_user,
+            created_days_ago=30,
+            account_hash="HASH-NEW",
+            account_name="Rotated",
+        )
+
+        lag = await _transaction_sync_lag(db, test_user.id)
+
+        assert lag is not None
+        assert lag.ever_synced is False
+        assert lag.days > 29
 
     async def test_failed_runs_and_positions_runs_do_not_count(self, db, test_user):
         """Only a COMPLETE transactions pull means transactions are current."""

@@ -239,6 +239,13 @@ class AlertService:
                 "create a new alert instead"
             )
 
+        # Captured before any mutation: the reset below fires on what actually
+        # CHANGED, not on what merely appeared in the payload. A handoff that
+        # re-sends an unchanged threshold must not cost a re-baseline.
+        prior_condition = alert.condition_type
+        prior_threshold = alert.threshold_value
+        prior_confirm_checks = alert.confirm_checks
+
         # Update fields
         if data.name is not None:
             alert.name = data.name
@@ -282,11 +289,29 @@ class AlertService:
         #   ignores by design. Clearing confirm_checks hands the crossing
         #   evaluator that accumulated value with no fresh baseline, which
         #   can suppress a real crossing outright.
-        if (
+        #
+        # The reset costs one deliberately quiet check: the next evaluation
+        # establishes a baseline and cannot fire, so a crossing that happens
+        # in that exact window is missed. That is the unavoidable flip side of
+        # never firing spuriously — a baseline is "no fire" by construction.
+        # It is only correct because every case that reaches here has state
+        # describing a configuration that no longer exists. Hence the
+        # comparison against the PRIOR values rather than against
+        # model_fields_set: a PUT that re-sends an unchanged threshold changes
+        # nothing, so it must not spend that check.
+        condition_changed = (
             data.condition_type is not None
-            or data.threshold_value is not None
-            or "confirm_checks" in data.model_fields_set
-        ):
+            and data.condition_type.value != prior_condition
+        )
+        threshold_changed = (
+            data.threshold_value is not None
+            and Decimal(str(data.threshold_value)) != Decimal(str(prior_threshold))
+        )
+        confirm_checks_changed = (
+            "confirm_checks" in data.model_fields_set
+            and alert.confirm_checks != prior_confirm_checks
+        )
+        if condition_changed or threshold_changed or confirm_checks_changed:
             alert.consecutive_met_count = 0
             alert.was_above_threshold = None
 

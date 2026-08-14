@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from app.schemas.exposure import CatalystCluster
 from app.schemas.watchlist import EntryZoneStatus
 
-SCHEMA_VERSION = "1.6"
+SCHEMA_VERSION = "1.7"
 
 # Write-side vocabulary version (the actions an advisor may emit, documented in
 # advisor-actions.md). Stamped separately from SCHEMA_VERSION so a pure write-vocab
@@ -65,11 +65,20 @@ class PackAlert(BaseModel):
     last_checked_value: Decimal | None = Field(
         None, description="Value at the most recent 5-minute check cycle"
     )
+    last_checked_at: datetime | None = Field(
+        None,
+        description=(
+            "When last_checked_value was recorded. Null means the age is "
+            "unknown - treat the value as stale, not current."
+        ),
+    )
     distance_percent: Decimal | None = Field(
         None,
         description=(
             "Percent move required to hit the threshold from the last checked "
-            "value (negative = below current). Null for percent conditions."
+            "value (negative = below current). Null for percent conditions, "
+            "and null when last_checked_value is stale - an absent distance "
+            "means 'unknown', never 'far away'."
         ),
     )
     status: str = Field(..., description="armed | approaching | triggered_recently")
@@ -138,7 +147,15 @@ class PackPlaybookTrigger(BaseModel):
     action: str
     tier: str | None = None
     status: str
-    signal: str
+    signal: str | None = Field(
+        None,
+        description=(
+            "armed | approaching | hit | unwatched | disarmed. Derived from "
+            "ACTIVE linked alerts only; null on a non-active trigger. "
+            "'disarmed' means the rungs exist but every one is switched off - "
+            "nothing is watching this."
+        ),
+    )
     executed_at: datetime | None = None
 
 

@@ -135,7 +135,7 @@ class TestContextPackV15:
         )
 
         pack = await ContextPackService(db).build(test_user.id)
-        assert pack.schema_version == SCHEMA_VERSION == "1.6"
+        assert pack.schema_version == SCHEMA_VERSION == "1.7"
         # Position carries account context
         pos = next(p for p in pack.positions if p.symbol == "PKV15")
         assert pos.account == "Roth"

@@ -1,6 +1,7 @@
 """Tests for the trigger playbook (service signal derivation + endpoints)."""
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -9,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.alert import Alert
 from app.schemas.context_pack import SCHEMA_VERSION
 from app.schemas.trigger import TriggerCreate, TriggerSignal, TriggerUpdate
-from app.services.context_pack import ContextPackService
+from app.services.context_pack import ContextPackService, render_markdown
 from app.services.trigger import TriggerService
 from tests.factories import create_test_alert, create_test_equity
 
@@ -69,6 +70,164 @@ class TestSignalDerivation:
         )
         trigger = await _make_trigger(db, [alert.id])
         assert trigger.signal == TriggerSignal.ARMED
+
+
+class TestSilencedTriggers:
+    """#259 - a trigger nobody is watching must not read as one that is.
+
+    The prod failure this pins: trigger 6 "CCJ add tiers" reported
+    ``armed`` with ``distance_percent: 2.78`` on its $88 rung while both
+    linked alerts had been inactive for three weeks and CCJ traded at
+    $97.99 - roughly 11% the *other* side of the rung. Every number in
+    these fixtures is that incident's.
+    """
+
+    async def test_all_alerts_deactivated_reads_disarmed_not_armed(
+        self, db: AsyncSession
+    ):
+        equity = await create_test_equity(db, symbol="CCJ1")
+        alerts = [
+            await create_test_alert(
+                db, equity,
+                name=f"CCJ add tier {i}",
+                threshold_value=threshold,
+                last_checked_value=85.62,
+                is_active=False,
+            )
+            for i, threshold in enumerate((88.0, 80.0))
+        ]
+        trigger = await _make_trigger(db, [a.id for a in alerts])
+
+        # Previously ARMED: only an EMPTY alert list could reach a
+        # not-being-watched state, so "linked but all dead" fell through.
+        assert trigger.signal == TriggerSignal.DISARMED
+
+    async def test_disarmed_is_distinct_from_unwatched(self, db: AsyncSession):
+        """A silenced ladder and a trigger with no rungs are different problems."""
+        equity = await create_test_equity(db, symbol="CCJ2")
+        alert = await create_test_alert(
+            db, equity, threshold_value=88.0, is_active=False
+        )
+        silenced = await _make_trigger(db, [alert.id], name="silenced")
+        never_wired = await _make_trigger(db, [], name="never wired")
+
+        assert silenced.signal == TriggerSignal.DISARMED
+        assert never_wired.signal == TriggerSignal.UNWATCHED
+
+    async def test_one_live_alert_keeps_the_trigger_watched(self, db: AsyncSession):
+        """DISARMED needs EVERY rung off - one live alert still covers the trigger."""
+        equity = await create_test_equity(db, symbol="CCJ3")
+        dead = await create_test_alert(
+            db, equity, name="dead rung",
+            threshold_value=88.0, last_checked_value=85.62, is_active=False,
+        )
+        live = await create_test_alert(
+            db, equity, name="live rung",
+            threshold_value=100.0, last_checked_value=50.0, is_active=True,
+        )
+        trigger = await _make_trigger(db, [dead.id, live.id])
+
+        assert trigger.signal == TriggerSignal.ARMED
+
+    async def test_recent_fire_from_a_silenced_alert_is_not_a_hit(
+        self, db: AsyncSession
+    ):
+        """The HIT scan skipped is_active, so a dead alert's fire masked the rest."""
+        equity = await create_test_equity(db, symbol="CCJ4")
+        alert = await create_test_alert(
+            db, equity,
+            threshold_value=88.0,
+            last_checked_value=85.62,
+            last_triggered_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            is_active=False,
+        )
+        trigger = await _make_trigger(db, [alert.id])
+
+        assert trigger.signal == TriggerSignal.DISARMED
+
+    async def test_frozen_distance_is_withheld(self, db: AsyncSession):
+        """The 2.78% that was three weeks old is reported as unknown, not as a distance."""
+        equity = await create_test_equity(db, symbol="CCJ5")
+        alert = await create_test_alert(
+            db, equity,
+            threshold_value=88.0,
+            last_checked_value=85.62,  # (88 - 85.62) / 85.62 = +2.78%
+            last_checked_at=datetime.now(timezone.utc) - timedelta(days=21),
+            is_active=False,
+        )
+        trigger = await _make_trigger(db, [alert.id])
+
+        assert trigger.alerts[0].distance_percent is None
+
+    async def test_a_fresh_distance_is_still_reported(self, db: AsyncSession):
+        """The guard withholds stale values only - it must not blank live ones."""
+        equity = await create_test_equity(db, symbol="CCJ6")
+        alert = await create_test_alert(
+            db, equity,
+            threshold_value=88.0,
+            last_checked_value=85.62,
+            last_checked_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+        )
+        trigger = await _make_trigger(db, [alert.id])
+
+        assert trigger.alerts[0].distance_percent == Decimal("2.78")
+        assert trigger.signal == TriggerSignal.APPROACHING
+
+    async def test_a_stale_value_cannot_produce_approaching(self, db: AsyncSession):
+        """Within 3% of a threshold means nothing if the value is unattended."""
+        equity = await create_test_equity(db, symbol="CCJ7")
+        alert = await create_test_alert(
+            db, equity,
+            threshold_value=88.0,
+            last_checked_value=85.62,
+            last_checked_at=datetime.now(timezone.utc) - timedelta(days=21),
+            is_active=True,  # active, but nothing has refreshed it
+        )
+        trigger = await _make_trigger(db, [alert.id])
+
+        assert trigger.signal == TriggerSignal.ARMED
+
+    async def test_a_value_with_no_timestamp_counts_as_stale(self, db: AsyncSession):
+        """Pre-migration rows have no last_checked_at; unknown age is not fresh."""
+        equity = await create_test_equity(db, symbol="CCJ8")
+        alert = await create_test_alert(
+            db, equity, threshold_value=88.0, last_checked_value=85.62,
+        )
+        alert.last_checked_at = None  # the state every row is in before its first check
+        await db.commit()
+
+        trigger = await _make_trigger(db, [alert.id])
+        assert trigger.alerts[0].distance_percent is None
+
+    async def test_closed_triggers_carry_no_signal(self, db: AsyncSession):
+        """Retired trigger 9 read 'armed' indefinitely; closed history has no signal."""
+        service = TriggerService(db)
+        equity = await create_test_equity(db, symbol="CCJ9")
+        alert = await create_test_alert(
+            db, equity, threshold_value=100.0, last_checked_value=50.0
+        )
+
+        executed_src = await _make_trigger(db, [alert.id], name="executed one")
+        retired_src = await _make_trigger(db, [alert.id], name="retired one")
+        assert executed_src.signal == TriggerSignal.ARMED  # while still active
+
+        executed = await service.execute_trigger(executed_src.id)
+        retired = await service.retire_trigger(retired_src.id)
+
+        assert executed.signal is None
+        assert retired.signal is None
+
+    async def test_rearming_restores_the_signal(self, db: AsyncSession):
+        """Signal is suppressed by lifecycle, not erased - rearm brings it back."""
+        service = TriggerService(db)
+        equity = await create_test_equity(db, symbol="CCJ10")
+        alert = await create_test_alert(
+            db, equity, threshold_value=100.0, last_checked_value=50.0
+        )
+        trigger = await _make_trigger(db, [alert.id])
+
+        assert (await service.execute_trigger(trigger.id)).signal is None
+        assert (await service.rearm_trigger(trigger.id)).signal == TriggerSignal.ARMED
 
 
 class TestLifecycle:
@@ -141,6 +300,49 @@ class TestLifecycle:
 
         assert pack.schema_version == SCHEMA_VERSION
         assert any(t.name == "Pack trigger" for t in pack.triggers)
+
+    async def test_pack_withholds_a_stale_alert_distance(
+        self, db: AsyncSession, test_user
+    ):
+        """The pack and the playbook must agree - the workflow cross-checks them.
+
+        ``active_alerts`` computes its own distance rather than calling
+        ``_alert_distance``, so without the same guard the identical alert
+        would read 2.78% away in one section of the pack and unknown in the
+        other.
+        """
+        equity = await create_test_equity(db, symbol="PKST")
+        await create_test_alert(
+            db, equity,
+            name="stale rung",
+            threshold_value=88.0,
+            last_checked_value=85.62,
+            last_checked_at=datetime.now(timezone.utc) - timedelta(days=21),
+            user_id=test_user.id,
+        )
+
+        pack = await ContextPackService(db).build(test_user.id)
+        packed = next(a for a in pack.active_alerts if a.name == "stale rung")
+
+        assert packed.distance_percent is None
+        assert packed.status == "armed"
+        # The age itself is exported, so the omission is explainable
+        assert packed.last_checked_at is not None
+
+    async def test_pack_renders_a_closed_trigger_without_a_signal(
+        self, db: AsyncSession, test_user
+    ):
+        """`signal` is null on executed triggers - the markdown must not print 'None/executed'."""
+        trigger = await _make_trigger(db, [], name="Closed pack trigger")
+        await TriggerService(db).execute_trigger(trigger.id)
+
+        pack = await ContextPackService(db).build(test_user.id)
+        packed = next(t for t in pack.triggers if t.name == "Closed pack trigger")
+        assert packed.signal is None
+
+        markdown = render_markdown(pack)
+        assert "None/executed" not in markdown
+        assert "- [executed] [orange] Closed pack trigger" in markdown
 
     async def test_update_tier_null_clears(self, db: AsyncSession):
         """Explicit tier:null clears the tier; an omitted tier is unchanged."""

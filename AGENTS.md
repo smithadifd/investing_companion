@@ -208,6 +208,12 @@ the hosts.
 - **TimescaleDB is mandatory** (see § Database) — a plain Postgres image is not a drop-in.
 - **Advisor contract drift**: skipping the § Conventions sync-table on an export/action change ships a
   pack whose version stamps lie to the advisor. Treat it as part of the change, not a follow-up.
+- **A stored value without its timestamp is indistinguishable from a fresh one.** `alerts.last_checked_value`
+  is written only by the scheduled check loop, and only for *active* alerts — so it freezes silently the
+  moment an alert is deactivated, and for three weeks read as a confident "2.78% away" on a rung price had
+  long since left (#259). Anything derived from a persisted observation must carry, and check, its
+  `*_at` companion; `AlertService._mark_checked` is the single writer that keeps the pair together.
+  The read side treats unknown age as stale, never as current.
 - **`docs/issues/017` (Schwab OAuth callback) is off-limits to routine edits** — it tracks a deliberate
   blocked-state decision.
 - **The macro calendar does not update itself, and deploying does not fix it.** `FRED_API_KEY` is unset

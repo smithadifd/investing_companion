@@ -398,8 +398,13 @@ export default function SettingsPage() {
                   <p className="text-xs text-neutral-500">
                     Optional. Connect a Schwab account to import your brokerage
                     transactions and positions for trade tracking and reconciliation —
-                    that is what connecting does. Quotes are unaffected: they come from
-                    the free Yahoo Finance base whether or not Schwab is connected.
+                    that is what connecting does.{' '}
+                    {!schwabStatus?.quotes_enabled && (
+                      <>
+                        Quotes are unaffected: they come from the free Yahoo Finance
+                        base whether or not Schwab is connected.{' '}
+                      </>
+                    )}
                     Schwab requires re-authorizing every 7 days, and transaction sync
                     pauses while it is disconnected.
                   </p>

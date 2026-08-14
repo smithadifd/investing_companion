@@ -21,7 +21,11 @@ The generic branch → PR → CI-green → squash-merge sequence is your global
 `~/.claude/CLAUDE.md` checklist (its `gh run watch` step waits for GitHub checks
 name-agnostically); keep only IC's deltas here, e.g.:
 - Deploy (only when asked): `./scripts/deploy-synology.sh`.
-- Migrations are Alembic **against prod** (`alembic upgrade head`) after deploy — not boot-time.
+- Migrations run automatically as the deploy script's tail (`alembic upgrade head` inside the
+  `api` container, immediately after the rebuild), with a hard `alembic current`-vs-`heads`
+  check that fails the deploy loudly on mismatch instead of shipping new code on an old schema
+  (#133). Not boot-time — the container `HEALTHCHECK` never touches the DB. If that step fails,
+  the migration still needs to be diagnosed/applied by hand before trusting the deploy.
 
 ## Handoff Execution Reference
 

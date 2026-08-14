@@ -14,12 +14,17 @@ class TriggerLifecycle(str, Enum):
 
 
 class TriggerSignal(str, Enum):
-    """Live signal derived from linked alerts."""
+    """Live signal derived from linked alerts.
+
+    Derived from ACTIVE alerts only, and only for ACTIVE triggers - an
+    executed or retired trigger carries ``signal: null``.
+    """
 
     ARMED = "armed"
     APPROACHING = "approaching"
     HIT = "hit"
     UNWATCHED = "unwatched"  # no linked alerts
+    DISARMED = "disarmed"  # linked alerts exist, but every one is deactivated
 
 
 class TriggerAlertSummary(BaseModel):
@@ -62,7 +67,9 @@ class TriggerResponse(TriggerBase):
 
     id: int
     status: TriggerLifecycle
-    signal: TriggerSignal
+    signal: TriggerSignal | None = Field(
+        None, description="Live signal; null for executed/retired triggers"
+    )
     executed_at: datetime | None = None
     execution_note: str | None = None
     alerts: list[TriggerAlertSummary] = Field(default_factory=list)

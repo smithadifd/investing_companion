@@ -63,7 +63,7 @@ const TIER_STYLES: Record<string, { border: string; chip: string }> = {
 
 const SIGNAL_CONFIG: Record<
   TriggerSignal,
-  { label: string; className: string; icon: React.ElementType }
+  { label: string; className: string; icon: React.ElementType; title?: string }
 > = {
   hit: {
     label: 'Hit',
@@ -87,14 +87,27 @@ const SIGNAL_CONFIG: Record<
     className:
       'bg-transparent text-neutral-400 dark:text-neutral-500 border border-dashed border-neutral-300 dark:border-neutral-600',
     icon: EyeOff,
+    title: 'No alerts are linked to this trigger',
+  },
+  // Shares the dashed outline with Unwatched (both mean "no live coverage")
+  // but in orange, because this one is a ladder that was built and then went
+  // dark — that is a problem to fix, not a trigger never wired up.
+  disarmed: {
+    label: 'Disarmed',
+    className:
+      'bg-transparent text-orange-600 dark:text-orange-400 border border-dashed border-orange-400 dark:border-orange-500/60',
+    icon: BellOff,
+    title: 'Every alert linked to this trigger is deactivated — nothing is watching it',
   },
 };
 
-function SignalChip({ signal }: { signal: TriggerSignal }) {
+function SignalChip({ signal }: { signal: TriggerSignal | null }) {
+  if (!signal) return null;
   const config = SIGNAL_CONFIG[signal];
   const Icon = config.icon;
   return (
     <span
+      title={config.title}
       className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${config.className}`}
     >
       <Icon className="h-3 w-3" />

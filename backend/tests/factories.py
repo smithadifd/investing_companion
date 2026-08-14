@@ -107,6 +107,7 @@ async def create_test_alert(
     cooldown_minutes: int = 60,
     is_active: bool = True,
     last_checked_value: float | None = None,
+    last_checked_at: datetime | None = None,
     was_above_threshold: bool | None = None,
     last_triggered_at: datetime | None = None,
     confirm_checks: int | None = None,
@@ -119,6 +120,14 @@ async def create_test_alert(
     Alerts are strictly owned (user_id is non-null). When no ``user_id`` is
     given, reuse the existing test user if there is one, else create an owner —
     so callers that don't care about ownership keep working.
+
+    ``last_checked_at`` defaults to *now* whenever a ``last_checked_value`` is
+    given, mirroring the check loop, which only ever writes the two together
+    (``AlertService._mark_checked``). A value with no timestamp is a state the
+    running app cannot produce, and the read side treats it as stale — so
+    defaulting it keeps fixtures describing live alerts rather than accidentally
+    exercising the staleness path. Pass an explicit datetime to age one on
+    purpose.
     """
     if user_id is None:
         user_id = await db.scalar(select(User.id).order_by(User.created_at))
@@ -136,6 +145,11 @@ async def create_test_alert(
         cooldown_minutes=cooldown_minutes,
         is_active=is_active,
         last_checked_value=last_checked_value,
+        last_checked_at=(
+            last_checked_at
+            if last_checked_at is not None or last_checked_value is None
+            else datetime.now(timezone.utc)
+        ),
         was_above_threshold=was_above_threshold,
         last_triggered_at=last_triggered_at,
         confirm_checks=confirm_checks,

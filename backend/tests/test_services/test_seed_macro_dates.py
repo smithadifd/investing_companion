@@ -127,13 +127,16 @@ class TestGdp2026Dates:
     plus the individual embargoed press releases cited in the block comment
     above GDP_DATES_2026 in seed_macro_events.py. Retrieved 2026-07-21."""
 
-    def test_matches_bea_schedule_for_supported_non_colliding_dates(self):
-        """Exact-equality on the seed list as shipped -- deliberately excludes
-        both April-2026 BEA releases (see the collision test below)."""
+    def test_matches_bea_schedule_exactly(self):
+        """Exact-equality on the seed list as shipped. Now includes both
+        April-2026 releases (restored 2026-08-14, Andrew elected -- see the
+        collision test below)."""
         assert GDP_DATES_2026 == [
             (date(2026, 1, 22), "Q3 2025 Updated Estimate"),
             (date(2026, 2, 20), "Q4 2025 Advance"),
             (date(2026, 3, 13), "Q4 2025 Second"),
+            (date(2026, 4, 9), "Q4 2025 Third"),
+            (date(2026, 4, 30), "Q1 2026 Advance"),
             (date(2026, 5, 28), "Q1 2026 Second"),
             (date(2026, 6, 25), "Q1 2026 Third"),
             (date(2026, 7, 30), "Q2 2026 Advance"),
@@ -144,22 +147,47 @@ class TestGdp2026Dates:
             (date(2026, 12, 23), "Q3 2026 Third"),
         ]
 
-    def test_april_2026_structural_collision_is_reported_not_shoehorned(self):
-        """Q4-2025 Third (Apr 9, corrected) and Q1-2026 Advance (Apr 30,
-        corrected) both land in April 2026 -- one calendar month, two real
-        releases. The recurrence-key MECHANICS are now fixed (see
-        macro_recurrence_key's ``ordinal`` param + the accompanying
-        migration), so encoding both would no longer collide -- but
-        restoring these two real calendar entries is a separate data
-        decision, deliberately left out of this list in this pass rather
-        than bundled in unasked. This test pins that the omission here is
-        still deliberate, not a leftover gap."""
-        months = {d.month for d, _label in GDP_DATES_2026}
-        assert 4 not in months
+    def test_april_2026_structural_collision_is_encoded(self):
+        """Q4-2025 Third (Apr 9) and Q1-2026 Advance (Apr 30) both land in
+        April 2026 -- one calendar month, two real releases.
+
+        This test previously pinned the OPPOSITE: that April was deliberately
+        empty, because the recurrence-key mechanics fix and the data decision
+        to restore these two entries were separated on purpose. The data
+        decision was taken 2026-08-14, re-verified against bea.gov's full-2026
+        schedule table, so April is now populated and the ordinal keys are
+        what keep the two apart."""
         dates = [d for d, _label in GDP_DATES_2026]
-        assert date(2026, 4, 9) not in dates
-        assert date(2026, 4, 30) not in dates
-        assert date(2026, 4, 29) not in dates  # the old (wrong) guess either
+        assert date(2026, 4, 9) in dates
+        assert date(2026, 4, 30) in dates
+        assert date(2026, 4, 29) not in dates  # the old (wrong) guess stays out
+
+    def test_april_2026_pair_gets_distinct_ordinal_keys(self):
+        """The property that makes encoding both safe: the seed list's labels
+        drive semantic ordinals, so the two April rows key apart instead of
+        one silently overwriting the other."""
+        keys = {
+            s.event_date: s.recurrence_key
+            for s in seed_statistical_specs(2026)
+            if s.event_type == "gdp"
+        }
+        assert keys[date(2026, 4, 9)] == "gdp_2026_04_third"
+        assert keys[date(2026, 4, 30)] == "gdp_2026_04_advance"
+
+    def test_april_advance_keeps_high_importance(self):
+        """Apr 30 is a real Advance estimate, so it must carry the Advance
+        importance tag -- guards against the restore landing it as a generic
+        medium-importance row."""
+        advance = next(
+            s for s in seed_statistical_specs(2026)
+            if s.event_type == "gdp" and s.event_date == date(2026, 4, 30)
+        )
+        assert advance.importance == "high"
+        third = next(
+            s for s in seed_statistical_specs(2026)
+            if s.event_type == "gdp" and s.event_date == date(2026, 4, 9)
+        )
+        assert third.importance == "medium"
 
     def test_no_second_shutdown_lapse_reflected_yet(self):
         """Q1-2026 Second/Third landed back on their originally-scheduled

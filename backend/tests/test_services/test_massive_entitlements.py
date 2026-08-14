@@ -239,6 +239,42 @@ class TestConfigParsing:
         parsed = Settings(MASSIVE_ENTITLEMENTS=blank)
         assert sorted(parsed.MASSIVE_ENTITLEMENTS) == sorted(ALL_SURFACES)
 
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("quote,history", ["history", "quote"]),
+            (" QUOTE , History ", ["history", "quote"]),
+            ("", ALL_SURFACES),
+            ("   ", ALL_SURFACES),
+            (",,,", ALL_SURFACES),
+        ],
+    )
+    def test_the_real_environment_path_parses(self, monkeypatch, raw, expected):
+        """The production path, not just the constructor.
+
+        Every deployment sets this through the *environment* — the compose
+        files pass ``MASSIVE_ENTITLEMENTS=${MASSIVE_ENTITLEMENTS:-}`` — and a
+        list-typed pydantic-settings field reached from an env var goes through
+        complex-value decoding before any validator runs. A comma-separated
+        value is not JSON, so the footgun guard has to hold on this path
+        specifically: if it ever stopped, the blank compose line would either
+        fail the app's boot or silently entitle nothing, and the constructor
+        tests above would still be green.
+        """
+        from app.core.config import Settings
+
+        monkeypatch.setenv("MASSIVE_ENTITLEMENTS", raw)
+        parsed = Settings(_env_file=None)
+        assert sorted(parsed.MASSIVE_ENTITLEMENTS) == sorted(expected)
+
+    def test_an_unset_environment_entitles_everything(self, monkeypatch):
+        """An install that never heard of this variable keeps working."""
+        from app.core.config import Settings
+
+        monkeypatch.delenv("MASSIVE_ENTITLEMENTS", raising=False)
+        parsed = Settings(_env_file=None)
+        assert sorted(parsed.MASSIVE_ENTITLEMENTS) == sorted(ALL_SURFACES)
+
 
 # ---------------------------------------------------------------------------
 # The gate — every call site, not just fundamentals

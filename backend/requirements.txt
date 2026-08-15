@@ -18,7 +18,7 @@ psycopg2-binary>=2.9.12  # For alembic sync operations
 # Validation & Serialization
 # ===========================================
 pydantic>=2.5.0
-pydantic-settings>=2.1.0
+pydantic-settings>=2.15.0
 email-validator>=2.1.0
 
 # ===========================================

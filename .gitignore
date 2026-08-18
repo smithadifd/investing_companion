@@ -114,4 +114,5 @@ CLAUDE.local.md
 # Local-only docs (session notes, plans)
 # ===========================================
 docs/sessions/
-docs/plans/
+# real content lives in foundry/plans/investing_companion — this path is a symlink to it
+docs/plans

@@ -1,3 +1,16 @@
+# ⚠ NOT the file the self-hosted deployment runs.
+#
+# The homelab runs `docker-compose.local.yml` (plus `docker-compose.recomputer.yml`
+# on recomputer, which moves the frontend off :3000). This file is kept for a
+# standalone/VPS-style deploy where this stack owns the host's ports.
+#
+# Running THIS file on recomputer would bring up the traefik service below, which
+# binds :80 and :443 — ports Caddy already owns there. That would take down every
+# *.home route on the box, Home Assistant and the Schwab OAuth callback included,
+# not just this app. Check which compose file is actually live before deploying:
+#
+#   docker inspect investing_api --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}'
+#
 # Production Docker Compose for Investing Companion
 # Production deployment with Traefik reverse proxy
 #

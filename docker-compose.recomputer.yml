@@ -1,0 +1,11 @@
+# recomputer overrides, layered on docker-compose.local.yml (the file the NAS
+# actually ran — NOT docker-compose.prod.yml, which brings a traefik that would
+# fight Caddy for :80/:443 on this host).
+#
+# homepage runs host-networked here and already holds :3000, so the frontend
+# moves to :3010. Caddy fronts both this and the Schwab OAuth callback host, so
+# nothing outside this file needs to know the port changed.
+services:
+  frontend:
+    ports: !override
+      - "3010:3000"

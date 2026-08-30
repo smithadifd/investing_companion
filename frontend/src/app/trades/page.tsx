@@ -14,6 +14,7 @@ import {
   Trash2,
   Pencil,
   Users,
+  PiggyBank,
 } from 'lucide-react';
 import {
   useTrades,
@@ -30,6 +31,7 @@ import { CreateTradeModal } from '@/components/trade/CreateTradeModal';
 import { EditTradeModal } from '@/components/trade/EditTradeModal';
 import { QuickTradeModal } from '@/components/trade/QuickTradeModal';
 import { AccountManager } from '@/components/trade/AccountManager';
+import { NavPanel } from '@/components/trade/NavPanel';
 
 // Helper to convert string/number to number
 function toNumber(value: number | string | null | undefined): number {
@@ -554,11 +556,15 @@ function PositionSizer() {
   );
 }
 
-type TabType = 'trades' | 'portfolio' | 'performance' | 'sizer';
+type TabType = 'trades' | 'portfolio' | 'nav' | 'performance' | 'sizer';
 
 const TAB_ITEMS = [
   { id: 'trades', label: 'Trades', Icon: BarChart3 },
   { id: 'portfolio', label: 'Positions', Icon: Wallet },
+  // NAV is its own tab, not a widening of Positions: the cash fold and the
+  // per-position open-lot walks behind it are work the Positions view (and
+  // the dashboard that shares its query) must not pay for.
+  { id: 'nav', label: 'Total Return', Icon: PiggyBank },
   { id: 'performance', label: 'Performance', Icon: LineChart },
   { id: 'sizer', label: 'Position Sizer', Icon: Calculator },
 ] as const;
@@ -852,6 +858,12 @@ export default function TradesPage() {
                 </p>
               </div>
             )}
+          </div>
+        )}
+
+        {activeTab === 'nav' && (
+          <div role="tabpanel" id="trades-tabpanel-nav" aria-labelledby="trades-tab-nav">
+            <NavPanel />
           </div>
         )}
 

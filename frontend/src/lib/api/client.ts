@@ -53,6 +53,10 @@ import type {
   PasswordChange,
   PerformanceReport,
   PortfolioSummary,
+  NavSummary,
+  CashTransaction,
+  CashTransactionCreate,
+  CashBackfillResult,
   PositionSizeRequest,
   PositionSizeResponse,
   PositionSummary,
@@ -1207,6 +1211,58 @@ class ApiClient {
       ? '/trades/portfolio?by_account=true'
       : '/trades/portfolio';
     return this.fetch<PortfolioSummary>(url);
+  }
+
+  /**
+   * Get NAV / total return. Omit `accountId` for the whole ledger.
+   */
+  async getNav(accountId?: number | null): Promise<NavSummary> {
+    const url =
+      accountId != null ? `/trades/nav?account_id=${accountId}` : '/trades/nav';
+    return this.fetch<NavSummary>(url);
+  }
+
+  // ==================== Cash Ledger ====================
+
+  async getCashTransactions(params?: {
+    account_id?: number | null;
+    limit?: number;
+    offset?: number;
+  }): Promise<CashTransaction[]> {
+    const queryParams = new URLSearchParams();
+    if (params?.account_id != null) {
+      queryParams.append('account_id', params.account_id.toString());
+    }
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.offset) queryParams.append('offset', params.offset.toString());
+    const queryString = queryParams.toString();
+    return this.fetch<CashTransaction[]>(
+      queryString ? `/cash?${queryString}` : '/cash',
+    );
+  }
+
+  async createCashTransaction(
+    data: CashTransactionCreate,
+  ): Promise<CashTransaction> {
+    return this.fetch<CashTransaction>('/cash', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteCashTransaction(id: number): Promise<void> {
+    await this.fetch(`/cash/${id}`, { method: 'DELETE' });
+  }
+
+  /**
+   * Adopt already-imported broker cash movements into the ledger. Idempotent;
+   * makes no broker call of its own.
+   */
+  async backfillCashFromBroker(accountId: number): Promise<CashBackfillResult> {
+    return this.fetch<CashBackfillResult>(
+      `/cash/backfill?account_id=${accountId}`,
+      { method: 'POST' },
+    );
   }
 
   // Account methods (multi-account positions)

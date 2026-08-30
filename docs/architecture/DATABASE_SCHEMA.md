@@ -595,6 +595,13 @@ comparing the earliest cash row against the earliest trade, which a clamped
 60-day pull satisfies trivially while omitting years of earlier cash — so it
 reported a confidently non-estimated total return over an incomplete picture.
 
+**EVIDENCE ONLY, never a conclusion** (`20260830_005`). The first cut stored
+`is_true_origin` — "the history is complete" — computed once at backfill time,
+which meant a trade backdated afterwards could not invalidate it. Completeness
+is now derived on every read by `CashLedgerService.coverage`, per account,
+against live activity; this table keeps only the two facts that cannot be
+recomputed.
+
 ```sql
 CREATE TABLE cash_ledger_coverage (
     id SERIAL PRIMARY KEY,
@@ -608,9 +615,11 @@ CREATE TABLE cash_ledger_coverage (
     -- window a broker import actually delivered, NOT the earliest row that
     -- happened to arrive. NULL = no import provenance (a manual ledger).
     complete_from TIMESTAMPTZ,
-    -- True only when the window was unclamped AND reached past every known
-    -- trade. A clamped 60-day pull can never assert it.
-    is_true_origin BOOLEAN NOT NULL DEFAULT false,
+    -- Some pull was clamped to the provider's history horizon and no later
+    -- pull reached back past that floor. Sticky: a routine incremental pull
+    -- recovers nothing, so it must not clear this. Defaults TRUE so a row
+    -- written by anything that does not know better reads as "assume a gap".
+    has_history_gap BOOLEAN NOT NULL DEFAULT true,
     source VARCHAR(50) NOT NULL DEFAULT 'schwab_api',
     -- The run's HISTORY GAP note: the readable reason is_true_origin is false.
     note TEXT,

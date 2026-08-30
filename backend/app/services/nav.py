@@ -121,8 +121,7 @@ class NavService:
         fees_paid = await self.cash.fees_paid(user_id, scope)
         coverage = await self.cash.coverage(user_id, scope)
 
-        if not coverage.opening_balance_is_known:
-            reasons.append(self._coverage_reason(coverage))
+        reasons.extend(self._coverage_reasons(coverage))
 
         positions_market_value = positions_market_value.quantize(_CENTS)
         unrealized_pnl = unrealized_pnl.quantize(_CENTS)
@@ -165,36 +164,24 @@ class NavService:
         )
 
     @staticmethod
-    def _coverage_reason(coverage: CashCoverage) -> str:
-        """Say WHY the cash history is incomplete, not just that it is.
+    def _coverage_reasons(coverage: CashCoverage) -> list[str]:
+        """One reason per account whose cash history cannot be shown complete.
 
-        Three distinguishable causes, and the reader can act on a different
-        thing in each: re-run the import, enter the missing cash by hand, or
-        accept the 60-day horizon. A single generic sentence for all three was
-        the version that let an incomplete picture read as a complete one.
+        ONE PER MEMBER, not one for the scope. Completeness is a per-account
+        property (see ``CashLedgerService.coverage``), and a single flat
+        sentence over a multi-account scope was the shape that let one covered
+        account speak for an uncovered sibling. It is also worse to read: the
+        reader can act on "the Roth's import was cut short" and cannot act on
+        "something is incomplete".
+
+        The member reasons are already written for a human by the coverage
+        model, so this is a projection, not a second place that decides things.
         """
-        if coverage.complete_from is not None:
-            detail = (
-                f"the cash history is complete only from "
-                f"{coverage.complete_from.date()} — the broker import could not "
-                "reach further back, so NAV is short every contribution made "
-                "before that date"
-            )
-            if coverage.provenance_note:
-                detail = f"{detail} ({coverage.provenance_note})"
-            return detail
-        if coverage.cash_starts_at is None:
-            return (
-                "no cash history has been recorded at all, so the cash balance "
-                "and every contribution-based figure start from zero rather "
-                "than from what was actually in the account"
-            )
-        return (
-            f"the cash history starts {coverage.cash_starts_at.date()} but "
-            f"trading activity starts {coverage.first_activity_at.date()} — the "
-            "opening balance before the ledger begins is unknown, so NAV is "
-            "short whatever cash was in the account then"
-        )
+        return [
+            f"cash history: {m.reason}"
+            for m in coverage.members
+            if not m.is_known and m.reason
+        ]
 
     @staticmethod
     def _unrealized_from_lots(lots: OpenLots, current_price: Decimal) -> Decimal:

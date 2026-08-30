@@ -59,6 +59,7 @@ function navSummary(overrides: Partial<NavSummary> = {}): NavSummary {
       provenance_source: null,
       provenance_note: null,
       opening_balance_is_known: true,
+      members: [],
     },
     ...overrides,
   };
@@ -123,6 +124,7 @@ describe('NavPanel', () => {
           provenance_source: 'schwab_api',
           provenance_note: 'HISTORY GAP: requested window start predates ...',
           opening_balance_is_known: false,
+          members: [],
         },
       }),
       isLoading: false,
@@ -186,6 +188,7 @@ describe('NavPanel', () => {
         provenance_source: 'schwab_api',
         provenance_note: null,
         opening_balance_is_known: true,
+        members: [],
       },
       history_gap_note: 'HISTORY GAP: requested window start predates ...',
       transaction_history_limit_days: 60,
@@ -216,5 +219,56 @@ describe('NavPanel', () => {
     expect(
       screen.getByText(/total return is reported as an estimate/),
     ).toBeInTheDocument();
+  });
+  it('lists one reason per account when several are incomplete', () => {
+    // REVIEW ROUND 2, ISSUE 1: completeness is per-account, so the panel must
+    // name WHICH accounts are short. One flat sentence over a multi-account
+    // scope is what let a covered account speak for an uncovered sibling.
+    mockNav.mockReturnValue({
+      data: navSummary({
+        account_id: null,
+        is_estimated: true,
+        estimate_reasons: [
+          "cash history: 'Taxable' has trades but no cash history at all",
+          'cash history: some trades are unassigned (they belong to no account)',
+        ],
+        coverage: {
+          cash_starts_at: null,
+          first_activity_at: new Date().toISOString(),
+          complete_from: null,
+          is_true_origin: false,
+          provenance_source: null,
+          provenance_note: null,
+          opening_balance_is_known: false,
+          members: [
+            {
+              account_id: 7,
+              account_name: 'Roth',
+              is_known: true,
+              cash_starts_at: null,
+              first_activity_at: null,
+              complete_from: null,
+              has_history_gap: false,
+              reason: null,
+            },
+            {
+              account_id: 8,
+              account_name: 'Taxable',
+              is_known: false,
+              cash_starts_at: null,
+              first_activity_at: new Date().toISOString(),
+              complete_from: null,
+              has_history_gap: false,
+              reason: "'Taxable' has trades but no cash history at all",
+            },
+          ],
+        },
+      }),
+      isLoading: false,
+    });
+    render(<NavPanel />);
+
+    expect(screen.getByText(/'Taxable' has trades but no cash history/)).toBeInTheDocument();
+    expect(screen.getByText(/some trades are unassigned/)).toBeInTheDocument();
   });
 });

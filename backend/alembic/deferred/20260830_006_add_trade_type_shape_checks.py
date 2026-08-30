@@ -69,8 +69,8 @@ category. If both are ever promoted, ``20260729_002`` must be promoted in its
 ``price >= 0`` form, or qualified with ``trade_type <> 'split'``. Its docstring
 has been updated to say so.
 
-Revision ID: 20260830_005
-Revises: 20260830_004   (head at authoring time - re-point when promoting)
+Revision ID: 20260830_006
+Revises: 20260830_005   (head at authoring time - re-point when promoting)
 Create Date: 2026-08-30
 
 """
@@ -79,8 +79,8 @@ from collections.abc import Sequence
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '20260830_005'
-down_revision: str | None = '20260830_004'
+revision: str = '20260830_006'
+down_revision: str | None = '20260830_005'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

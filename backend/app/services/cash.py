@@ -45,6 +45,7 @@ from app.db.models.trade import TradeType
 from app.schemas.account import AccountRef
 from app.schemas.cash import (
     CashCoverage,
+    CashCoverageMember,
     CashTransactionCreate,
     CashTransactionResponse,
 )
@@ -190,55 +191,88 @@ class CashLedgerService:
     async def coverage(
         self, user_id: UUID, account_ids: list[int] | None = None
     ) -> CashCoverage:
-        """How far back the ledger actually knows this scope's cash history.
+        """Is the cash balance for this scope COMPLETE? Derived, per account.
 
-        Q-E's honest answer, and a corrected one. This used to decide
-        "is the opening balance known?" by comparing the earliest cash ROW
-        against the earliest trade. That answers *"is there cash before the
-        first trade?"*, which is a different question: a 60-day Schwab pull
-        satisfies it trivially (a deposit 45 days ago, a trade 40 days ago)
-        while omitting years of earlier cash activity the clamped window never
-        reached - so NAV reported a confidently non-estimated total return over
-        an incomplete picture.
+        THE MODEL, in three sentences. Completeness is a property of an
+        ACCOUNT, not of a scope. It is DERIVED at read time from live evidence,
+        never read back as a stored conclusion. A scope is complete iff every
+        member of it is individually complete.
 
-        The deciding evidence is the import WINDOW, not the row dates, and it
-        is persisted by the backfill in ``cash_ledger_coverage`` precisely
-        because it is not recoverable from anything else later. Three cases, in
-        order:
+        Each of those three sentences is a bug that was found here:
 
-        1. **Import provenance exists.** Trust it, and only it. Known iff every
-           account in scope reports ``is_true_origin`` - i.e. its pull was
-           unclamped and reached back past every trade it holds.
-        2. **No provenance (a purely manual ledger).** Fall back to the row
-           comparison. It is a weak signal, but here it means something real:
-           the *user* entered cash covering their whole history, which is a
-           human assertion rather than a machine's guess.
-        3. **No activity at all.** Known - nothing happened, so nothing is
-           missing.
+        * The scope fold used to run ``all()`` over whichever provenance rows
+          happened to exist, so an account with none simply did not vote - one
+          backfilled account could vouch for a portfolio containing an
+          obviously incomplete one, on the default (whole-ledger) call.
+        * ``is_true_origin`` used to be stored at backfill time, so a trade
+          backdated afterwards could not invalidate it.
+        * An "empty ledger is fine" shortcut used to run BEFORE the provenance
+          check, so a clamped pull that returned no rows read as complete.
+
+        PER-ACCOUNT RULE, in evidence order:
+
+        1. **Import provenance exists.** Complete iff the pull was not clamped
+           (``has_history_gap`` false), delivered a window (``complete_from``),
+           and that window reaches at or before every trade the account holds
+           *right now*. The last clause is re-evaluated on every read, which is
+           what makes a backdated trade invalidate it.
+        2. **...or the user supplied earlier history by hand.** Cash dated
+           before BOTH the import window and the first trade is the same human
+           assertion case 3 accepts. Without this a clamped account would be
+           permanently estimated with no way out, which is a dead end rather
+           than an answer. Cash *inside* the window proves nothing - the import
+           produced it.
+        3. **No provenance (a purely manual ledger).** Complete iff the
+           earliest cash row is at or before the earliest trade. Weak evidence,
+           but here it means something real: the *user* says their ledger
+           covers their history.
+        4. **No activity at all.** Complete - nothing happened, so nothing is
+           missing. Deliberately LAST: it must never override case 1.
 
         RESIDUAL GAP, stated rather than papered over: even an unclamped window
         reaching past every known trade cannot rule out a deposit made before
-        that window and before any trade, because nothing in the system
-        witnesses such an account. ``is_true_origin`` means "complete as far as
-        anything here can establish", not "provably complete". Closing that
-        would need a broker statement import, which is out of scope.
+        that window and before any trade, in an account nothing else witnesses.
+        "Complete" here means "complete as far as anything in this system can
+        establish", not "provably complete". Closing that needs a broker
+        statement import, which is out of scope.
 
-        For a multi-account scope, ``complete_from`` is the LATEST of the
-        per-account values: the whole scope is only complete from the point at
-        which its worst-covered member is.
+        SCOPE MEMBERSHIP. An explicit ``account_ids`` is exactly those
+        accounts. The whole-ledger scope (``None``) is every account of this
+        user with any activity, PLUS the unassigned trade bucket if any trade
+        has no account - those trades consume cash from the fold and nothing
+        funds them, so omitting them is the same silence this method exists to
+        break.
+
+        Cost is four queries regardless of account count: two grouped
+        aggregates, the provenance rows, and the account names.
         """
         from app.db.models.trade import Trade
 
-        cash_start = await self.db.scalar(
-            self._scope_cash(
-                select(func.min(CashTransaction.occurred_at)), user_id, account_ids
+        # --- per-account aggregates, one query each -----------------------
+        cash_rows = (
+            await self.db.execute(
+                self._scope_cash(
+                    select(
+                        CashTransaction.account_id,
+                        func.min(CashTransaction.occurred_at),
+                    ),
+                    user_id,
+                    account_ids,
+                ).group_by(CashTransaction.account_id)
             )
-        )
-        first_activity = await self.db.scalar(
-            self._scope_trades(
-                select(func.min(Trade.executed_at)), user_id, account_ids
+        ).all()
+        cash_by_account: dict[int | None, datetime] = {r[0]: r[1] for r in cash_rows}
+
+        trade_rows = (
+            await self.db.execute(
+                self._scope_trades(
+                    select(Trade.account_id, func.min(Trade.executed_at)),
+                    user_id,
+                    account_ids,
+                ).group_by(Trade.account_id)
             )
-        )
+        ).all()
+        trades_by_account: dict[int | None, datetime] = {r[0]: r[1] for r in trade_rows}
 
         provenance_stmt = select(CashLedgerCoverage).where(
             CashLedgerCoverage.user_id == user_id
@@ -247,39 +281,191 @@ class CashLedgerService:
             provenance_stmt = provenance_stmt.where(
                 CashLedgerCoverage.account_id.in_(account_ids)
             )
-        provenance = list((await self.db.execute(provenance_stmt)).scalars().all())
+        provenance_by_account: dict[int, CashLedgerCoverage] = {
+            row.account_id: row
+            for row in (await self.db.execute(provenance_stmt)).scalars().all()
+        }
 
-        complete_from: datetime | None = None
-        provenance_source: str | None = None
-        provenance_note: str | None = None
-        is_true_origin = False
-
-        if provenance:
-            starts = [p.complete_from for p in provenance if p.complete_from]
-            complete_from = max(starts) if starts else None
-            is_true_origin = all(p.is_true_origin for p in provenance)
-            provenance_source = provenance[0].source
-            provenance_note = next((p.note for p in provenance if p.note), None)
-
-        if first_activity is None and cash_start is None:
-            known = True
-        elif provenance:
-            known = is_true_origin
-        elif first_activity is None:
-            known = True
-        elif cash_start is None:
-            known = False
+        # --- who is in scope ----------------------------------------------
+        if account_ids is not None:
+            # An explicit account scope never includes the unassigned bucket:
+            # asking about the Roth is not asking about loose trades.
+            member_ids: list[int | None] = list(account_ids)
         else:
-            known = cash_start <= first_activity
+            member_ids = sorted(
+                {k for k in cash_by_account if k is not None}
+                | {k for k in trades_by_account if k is not None}
+                | set(provenance_by_account),
+                key=lambda v: (v is None, v),
+            )
+            if None in trades_by_account:
+                member_ids.append(None)
+
+        names: dict[int, str] = {}
+        real_ids = [i for i in member_ids if i is not None]
+        if real_ids:
+            names = {
+                row[0]: row[1]
+                for row in (
+                    await self.db.execute(
+                        select(Account.id, Account.name).where(
+                            Account.id.in_(real_ids), Account.user_id == user_id
+                        )
+                    )
+                ).all()
+            }
+
+        members = [
+            self._member_coverage(
+                account_id=account_id,
+                account_name=names.get(account_id) if account_id is not None else None,
+                cash_starts_at=cash_by_account.get(account_id),
+                first_activity_at=trades_by_account.get(account_id),
+                provenance=(
+                    provenance_by_account.get(account_id)
+                    if account_id is not None
+                    else None
+                ),
+            )
+            for account_id in member_ids
+        ]
+
+        # --- fold ----------------------------------------------------------
+        cash_starts = [m.cash_starts_at for m in members if m.cash_starts_at]
+        activity_starts = [m.first_activity_at for m in members if m.first_activity_at]
+        complete_froms = [m.complete_from for m in members if m.complete_from]
+        with_provenance = [m for m in members if m.complete_from or m.has_history_gap]
+        gapped = next((m for m in members if m.has_history_gap), None)
 
         return CashCoverage(
-            cash_starts_at=cash_start,
-            first_activity_at=first_activity,
-            complete_from=complete_from,
-            is_true_origin=is_true_origin,
-            provenance_source=provenance_source,
-            provenance_note=provenance_note,
-            opening_balance_is_known=known,
+            cash_starts_at=min(cash_starts) if cash_starts else None,
+            first_activity_at=min(activity_starts) if activity_starts else None,
+            # The LATEST of the per-account windows: the scope is only complete
+            # from the point at which its worst-covered member is.
+            complete_from=max(complete_froms) if complete_froms else None,
+            is_true_origin=bool(members) and all(m.is_known for m in members),
+            provenance_source=(
+                (
+                    provenance_by_account[with_provenance[0].account_id].source
+                    if with_provenance[0].account_id in provenance_by_account
+                    else None
+                )
+                if with_provenance
+                else None
+            ),
+            provenance_note=(
+                provenance_by_account[gapped.account_id].note
+                if gapped is not None and gapped.account_id in provenance_by_account
+                else None
+            ),
+            opening_balance_is_known=all(m.is_known for m in members),
+            members=members,
+        )
+
+    @staticmethod
+    def _member_coverage(
+        *,
+        account_id: int | None,
+        account_name: str | None,
+        cash_starts_at: datetime | None,
+        first_activity_at: datetime | None,
+        provenance: CashLedgerCoverage | None,
+    ) -> CashCoverageMember:
+        """One account's verdict. Pure - every input is passed in.
+
+        Pure on purpose: this is the whole model, it is the thing three review
+        passes found bugs in, and a function with no I/O can be exercised
+        directly at every branch without constructing a database state for each.
+        The evidence-order comments here are the specification.
+        """
+        label = f"'{account_name}'" if account_name else "the unassigned bucket"
+        has_gap = bool(provenance and provenance.has_history_gap)
+        complete_from = provenance.complete_from if provenance else None
+
+        def member(is_known: bool, reason: str | None) -> CashCoverageMember:
+            return CashCoverageMember(
+                account_id=account_id,
+                account_name=account_name,
+                is_known=is_known,
+                cash_starts_at=cash_starts_at,
+                first_activity_at=first_activity_at,
+                complete_from=complete_from,
+                has_history_gap=has_gap,
+                reason=reason,
+            )
+
+        # The unassigned trade bucket can never hold cash (cash_transactions
+        # requires an account), so any trade in it is funded by nothing.
+        if account_id is None:
+            if first_activity_at is None:
+                return member(True, None)
+            return member(
+                False,
+                "some trades are unassigned (they belong to no account), so "
+                "nothing in the cash ledger funds them — assign them to an "
+                "account to include their cash effect",
+            )
+
+        # 1/2. Import provenance decides, and is re-checked against LIVE trades.
+        if provenance is not None:
+            reaches_all_trades = complete_from is not None and (
+                first_activity_at is None or complete_from <= first_activity_at
+            )
+            if not has_gap and reaches_all_trades:
+                return member(True, None)
+
+            # The hand-entered escape hatch: history from BEFORE the import
+            # window and before every trade is the same assertion case 3 takes.
+            supplied_by_hand = (
+                cash_starts_at is not None
+                and first_activity_at is not None
+                and cash_starts_at <= first_activity_at
+                and (complete_from is None or cash_starts_at < complete_from)
+            )
+            if supplied_by_hand:
+                return member(True, None)
+
+            if has_gap:
+                boundary = (
+                    f" — it reaches back only to {complete_from.date()}"
+                    if complete_from is not None
+                    else ""
+                )
+                return member(
+                    False,
+                    f"the broker import for {label} was cut short by the "
+                    f"provider's history limit{boundary}, so cash movements "
+                    "before that are missing",
+                )
+            if complete_from is None:
+                return member(
+                    False,
+                    f"the broker import for {label} recorded no window, so how "
+                    "far back its cash history reaches is unknown",
+                )
+            return member(
+                False,
+                f"{label} has trading activity from "
+                f"{first_activity_at.date()}, before its cash history begins on "
+                f"{complete_from.date()}",
+            )
+
+        # 3/4. No provenance: the manual ledger, then the quiet account.
+        if first_activity_at is None:
+            return member(True, None)
+        if cash_starts_at is None:
+            return member(
+                False,
+                f"{label} has trades but no cash history at all, so its balance "
+                "starts from zero rather than from what was actually in it",
+            )
+        if cash_starts_at <= first_activity_at:
+            return member(True, None)
+        return member(
+            False,
+            f"{label}'s cash history starts {cash_starts_at.date()} but its "
+            f"trading starts {first_activity_at.date()} — the opening balance "
+            "before the ledger begins is unknown",
         )
 
     async def record_coverage(
@@ -288,13 +474,18 @@ class CashLedgerService:
         account_id: int,
         *,
         complete_from: datetime | None,
-        is_true_origin: bool,
+        has_history_gap: bool,
         source: str,
         note: str | None,
     ) -> None:
-        """Upsert this account's import-coverage provenance.
+        """Upsert this account's import-coverage EVIDENCE.
 
-        Upsert, not insert: the row describes the CURRENT best knowledge, and a
+        Evidence only - which window the imports actually delivered, and
+        whether a clamp is still outstanding. Never the verdict: that is
+        derived on every read by :meth:`coverage`, so it tracks the ledger
+        instead of a snapshot of it.
+
+        Upsert, not insert: the row describes the current best knowledge, and a
         later pull with a wider window should improve it rather than leave two
         rows disagreeing. Keyed by ``uq_cash_ledger_coverage_user_account``.
         """
@@ -308,7 +499,7 @@ class CashLedgerService:
             row = CashLedgerCoverage(user_id=user_id, account_id=account_id)
             self.db.add(row)
         row.complete_from = complete_from
-        row.is_true_origin = is_true_origin
+        row.has_history_gap = has_history_gap
         row.source = source
         row.note = note
         await self.db.commit()

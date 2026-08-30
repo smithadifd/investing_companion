@@ -204,26 +204,21 @@ class CashBackfillService:
         # below, and NAV - asked minutes or weeks later - has nothing to
         # consult but row dates, which cannot distinguish "cash before the
         # first trade" from "a complete cash history".
-        gap_note = await self._history_gap_note(user_id, link.account_hash)
         complete_from = await self._earliest_delivered_window(
             user_id, link.account_hash
         )
-        first_activity = (
-            await self.cash.coverage(user_id, [account_id])
-        ).first_activity_at
-        # The strong claim, granted narrowly: the window must not have been
-        # clamped to the 60-day horizon, AND it must reach back at or before
-        # every trade this account holds. A clamped pull can never assert it.
-        is_true_origin = bool(
-            gap_note is None
-            and complete_from is not None
-            and (first_activity is None or complete_from <= first_activity)
+        has_gap, gap_note = await self._gap_state(
+            user_id, link.account_hash, complete_from
         )
+        # EVIDENCE ONLY. Whether the history is COMPLETE is decided on every
+        # read by CashLedgerService.coverage, against live activity - storing
+        # that verdict here is what let a trade backdated after the backfill go
+        # unnoticed.
         await self.cash.record_coverage(
             user_id,
             account_id,
             complete_from=complete_from,
-            is_true_origin=is_true_origin,
+            has_history_gap=has_gap,
             source=source,
             note=gap_note,
         )
@@ -252,7 +247,7 @@ class CashBackfillService:
 
         ``None`` when no complete run carries a window (older runs, or a lane
         that does not record one), which reads as "no provenance" and keeps
-        ``is_true_origin`` False.
+        ``has_history_gap`` conservative.
         """
         return await self.db.scalar(
             select(func.min(BrokerImportRun.window_start)).where(
@@ -304,29 +299,62 @@ class CashBackfillService:
             return TradeType.DEPOSIT, amount, None
         return TradeType.WITHDRAWAL, -amount, None
 
-    async def _history_gap_note(self, user_id: UUID, account_hash: str) -> str | None:
-        """The most recent complete transactions run's HISTORY GAP note, if any.
+    async def _gap_state(
+        self, user_id: UUID, account_hash: str, earliest_window: datetime | None
+    ) -> tuple[bool, str | None]:
+        """Is a history clamp still outstanding for this account, and what did
+        it say?
 
-        Schwab's transactions endpoint only accepts start dates within the
-        trailing 60 days and has no pagination past that boundary, so a pull
-        whose requested window predated it was clamped and the skipped span is
-        unrecoverable via the API. Surfacing the note here is what stops the
-        ledger's start date reading as "this is when the account began".
+        A HISTORY GAP means a pull asked for data older than the provider's
+        60-day horizon and was cut back to it, leaving a span the API cannot
+        return. The gap belongs to the ACCOUNT'S HISTORY, not to the latest
+        run - and reading it off the latest run was a bug: a clamped pull
+        followed by a routine incremental pull (which carries no note of its
+        own, having never asked for anything old enough to be clamped) dropped
+        the flag while recovering exactly nothing, so coverage could be
+        declared established without a single missing transaction arriving.
+
+        So the flag is STICKY, and closes only on real evidence: some run must
+        have delivered a window starting STRICTLY EARLIER than the earliest
+        clamped run's floor. In practice the horizon only moves forward with
+        wall-clock time, so a Schwab-only account stays gapped - which is the
+        honest answer, and why ``CashLedgerService.coverage`` offers a
+        hand-entered escape hatch rather than pretending otherwise.
+
+        Returns ``(has_gap, note)``; the note is the newest clamped run's, as
+        the freshest phrasing of the same boundary.
         """
+        gap_prefix = f"{schwab_ingestion.HISTORY_GAP_NOTE_PREFIX}%"
+        base = (
+            BrokerImportRun.user_id == user_id,
+            BrokerImportRun.account_hash == account_hash,
+            BrokerImportRun.kind == ImportKind.TRANSACTIONS,
+            BrokerImportRun.status == ImportStatus.COMPLETE,
+        )
         note = await self.db.scalar(
             select(BrokerImportRun.notes)
-            .where(
-                BrokerImportRun.user_id == user_id,
-                BrokerImportRun.account_hash == account_hash,
-                BrokerImportRun.kind == ImportKind.TRANSACTIONS,
-                BrokerImportRun.status == ImportStatus.COMPLETE,
-            )
+            .where(*base, BrokerImportRun.notes.like(gap_prefix))
             .order_by(BrokerImportRun.created_at.desc(), BrokerImportRun.id.desc())
             .limit(1)
         )
-        if note and note.startswith(schwab_ingestion.HISTORY_GAP_NOTE_PREFIX):
-            return note
-        return None
+        if note is None:
+            # No completed run ever recorded a clamp.
+            return False, None
+
+        clamped_floor = await self.db.scalar(
+            select(func.min(BrokerImportRun.window_start)).where(
+                *base, BrokerImportRun.notes.like(gap_prefix)
+            )
+        )
+        if (
+            clamped_floor is not None
+            and earliest_window is not None
+            and earliest_window < clamped_floor
+        ):
+            # A later pull genuinely reached back past the clamped floor, so
+            # the missing span was recovered and the gap is closed.
+            return False, None
+        return True, note
 
 
 def _finite(value: Decimal | None) -> Decimal | None:

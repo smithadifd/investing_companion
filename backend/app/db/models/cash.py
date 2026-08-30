@@ -207,11 +207,21 @@ class CashLedgerCoverage(Base, TimestampMixin):
     a pull that happened weeks ago is not recoverable from anything else in the
     database. Losing it is what caused the bug.
 
-    ``is_true_origin`` is the strong claim and is granted narrowly: the pull's
-    window must not have been clamped, AND it must reach back at or before
-    every trade in the account. Even then a deposit made before the window and
-    before any trade is undetectable - that residual gap class is stated in
-    :meth:`CashLedgerService.coverage` rather than papered over.
+    **EVIDENCE ONLY, NEVER A CONCLUSION.** This row deliberately does not
+    store "is the history complete?". It stores the two facts that cannot be
+    recomputed later - which window a pull actually delivered, and whether any
+    pull hit the API's clamp - and
+    :meth:`app.services.cash.CashLedgerService.coverage` derives the answer
+    from them against LIVE activity on every read.
+
+    That split is a correction. The first cut stored the conclusion
+    (``is_true_origin``) at backfill time, which meant a trade backdated
+    afterwards - an import, a correction, a forgotten fill - could not
+    invalidate it: NAV went on reporting a complete cash history over one that
+    provably was not. A conclusion has an implicit "as of when", and a column
+    with no timestamp cannot carry it (the same trap
+    ``alerts.last_checked_value`` fell into). Evidence does not go stale;
+    conclusions do.
     """
 
     __tablename__ = "cash_ledger_coverage"
@@ -235,15 +245,23 @@ class CashLedgerCoverage(Base, TimestampMixin):
     # (the earliest window start the broker actually delivered), NOT merely the
     # earliest row present. NULL = no import provenance at all.
     complete_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # True only when the pull was unclamped AND reached past every known trade.
-    is_true_origin: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("false"), default=False
+    # EVIDENCE: some completed pull for this account was clamped to the API's
+    # 60-day history horizon and no later pull has reached back past that
+    # floor, so a span of cash movements is still missing. Sticky by
+    # construction - a routine incremental pull recovers nothing, so it must
+    # not clear this.
+    #
+    # Defaults TRUE, deliberately: a row written by anything that does not know
+    # better should read as "assume a gap" rather than as a clean bill of
+    # health. The backfill always writes it explicitly.
+    has_history_gap: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true"), default=True
     )
     source: Mapped[str] = mapped_column(
         String(50), nullable=False, server_default="schwab_api", default="schwab_api"
     )
     # The run's HISTORY GAP note, when there was one - the human-readable
-    # reason `is_true_origin` is False.
+    # reason `has_history_gap` is set.
     note: Mapped[str | None] = mapped_column(Text)
 
     user: Mapped["User"] = relationship()
@@ -257,5 +275,5 @@ class CashLedgerCoverage(Base, TimestampMixin):
     def __repr__(self) -> str:
         return (
             f"<CashLedgerCoverage(account={self.account_id}, "
-            f"complete_from={self.complete_from}, true_origin={self.is_true_origin})>"
+            f"complete_from={self.complete_from}, gap={self.has_history_gap})>"
         )

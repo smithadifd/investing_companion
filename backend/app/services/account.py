@@ -31,15 +31,23 @@ class AccountHasCashHistoryError(Exception):
     the user can never reconstruct - and doing it behind a confirmation dialog
     that (correctly, for trades) promises nothing will be lost.
 
-    Carries the count so the caller can say how much is at stake instead of
-    just saying no.
+    Carries the count when it is known, so the caller can say how much is at
+    stake instead of just saying no. ``None`` when the FK caught the race
+    described in :meth:`AccountService.delete_account` - there is at least one
+    row, but counting it again after a rollback would mean issuing a query on a
+    session that has just been unwound, which is both fragile and unnecessary
+    for the message.
     """
 
-    def __init__(self, cash_count: int) -> None:
+    def __init__(self, cash_count: int | None = None) -> None:
         self.cash_count = cash_count
+        amount = (
+            "cash transactions"
+            if cash_count is None
+            else f"{cash_count} cash transaction{'' if cash_count == 1 else 's'}"
+        )
         super().__init__(
-            f"This account has {cash_count} cash transaction"
-            f"{'' if cash_count == 1 else 's'} recorded against it. Deleting the "
+            f"This account has {amount} recorded against it. Deleting the "
             "account would destroy that history permanently - unlike trades, "
             "cash cannot be left unassigned. Delete the cash transactions "
             "first (Total Return tab -> Cash ledger), then delete the account."
@@ -122,24 +130,46 @@ class AccountService:
         (``ON DELETE RESTRICT``) so the user gets a sentence rather than an
         IntegrityError-turned-500. The FK is still the backstop: it binds every
         writer, including psql and any future bulk path that never comes
-        through here.
+        through here - and it also catches the race the check cannot (see the
+        commit handler below).
         """
         account = await self._get(account_id, user_id)
         if not account:
             return False
 
-        cash_count = await self.db.scalar(
-            select(func.count(CashTransaction.id)).where(
-                CashTransaction.account_id == account_id,
-                CashTransaction.user_id == user_id,
-            )
-        )
+        cash_count = await self._cash_count(account_id, user_id)
         if cash_count:
             raise AccountHasCashHistoryError(cash_count)
 
         await self.db.delete(account)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError as e:
+            # The check above and this commit are two statements. A backfill or
+            # a second tab inserting a cash row in between leaves the check
+            # satisfied and RESTRICT correctly refusing the delete - as an
+            # IntegrityError, i.e. a 500, rather than the 409 this endpoint
+            # documents. Rare, and exactly the kind of rare that surfaces on the
+            # day a scheduled sync overlaps a tidy-up.
+            #
+            # Rolled back and re-raised as the SAME typed error, so the caller
+            # has one path to handle and the user sees one message either way.
+            # No count: re-reading it would mean querying a session that has
+            # just been unwound, and "there is cash here" is the whole message.
+            await self.db.rollback()
+            raise AccountHasCashHistoryError() from e
         return True
+
+    async def _cash_count(self, account_id: int, user_id: UUID) -> int:
+        """How many cash transactions this user has against this account."""
+        return (
+            await self.db.scalar(
+                select(func.count(CashTransaction.id)).where(
+                    CashTransaction.account_id == account_id,
+                    CashTransaction.user_id == user_id,
+                )
+            )
+        ) or 0
 
     async def _get(self, account_id: int, user_id: UUID) -> Account | None:
         return await self.db.scalar(

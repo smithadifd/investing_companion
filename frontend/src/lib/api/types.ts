@@ -992,22 +992,42 @@ export interface CashTransactionCreate {
 }
 
 /**
+ * One account's own completeness answer inside a scope.
+ *
+ * Completeness is a PER-ACCOUNT property; the scope's verdict is a fold over
+ * these. `account_id` is null for the unassigned trade bucket.
+ */
+export interface CashCoverageMember {
+  account_id: number | null;
+  account_name: string | null;
+  is_known: boolean;
+  cash_starts_at: string | null;
+  first_activity_at: string | null;
+  complete_from: string | null;
+  has_history_gap: boolean;
+  /** Why this account is not known; null when it is */
+  reason: string | null;
+}
+
+/**
  * How far back the cash ledger actually knows this scope's history.
  *
  * `cash_starts_at` (a row date) and `complete_from` (an import window) answer
  * DIFFERENT questions — "is there cash before the first trade?" is not "is the
- * cash history complete?". Only `opening_balance_is_known` settles it.
+ * cash history complete?". Only `opening_balance_is_known` settles it, and it
+ * is true only when EVERY entry in `members` is individually known.
  */
 export interface CashCoverage {
   cash_starts_at: string | null;
   first_activity_at: string | null;
   /** Earliest instant cash is known COMPLETE from; null = no import provenance */
   complete_from: string | null;
-  /** True only when an import window was unclamped AND reached past every trade */
+  /** Derived, never stored: every member's import window is unclamped and complete */
   is_true_origin: boolean;
   provenance_source: string | null;
   provenance_note: string | null;
   opening_balance_is_known: boolean;
+  members: CashCoverageMember[];
 }
 
 /**

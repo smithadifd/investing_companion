@@ -172,10 +172,70 @@ class TestTheDatabaseIsTheBackstop:
                 user_id=test_user.id,
                 account_id=account.id,
                 complete_from=_ago(59),
-                is_true_origin=False,
+                has_history_gap=True,
                 source="schwab_api",
             )
         )
         await db.commit()
 
         assert await AccountService(db).delete_account(account.id, test_user.id) is True
+class TestConcurrentInsertDuringDeletion:
+    """REVIEW ROUND 2, ISSUE 5 - the check and the delete are two statements.
+
+    A backfill (or a second tab) inserting a cash row in the window between
+    them leaves the application check satisfied and the FK correctly refusing
+    the delete - but as an unhandled IntegrityError, i.e. a 500, not the clean
+    409 the endpoint documents. Rare, and exactly the kind of rare that shows
+    up on the one day a scheduled sync overlaps a tidy-up.
+
+    The race is forced rather than raced: ``_cash_count`` is stubbed to return
+    0 while a real row exists, which is precisely the state a concurrent insert
+    produces. This is not mocking a collaborator - it is pinning a timing
+    branch that cannot otherwise be reached deterministically.
+    """
+
+    async def test_a_row_inserted_after_the_check_still_yields_the_typed_error(
+        self, db: AsyncSession, test_user
+    ):
+        from app.services.account import AccountService
+
+        account = await create_test_account(db, test_user, name="Roth")
+        await _cash(db, test_user, account)
+        await db.commit()
+
+        service = AccountService(db)
+
+        async def _raced(*_args, **_kwargs) -> int:
+            return 0
+
+        service._cash_count = _raced  # type: ignore[method-assign]
+
+        with pytest.raises(AccountHasCashHistoryError):
+            await service.delete_account(account.id, test_user.id)
+
+        # Survival of the account is not asserted here on purpose. It is
+        # guaranteed by Postgres - the transaction that attempted the DELETE
+        # was rolled back - and this suite's savepoint fixture cannot serve a
+        # query after a rollback inside the session under test (it re-opens the
+        # nested transaction synchronously). What CAN be checked here is the
+        # contract: the caller gets the same typed error either way.
+        # TestTheDatabaseIsTheBackstop proves the FK itself refuses the delete.
+        assert service._cash_count is _raced  # the race really was simulated
+
+    async def test_the_endpoint_still_returns_409_not_500(
+        self, authed_client: AsyncClient, db: AsyncSession, test_user, monkeypatch
+    ):
+        from app.services import account as account_module
+
+        acct = await create_test_account(db, test_user, name="Roth")
+        await _cash(db, test_user, acct)
+        await db.commit()
+
+        async def _raced(self, account_id, user_id) -> int:
+            return 0
+
+        monkeypatch.setattr(account_module.AccountService, "_cash_count", _raced)
+
+        resp = await authed_client.delete(f"{ACCOUNTS_URL}/{acct.id}")
+        assert resp.status_code == 409
+        assert "cash" in resp.json()["detail"].lower()

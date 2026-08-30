@@ -71,6 +71,44 @@ class CashTransactionResponse(CashTransactionBase):
     updated_at: datetime
 
 
+class CashCoverageMember(BaseModel):
+    """One account's own completeness answer inside a scope.
+
+    Completeness is a PER-ACCOUNT property; a scope is complete only if every
+    member is. Reporting the scope as one flat verdict was the bug: an account
+    with no import provenance simply did not appear in the fold, so a
+    well-covered account could vouch for a sibling with an obvious history gap.
+
+    ``account_id`` is null for the **unassigned trade bucket** - trades with no
+    account. They still consume cash from the whole-ledger fold and nothing
+    funds them, so they are a member in their own right rather than a silent
+    omission.
+    """
+
+    account_id: int | None = Field(
+        None, description="null = the unassigned trade bucket"
+    )
+    account_name: str | None = None
+    is_known: bool = Field(
+        ..., description="Whether THIS account's cash history can be shown complete"
+    )
+    cash_starts_at: datetime | None = None
+    first_activity_at: datetime | None = None
+    complete_from: datetime | None = Field(
+        None, description="Earliest window a broker import delivered for this account"
+    )
+    has_history_gap: bool = Field(
+        False,
+        description=(
+            "A pull was clamped to the broker's history horizon and no later "
+            "pull reached back past it"
+        ),
+    )
+    reason: str | None = Field(
+        None, description="Why this account is not known; null when it is"
+    )
+
+
 class CashCoverage(BaseModel):
     """How far back the cash ledger actually knows this scope's history.
 
@@ -104,8 +142,9 @@ class CashCoverage(BaseModel):
     is_true_origin: bool = Field(
         False,
         description=(
-            "True only when an import window was unclamped AND reached back "
-            "past every known trade. Never asserted by a clamped 60-day pull"
+            "DERIVED at read time, never stored: true only when EVERY account "
+            "in scope has an import window that was unclamped and reached back "
+            "past all of that account's trades. Never asserted by a clamped pull"
         ),
     )
     provenance_source: str | None = Field(
@@ -118,9 +157,17 @@ class CashCoverage(BaseModel):
     opening_balance_is_known: bool = Field(
         ...,
         description=(
-            "False when the cash history cannot be shown to be complete: no "
-            "cash rows at all, trades predating the first cash row, or a broker "
-            "import whose window was clamped short of the account's start"
+            "The scope's verdict: true only when EVERY member in `members` is "
+            "individually known. False when any account has no cash rows, has "
+            "trades predating its first cash row, or carries a broker import "
+            "whose window was clamped short of its start"
+        ),
+    )
+    members: list[CashCoverageMember] = Field(
+        default_factory=list,
+        description=(
+            "Per-account detail. The scope's verdict is a fold over this list, "
+            "so an unknown member always names itself"
         ),
     )
 

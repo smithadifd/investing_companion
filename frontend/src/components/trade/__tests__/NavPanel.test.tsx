@@ -54,6 +54,10 @@ function navSummary(overrides: Partial<NavSummary> = {}): NavSummary {
     coverage: {
       cash_starts_at: new Date().toISOString(),
       first_activity_at: new Date().toISOString(),
+      complete_from: null,
+      is_true_origin: true,
+      provenance_source: null,
+      provenance_note: null,
       opening_balance_is_known: true,
     },
     ...overrides,
@@ -114,6 +118,10 @@ describe('NavPanel', () => {
         coverage: {
           cash_starts_at: new Date().toISOString(),
           first_activity_at: new Date().toISOString(),
+          complete_from: '2026-07-01T00:00:00Z',
+          is_true_origin: false,
+          provenance_source: 'schwab_api',
+          provenance_note: 'HISTORY GAP: requested window start predates ...',
           opening_balance_is_known: false,
         },
       }),
@@ -128,6 +136,12 @@ describe('NavPanel', () => {
     expect(
       screen.getByText(/opening cash balance before 2026-07-01 is unknown/),
     ).toBeInTheDocument();
+    // REVIEW FINDING 2: the boundary itself is shown, so "estimated" reads as
+    // "complete only from this date" rather than a vague warning.
+    expect(
+      screen.getByText(/Cash history is complete only from/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/schwab_api/)).toBeInTheDocument();
   });
 
   it('shows no estimate banner when nothing is missing', () => {
@@ -167,6 +181,10 @@ describe('NavPanel', () => {
       coverage: {
         cash_starts_at: null,
         first_activity_at: null,
+        complete_from: null,
+        is_true_origin: false,
+        provenance_source: 'schwab_api',
+        provenance_note: null,
         opening_balance_is_known: true,
       },
       history_gap_note: 'HISTORY GAP: requested window start predates ...',

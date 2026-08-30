@@ -22,6 +22,11 @@ seeds, psql, importers and any future writer are bound by them too:
    and belong in ``cash_transactions``. A row carrying one here makes
    ``_fold_position`` raise, which is correct but turns one bad row into a
    broken portfolio endpoint; the CHECK stops it being written at all.
+5. ``ck_trades_split_no_fees`` - a ``split`` row carries no fees. Nothing
+   spends them: the cash fold gives a split zero cash effect and the FIFO
+   unrealized walk ignores split rows, but ``NavSummary.fees_paid`` sums every
+   ``Trade.fees``, so a fee here is reported as paid while never leaving the
+   account. Added after review found the write path silently accepting one.
 
 Why they are held back
 ----------------------
@@ -46,7 +51,8 @@ Run against the target DB and confirm every count is zero::
       count(*) FILTER (WHERE trade_type = 'split'  AND price <> 0)          AS split_priced,
       count(*) FILTER (WHERE trade_type = 'split'  AND account_id IS NOT NULL) AS split_accounted,
       count(*) FILTER (WHERE trade_type = 'dividend' AND account_id IS NULL)   AS dividend_orphaned,
-      count(*) FILTER (WHERE trade_type IN ('deposit', 'withdrawal'))          AS cash_in_trades
+      count(*) FILTER (WHERE trade_type IN ('deposit', 'withdrawal'))          AS cash_in_trades,
+      count(*) FILTER (WHERE trade_type = 'split'  AND fees <> 0)             AS split_with_fees
     FROM trades;
 
 A non-zero count is a data fix first, never a weakened constraint.
@@ -63,8 +69,8 @@ category. If both are ever promoted, ``20260729_002`` must be promoted in its
 ``price >= 0`` form, or qualified with ``trade_type <> 'split'``. Its docstring
 has been updated to say so.
 
-Revision ID: 20260830_003
-Revises: 20260830_002   (head at authoring time - re-point when promoting)
+Revision ID: 20260830_005
+Revises: 20260830_004   (head at authoring time - re-point when promoting)
 Create Date: 2026-08-30
 
 """
@@ -73,8 +79,8 @@ from collections.abc import Sequence
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '20260830_003'
-down_revision: str | None = '20260830_002'
+revision: str = '20260830_005'
+down_revision: str | None = '20260830_004'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -100,10 +106,16 @@ def upgrade() -> None:
         'trades',
         "trade_type NOT IN ('deposit', 'withdrawal')",
     )
+    op.create_check_constraint(
+        'ck_trades_split_no_fees',
+        'trades',
+        "trade_type <> 'split' OR fees = 0",
+    )
 
 
 def downgrade() -> None:
     for name in (
+        'ck_trades_split_no_fees',
         'ck_trades_no_cash_types',
         'ck_trades_dividend_has_account',
         'ck_trades_split_no_account',

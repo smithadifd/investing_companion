@@ -400,7 +400,9 @@ class TradeService:
         # that flips trade_type to `split` without also sending price=0, or
         # one that reassigns a split onto an account. ValueError -> 422 via
         # the endpoint's existing handler.
-        validate_trade_shape(trade.trade_type, trade.price, trade.account_id)
+        validate_trade_shape(
+            trade.trade_type, trade.price, trade.account_id, trade.fees
+        )
 
         try:
             await self.db.commit()

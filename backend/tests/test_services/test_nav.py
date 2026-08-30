@@ -267,6 +267,79 @@ class TestNavHonesty:
         assert nav.is_estimated is True
         assert any("ledger" in reason for reason in nav.estimate_reasons)
 
+    async def test_an_incomplete_broker_backfill_keeps_nav_estimated(
+        self, db: AsyncSession, test_user
+    ):
+        """REVIEW FINDING 2, at the surface that matters.
+
+        Deposit 45 days ago, trade 40 days ago, and a pull whose window was
+        clamped to Schwab's 60-day horizon. The naive "cash predates trades"
+        check passes; the cash picture is still missing everything before the
+        window. NAV must not present a confident total return over it.
+        """
+        from app.db.models.account_link import AccountLink, AccountLinkStatus
+        from app.db.models.broker_import import (
+            BrokerImportRun,
+            ImportedTransaction,
+            ImportKind,
+            ImportStatus,
+        )
+        from app.services.cash_backfill import CashBackfillService
+
+        acct = await create_test_account(db, test_user, name="Roth")
+        equity = await create_test_equity(db, symbol="CLAMPED")
+        db.add(
+            AccountLink(
+                user_id=test_user.id,
+                account_hash="NAVCOV",
+                source="schwab_api",
+                account_id=acct.id,
+                status=AccountLinkStatus.ACTIVE,
+            )
+        )
+        await db.flush()
+        run = BrokerImportRun(
+            user_id=test_user.id,
+            account_hash="NAVCOV",
+            source="schwab_api",
+            kind=ImportKind.TRANSACTIONS,
+            status=ImportStatus.COMPLETE,
+            notes="HISTORY GAP: requested window start predates ...",
+            window_start=_at(59),
+            window_end=_at(0),
+        )
+        db.add(run)
+        await db.flush()
+        db.add(
+            ImportedTransaction(
+                import_run_id=run.id,
+                user_id=test_user.id,
+                account_hash="NAVCOV",
+                source="schwab_api",
+                external_transaction_id="schwab:navcov:1",
+                transaction_type="ACH_RECEIPT",
+                net_amount=Decimal("5000"),
+                occurred_at=_at(45),
+                raw={},
+            )
+        )
+        await _trade(db, equity, test_user, TradeType.BUY, 10, 100, 40, acct.id)
+        await db.commit()
+
+        await CashBackfillService(db).backfill(test_user.id, acct.id)
+
+        service = NavService(db)
+        _stub_quotes(service, {"CLAMPED": 100})
+        nav = await service.get_nav(test_user.id, acct.id)
+
+        assert nav is not None
+        assert nav.is_estimated is True, (
+            "NAV reported a confident total return over an incomplete cash history"
+        )
+        assert any("cash history" in reason for reason in nav.estimate_reasons)
+        assert nav.coverage.is_true_origin is False
+        assert nav.coverage.complete_from is not None
+
     async def test_a_quiet_empty_account_is_not_estimated(
         self, db: AsyncSession, test_user
     ):

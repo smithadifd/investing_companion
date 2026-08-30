@@ -195,7 +195,12 @@ export function AccountManager({ onClose }: AccountManagerProps) {
       {deleteId !== null && (
         <ConfirmModal
           title="Delete Account"
-          message="Delete this account? Its trades stay, but become unassigned."
+          message={
+            'Delete this account? Its trades stay, but become unassigned. ' +
+            'Cash transactions cannot be unassigned — if any are recorded ' +
+            'against this account, the delete is refused and you will be told ' +
+            'to remove them first.'
+          }
           confirmLabel="Delete"
           onConfirm={() => {
             deleteAccount.mutate(deleteId);

@@ -167,6 +167,18 @@ export function NavPanel() {
               <li key={reason}>{reason}</li>
             ))}
           </ul>
+          {nav.coverage.complete_from && (
+            <p className="mt-2 text-sm text-amber-800 dark:text-amber-300">
+              Cash history is complete only from{' '}
+              <span className="font-medium">
+                {formatDate(nav.coverage.complete_from)}
+              </span>
+              {nav.coverage.provenance_source
+                ? ` (${nav.coverage.provenance_source})`
+                : ''}
+              .
+            </p>
+          )}
         </div>
       )}
 

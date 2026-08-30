@@ -26,6 +26,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     Enum,
@@ -34,6 +35,8 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -63,11 +66,19 @@ class CashTransaction(Base, TimestampMixin):
     )
     # NOT NULL, unlike trades.account_id. An unassigned *trade* is an existing,
     # supported bucket; cash that belongs to no account is meaningless, and a
-    # NAV built over it would be a number with no owner. CASCADE for the same
-    # reason: deleting the account deletes its cash history, because that
-    # history describes the account and nothing else.
+    # NAV built over it would be a number with no owner.
+    #
+    # RESTRICT, and this is a correction (20260830_003) of the CASCADE this
+    # table shipped with. `DELETE /api/v1/accounts/{id}` is a real,
+    # user-reachable hard delete: under CASCADE one click permanently destroyed
+    # every deposit and withdrawal ever recorded against the account, while the
+    # confirmation dialog - written for `trades.account_id`'s SET NULL - told
+    # the user their data was safe. SET NULL is not available here (see the
+    # NOT NULL above), so the delete is refused instead, loudly, and the user
+    # is told to remove the cash rows first. Losing financial history to a
+    # dialog that promised otherwise is the failure being closed.
     account_id: Mapped[int] = mapped_column(
-        ForeignKey("accounts.id", ondelete="CASCADE"),
+        ForeignKey("accounts.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
@@ -172,4 +183,79 @@ class CashTransaction(Base, TimestampMixin):
         return (
             f"<CashTransaction(id={self.id}, {self.kind.value} "
             f"{self.amount} account={self.account_id})>"
+        )
+class CashLedgerCoverage(Base, TimestampMixin):
+    """What the cash ledger for one account is actually KNOWN to cover.
+
+    The honesty half of Q-E, and a correction. NAV originally decided
+    "is the opening balance known?" by comparing the earliest cash row against
+    the earliest visible trade. That answers *"is there cash before the first
+    trade?"*, which is not the question - the question is *"is the cash history
+    COMPLETE?"*. A 60-day Schwab pull satisfies the former trivially (a deposit
+    45 days ago, a trade 40 days ago) while omitting years of earlier cash
+    activity the clamped window never reached, and NAV then reported a
+    confidently non-estimated total return over an incomplete picture.
+
+    The evidence that settles it - the pull's actual window and whether it was
+    clamped to the API's 60-day horizon - existed only in the backfill's return
+    value, which nothing kept. So it is persisted here, once per (user,
+    account), and :meth:`app.services.cash.CashLedgerService.coverage` reads it
+    instead of re-deriving a guess.
+
+    DERIVED BUT STORED, unlike the balance, and deliberately so: the balance
+    can be re-folded from rows that are all still present, whereas the shape of
+    a pull that happened weeks ago is not recoverable from anything else in the
+    database. Losing it is what caused the bug.
+
+    ``is_true_origin`` is the strong claim and is granted narrowly: the pull's
+    window must not have been clamped, AND it must reach back at or before
+    every trade in the account. Even then a deposit made before the window and
+    before any trade is undetectable - that residual gap class is stated in
+    :meth:`CashLedgerService.coverage` rather than papered over.
+    """
+
+    __tablename__ = "cash_ledger_coverage"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # CASCADE here, unlike cash_transactions: this row is pure derived
+    # provenance about a pull, regenerable by re-running the backfill. It is
+    # not history worth blocking an account deletion over.
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # The earliest instant from which cash movements are known to be COMPLETE
+    # (the earliest window start the broker actually delivered), NOT merely the
+    # earliest row present. NULL = no import provenance at all.
+    complete_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # True only when the pull was unclamped AND reached past every known trade.
+    is_true_origin: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )
+    source: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="schwab_api", default="schwab_api"
+    )
+    # The run's HISTORY GAP note, when there was one - the human-readable
+    # reason `is_true_origin` is False.
+    note: Mapped[str | None] = mapped_column(Text)
+
+    user: Mapped["User"] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "account_id", name="uq_cash_ledger_coverage_user_account"
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<CashLedgerCoverage(account={self.account_id}, "
+            f"complete_from={self.complete_from}, true_origin={self.is_true_origin})>"
         )

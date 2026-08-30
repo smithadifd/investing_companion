@@ -45,8 +45,12 @@ PostgreSQL 15+ with TimescaleDB extension for time-series data. Uses SQLAlchemy 
         │  cash_balance / NAV are FOLDS over both, never stored
         v
 ┌──────────────────────┐     ┌─────────────────┐
-│  cash_transactions   │────>│    accounts     │
-└──────────────────────┘     └─────────────────┘
+│  cash_transactions   │────>│    accounts     │  RESTRICT: cash blocks
+└──────────────────────┘     └─────────────────┘  an account delete
+                                     ^
+┌──────────────────────┐             │
+│ cash_ledger_coverage │─────────────┘  CASCADE: regenerable provenance
+└──────────────────────┘
 ```
 
 ---
@@ -537,9 +541,14 @@ computed, never written here.
 CREATE TABLE cash_transactions (
     id SERIAL PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    -- NOT NULL with CASCADE, unlike trades.account_id: cash that belongs to no
-    -- account is meaningless, and its history describes nothing else.
-    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    -- NOT NULL, unlike trades.account_id: cash that belongs to no account is
+    -- meaningless. RESTRICT (corrected by 20260830_003 from the CASCADE this
+    -- table first shipped with): DELETE /api/v1/accounts/{id} is a real hard
+    -- delete, so CASCADE silently destroyed every deposit and withdrawal ever
+    -- recorded against the account -- behind a dialog written for trades' SET
+    -- NULL that promised nothing would be lost. There is no unassigned bucket
+    -- for money, so the account delete is refused (409) instead.
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
 
     -- Reuses trade_type_enum; the CHECK below is what narrows it to cash.
     kind trade_type_enum NOT NULL,
@@ -571,6 +580,49 @@ CREATE INDEX idx_cash_transactions_user_account_time
 CREATE UNIQUE INDEX uq_cash_transactions_external_id
     ON cash_transactions(user_id, external_transaction_id)
     WHERE external_transaction_id IS NOT NULL;
+```
+
+### cash_ledger_coverage
+
+How much of an account's cash history is actually KNOWN. Added by
+`20260830_004`.
+
+The only table in this design that stores something derived, and deliberately:
+the balance can always be re-folded from rows that are all still present, but
+the shape of a broker pull that happened weeks ago is not recoverable from
+anything else. NAV originally re-derived "is the opening balance known?" by
+comparing the earliest cash row against the earliest trade, which a clamped
+60-day pull satisfies trivially while omitting years of earlier cash — so it
+reported a confidently non-estimated total return over an incomplete picture.
+
+```sql
+CREATE TABLE cash_ledger_coverage (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- CASCADE here, deliberately unlike its sibling above: this row is
+    -- regenerable provenance about a pull, not financial history, so it is
+    -- not worth blocking an account deletion over.
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+
+    -- Earliest instant cash movements are known COMPLETE from -- the earliest
+    -- window a broker import actually delivered, NOT the earliest row that
+    -- happened to arrive. NULL = no import provenance (a manual ledger).
+    complete_from TIMESTAMPTZ,
+    -- True only when the window was unclamped AND reached past every known
+    -- trade. A clamped 60-day pull can never assert it.
+    is_true_origin BOOLEAN NOT NULL DEFAULT false,
+    source VARCHAR(50) NOT NULL DEFAULT 'schwab_api',
+    -- The run's HISTORY GAP note: the readable reason is_true_origin is false.
+    note TEXT,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_cash_ledger_coverage_user_account UNIQUE (user_id, account_id)
+);
+
+CREATE INDEX ix_cash_ledger_coverage_user_id ON cash_ledger_coverage(user_id);
+CREATE INDEX ix_cash_ledger_coverage_account_id ON cash_ledger_coverage(account_id);
 ```
 
 ---

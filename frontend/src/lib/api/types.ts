@@ -991,10 +991,22 @@ export interface CashTransactionCreate {
   notes?: string;
 }
 
-/** How far back the cash ledger actually knows this scope's history. */
+/**
+ * How far back the cash ledger actually knows this scope's history.
+ *
+ * `cash_starts_at` (a row date) and `complete_from` (an import window) answer
+ * DIFFERENT questions — "is there cash before the first trade?" is not "is the
+ * cash history complete?". Only `opening_balance_is_known` settles it.
+ */
 export interface CashCoverage {
   cash_starts_at: string | null;
   first_activity_at: string | null;
+  /** Earliest instant cash is known COMPLETE from; null = no import provenance */
+  complete_from: string | null;
+  /** True only when an import window was unclamped AND reached past every trade */
+  is_true_origin: boolean;
+  provenance_source: string | null;
+  provenance_note: string | null;
   opening_balance_is_known: boolean;
 }
 

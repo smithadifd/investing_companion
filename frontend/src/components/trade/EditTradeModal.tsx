@@ -47,9 +47,13 @@ export function EditTradeModal({ trade, onClose }: EditTradeModalProps) {
   // else, so the form never builds such a body.
   const isSplit = tradeType === 'split';
   const isDividend = tradeType === 'dividend';
+  // See CreateTradeModal: an unassigned dividend vanishes from every
+  // account-scoped cash and NAV figure, so the API refuses one.
+  const missingAccount = isDividend && accountId === null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (missingAccount) return;
 
     const data: TradeUpdate = {
       trade_type: tradeType,
@@ -150,7 +154,16 @@ export function EditTradeModal({ trade, onClose }: EditTradeModalProps) {
           </div>
 
           {/* Account (only shown once accounts exist). Never on a split. */}
-          {!isSplit && <AccountSelect value={accountId} onChange={setAccountId} />}
+          {!isSplit && (
+            <div>
+              <AccountSelect value={accountId} onChange={setAccountId} />
+              {missingAccount && (
+                <p role="alert" className="text-sm text-amber-600 dark:text-amber-400 mt-1">
+                  A dividend must name the account its cash landed in.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Fees — a split has none */}
           {!isSplit && (
@@ -236,7 +249,7 @@ export function EditTradeModal({ trade, onClose }: EditTradeModalProps) {
             </button>
             <button
               type="submit"
-              disabled={updateTrade.isPending}
+              disabled={updateTrade.isPending || missingAccount}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
             >
               {updateTrade.isPending && <Loader2 className="h-4 w-4 animate-spin" />}

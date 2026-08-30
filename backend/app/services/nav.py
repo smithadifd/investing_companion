@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.account import Account
 from app.schemas.account import AccountRef
-from app.schemas.cash import NavSummary
+from app.schemas.cash import CashCoverage, NavSummary
 from app.services.cash import CashLedgerService
 from app.services.trade import OpenLots, TradeService
 
@@ -122,16 +122,7 @@ class NavService:
         coverage = await self.cash.coverage(user_id, scope)
 
         if not coverage.opening_balance_is_known:
-            since = (
-                f" before {coverage.cash_starts_at.date()}"
-                if coverage.cash_starts_at is not None
-                else ""
-            )
-            reasons.append(
-                f"opening cash balance{since} is unknown: the cash ledger does "
-                "not reach back to the first trade, so NAV is short whatever "
-                "was in the account before it"
-            )
+            reasons.append(self._coverage_reason(coverage))
 
         positions_market_value = positions_market_value.quantize(_CENTS)
         unrealized_pnl = unrealized_pnl.quantize(_CENTS)
@@ -171,6 +162,38 @@ class NavService:
             is_estimated=bool(reasons),
             estimate_reasons=reasons,
             coverage=coverage,
+        )
+
+    @staticmethod
+    def _coverage_reason(coverage: CashCoverage) -> str:
+        """Say WHY the cash history is incomplete, not just that it is.
+
+        Three distinguishable causes, and the reader can act on a different
+        thing in each: re-run the import, enter the missing cash by hand, or
+        accept the 60-day horizon. A single generic sentence for all three was
+        the version that let an incomplete picture read as a complete one.
+        """
+        if coverage.complete_from is not None:
+            detail = (
+                f"the cash history is complete only from "
+                f"{coverage.complete_from.date()} — the broker import could not "
+                "reach further back, so NAV is short every contribution made "
+                "before that date"
+            )
+            if coverage.provenance_note:
+                detail = f"{detail} ({coverage.provenance_note})"
+            return detail
+        if coverage.cash_starts_at is None:
+            return (
+                "no cash history has been recorded at all, so the cash balance "
+                "and every contribution-based figure start from zero rather "
+                "than from what was actually in the account"
+            )
+        return (
+            f"the cash history starts {coverage.cash_starts_at.date()} but "
+            f"trading activity starts {coverage.first_activity_at.date()} — the "
+            "opening balance before the ledger begins is unknown, so NAV is "
+            "short whatever cash was in the account then"
         )
 
     @staticmethod

@@ -237,3 +237,98 @@ class TestSchemaShapeValidator:
                 executed_at=_at(1),
                 account_id=7,
             )
+
+    def test_dividend_must_carry_an_account(self):
+        """REVIEW FINDING 3. An unassigned dividend shows up in the whole-ledger
+        cash view and then silently VANISHES from every account-scoped cash and
+        NAV query, because those filter on account_id. Dividend cash that landed
+        in no account is money with no home, not an edge case."""
+        with pytest.raises(ValidationError, match="account"):
+            TradeCreate(
+                equity_id=1,
+                trade_type=TradeType.DIVIDEND,
+                quantity=Decimal("100"),
+                price=Decimal("1.20"),
+                executed_at=_at(1),
+                account_id=None,
+            )
+
+    def test_dividend_with_an_account_is_accepted(self):
+        payload = TradeCreate(
+            equity_id=1,
+            trade_type=TradeType.DIVIDEND,
+            quantity=Decimal("100"),
+            price=Decimal("1.20"),
+            executed_at=_at(1),
+            account_id=7,
+        )
+        assert payload.account_id == 7
+
+    def test_split_must_not_carry_fees(self):
+        """REVIEW FINDING 4. Nothing consumes a split's fees: the cash fold
+        gives splits zero cash effect and the FIFO unrealized walk ignores them
+        too - but fees_paid sums every Trade.fees row, so a fee here is
+        reported and never actually leaves the account. Reject it at the write
+        boundary rather than shipping an internal inconsistency."""
+        with pytest.raises(ValidationError, match="fees"):
+            TradeCreate(
+                equity_id=1,
+                trade_type=TradeType.SPLIT,
+                quantity=Decimal("4"),
+                price=Decimal("0"),
+                fees=Decimal("1.50"),
+                executed_at=_at(1),
+            )
+
+    def test_split_with_zero_fees_is_accepted(self):
+        payload = TradeCreate(
+            equity_id=1,
+            trade_type=TradeType.SPLIT,
+            quantity=Decimal("4"),
+            price=Decimal("0"),
+            fees=Decimal("0"),
+            executed_at=_at(1),
+        )
+        assert payload.fees == Decimal("0")
+
+
+class TestUpdateEnforcesTheSameShapeRules:
+    """The rules are checked against the RESULTING row, so a partial patch
+    cannot walk a trade into a shape the create path forbids."""
+
+    async def test_unassigning_a_dividend_is_refused(
+        self, db: AsyncSession, test_user
+    ):
+        from app.schemas.trade import TradeUpdate
+
+        service = TradeService(db)
+        equity = await create_test_equity(db, symbol="DIVUP")
+        acct = await create_test_account(db, test_user, name="Roth")
+        await db.commit()
+        created = await _create(
+            service, test_user.id, equity.id, TradeType.DIVIDEND, 100, "1.20", acct.id, 5
+        )
+        assert created is not None
+
+        with pytest.raises(ValueError, match="account"):
+            await service.update_trade(
+                created.id, test_user.id, TradeUpdate(account_id=None)
+            )
+
+    async def test_adding_fees_to_a_split_is_refused(
+        self, db: AsyncSession, test_user
+    ):
+        from app.schemas.trade import TradeUpdate
+
+        service = TradeService(db)
+        equity = await create_test_equity(db, symbol="SPLUP")
+        await db.commit()
+        created = await _create(
+            service, test_user.id, equity.id, TradeType.SPLIT, 4, 0, None, 5
+        )
+        assert created is not None
+
+        with pytest.raises(ValueError, match="fees"):
+            await service.update_trade(
+                created.id, test_user.id, TradeUpdate(fees=Decimal("2"))
+            )

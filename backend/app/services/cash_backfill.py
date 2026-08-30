@@ -36,10 +36,11 @@ IDEMPOTENT on ``(user_id, external_transaction_id)`` via
 keying on it would re-mint the same deposit each time.
 """
 
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.account import Account
@@ -198,16 +199,68 @@ class CashBackfillService:
                 created.append(row)
                 adopted_ids.add(txn.external_transaction_id)
 
+        # Persist what this pull actually REACHED, not just what it adopted.
+        # Without this the HISTORY GAP evidence lives only in the response
+        # below, and NAV - asked minutes or weeks later - has nothing to
+        # consult but row dates, which cannot distinguish "cash before the
+        # first trade" from "a complete cash history".
+        gap_note = await self._history_gap_note(user_id, link.account_hash)
+        complete_from = await self._earliest_delivered_window(
+            user_id, link.account_hash
+        )
+        first_activity = (
+            await self.cash.coverage(user_id, [account_id])
+        ).first_activity_at
+        # The strong claim, granted narrowly: the window must not have been
+        # clamped to the 60-day horizon, AND it must reach back at or before
+        # every trade this account holds. A clamped pull can never assert it.
+        is_true_origin = bool(
+            gap_note is None
+            and complete_from is not None
+            and (first_activity is None or complete_from <= first_activity)
+        )
+        await self.cash.record_coverage(
+            user_id,
+            account_id,
+            complete_from=complete_from,
+            is_true_origin=is_true_origin,
+            source=source,
+            note=gap_note,
+        )
+
         return CashBackfillResult(
             account_id=account_id,
             created=created,
             already_present=already_present,
             skipped=skipped,
             coverage=await self.cash.coverage(user_id, [account_id]),
-            history_gap_note=await self._history_gap_note(user_id, link.account_hash),
+            history_gap_note=gap_note,
             transaction_history_limit_days=(
                 schwab_ingestion.TRANSACTION_HISTORY_LIMIT_DAYS
             ),
+        )
+
+    async def _earliest_delivered_window(
+        self, user_id: UUID, account_hash: str
+    ) -> datetime | None:
+        """The earliest ``window_start`` any COMPLETE transactions pull covered.
+
+        This - not the earliest row that happened to arrive - is the instant
+        from which the broker data is complete. A window with no rows in it is
+        still evidence: it says nothing happened then, which is exactly what a
+        balance fold needs to know.
+
+        ``None`` when no complete run carries a window (older runs, or a lane
+        that does not record one), which reads as "no provenance" and keeps
+        ``is_true_origin`` False.
+        """
+        return await self.db.scalar(
+            select(func.min(BrokerImportRun.window_start)).where(
+                BrokerImportRun.user_id == user_id,
+                BrokerImportRun.account_hash == account_hash,
+                BrokerImportRun.kind == ImportKind.TRANSACTIONS,
+                BrokerImportRun.status == ImportStatus.COMPLETE,
+            )
         )
 
     @staticmethod

@@ -38,7 +38,14 @@ from app.db.models.broker_import import (
 from app.db.models.trade import TradeType
 from app.services.cash import CashLedgerService
 from app.services.cash_backfill import CashBackfillService
-from tests.factories import create_test_account, create_test_user
+from sqlalchemy import select
+
+from tests.factories import (
+    create_test_account,
+    create_test_equity,
+    create_test_trade,
+    create_test_user,
+)
 
 HASH = "BACKFILL_HASH"
 
@@ -60,7 +67,9 @@ async def _link(db, user, account_id, account_hash=HASH):
     await db.flush()
 
 
-async def _run(db, user, *, account_hash=HASH, notes=None):
+async def _run(
+    db, user, *, account_hash=HASH, notes=None, window_start=None, window_end=None
+):
     run = BrokerImportRun(
         user_id=user.id,
         account_hash=account_hash,
@@ -68,6 +77,8 @@ async def _run(db, user, *, account_hash=HASH, notes=None):
         kind=ImportKind.TRANSACTIONS,
         status=ImportStatus.COMPLETE,
         notes=notes,
+        window_start=window_start,
+        window_end=window_end,
     )
     db.add(run)
     await db.flush()
@@ -345,3 +356,220 @@ class TestBackfillCrossUserIsolation:
         assert (
             await CashBackfillService(db).backfill(test_user.id, b_account.id) is None
         )
+class TestCoverageProvenanceIsPersisted:
+    """REVIEW FINDING 2 - "the ledger starts before the first trade" is not
+    the same claim as "the ledger is COMPLETE".
+
+    The old check only compared the earliest cash row against the earliest
+    visible trade. A 60-day Schwab pull can satisfy that trivially - a deposit
+    45 days ago, a trade 40 days ago - while omitting years of earlier cash
+    activity that the clamped window never reached. NAV then reported a
+    confidently NON-estimated total return over an incomplete cash picture,
+    which is precisely the number this whole build exists to make trustworthy.
+
+    The HISTORY GAP metadata that would have revealed it was returned only
+    transiently at backfill time and never consulted again. So the backfill now
+    PERSISTS what window it actually reached, and NAV reads that instead of
+    re-deriving a guess.
+
+    SEAM UNDER TEST: the cash-coverage seam - ``CashLedgerService.coverage``,
+    now backed by a stored ``cash_ledger_coverage`` row rather than a heuristic
+    over row dates.
+    """
+
+    async def test_backfill_records_the_window_it_actually_reached(
+        self, db: AsyncSession, test_user
+    ):
+        account = await create_test_account(db, test_user, name="Roth")
+        await _link(db, test_user, account.id)
+        run = await _run(
+            db, test_user, window_start=_ago(59), window_end=_ago(0)
+        )
+        await _txn(db, test_user, run, external_id="schwab:cov:1", days_ago=45)
+        await db.commit()
+
+        result = await CashBackfillService(db).backfill(test_user.id, account.id)
+        assert result is not None
+        assert result.coverage.complete_from is not None
+        assert result.coverage.complete_from < _ago(58)
+        assert result.coverage.provenance_source == "schwab_api"
+
+    async def test_a_clamped_window_never_claims_a_true_origin(
+        self, db: AsyncSession, test_user
+    ):
+        """A HISTORY GAP note means the requested start was cut back to the
+        60-day horizon and the skipped span is unrecoverable via the API."""
+        account = await create_test_account(db, test_user, name="Roth")
+        await _link(db, test_user, account.id)
+        run = await _run(
+            db, test_user,
+            notes="HISTORY GAP: requested window start predates ...",
+            window_start=_ago(59), window_end=_ago(0),
+        )
+        await _txn(db, test_user, run, external_id="schwab:cov:2", days_ago=45)
+        await db.commit()
+
+        result = await CashBackfillService(db).backfill(test_user.id, account.id)
+        assert result is not None
+        assert result.coverage.is_true_origin is False
+        assert result.coverage.opening_balance_is_known is False
+
+    async def test_an_unclamped_window_reaching_past_all_activity_is_a_true_origin(
+        self, db: AsyncSession, test_user
+    ):
+        account = await create_test_account(db, test_user, name="Roth")
+        equity = await create_test_equity(db, symbol="COVOK")
+        await _link(db, test_user, account.id)
+        run = await _run(db, test_user, window_start=_ago(59), window_end=_ago(0))
+        await _txn(db, test_user, run, external_id="schwab:cov:3", days_ago=45)
+        await create_test_trade(
+            db, equity, test_user, quantity=Decimal("10"), price=Decimal("100"),
+            executed_at=_ago(40), account_id=account.id,
+        )
+        await db.commit()
+
+        result = await CashBackfillService(db).backfill(test_user.id, account.id)
+        assert result is not None
+        assert result.coverage.is_true_origin is True
+        assert result.coverage.opening_balance_is_known is True
+
+    async def test_the_gap_the_old_heuristic_missed(
+        self, db: AsyncSession, test_user
+    ):
+        """THE HEADLINE REGRESSION. Deposit 45 days ago, trade 40 days ago -
+        the old check saw "cash predates trades" and called the opening balance
+        KNOWN. But the pull was clamped, so years of earlier deposits were never
+        seen and the balance is short by all of them.
+        """
+        account = await create_test_account(db, test_user, name="Roth")
+        equity = await create_test_equity(db, symbol="COVGAP")
+        await _link(db, test_user, account.id)
+        run = await _run(
+            db, test_user,
+            notes="HISTORY GAP: requested window start predates ...",
+            window_start=_ago(59), window_end=_ago(0),
+        )
+        await _txn(db, test_user, run, external_id="schwab:cov:4", days_ago=45)
+        await create_test_trade(
+            db, equity, test_user, quantity=Decimal("10"), price=Decimal("100"),
+            executed_at=_ago(40), account_id=account.id,
+        )
+        await db.commit()
+
+        await CashBackfillService(db).backfill(test_user.id, account.id)
+
+        coverage = await CashLedgerService(db).coverage(test_user.id, [account.id])
+        # The naive comparison still holds - and is still not enough.
+        assert coverage.cash_starts_at is not None
+        assert coverage.first_activity_at is not None
+        assert coverage.cash_starts_at < coverage.first_activity_at
+        assert coverage.opening_balance_is_known is False, (
+            "cash-before-trades was mistaken for a complete cash history"
+        )
+
+    async def test_provenance_outlives_the_backfill_call(
+        self, db: AsyncSession, test_user
+    ):
+        """The whole point: NAV asks later, long after the backfill returned."""
+        account = await create_test_account(db, test_user, name="Roth")
+        await _link(db, test_user, account.id)
+        run = await _run(
+            db, test_user,
+            notes="HISTORY GAP: requested window start predates ...",
+            window_start=_ago(59), window_end=_ago(0),
+        )
+        await _txn(db, test_user, run, external_id="schwab:cov:5", days_ago=45)
+        await db.commit()
+
+        await CashBackfillService(db).backfill(test_user.id, account.id)
+
+        # A completely fresh service instance, as a later request would build.
+        coverage = await CashLedgerService(db).coverage(test_user.id, [account.id])
+        assert coverage.is_true_origin is False
+        assert coverage.provenance_note is not None
+        assert coverage.provenance_note.startswith("HISTORY GAP:")
+
+    async def test_re_running_updates_the_row_rather_than_duplicating_it(
+        self, db: AsyncSession, test_user
+    ):
+        from sqlalchemy import func, select
+
+        from app.db.models.cash import CashLedgerCoverage
+
+        account = await create_test_account(db, test_user, name="Roth")
+        await _link(db, test_user, account.id)
+        run = await _run(db, test_user, window_start=_ago(59), window_end=_ago(0))
+        await _txn(db, test_user, run, external_id="schwab:cov:6", days_ago=45)
+        await db.commit()
+
+        service = CashBackfillService(db)
+        await service.backfill(test_user.id, account.id)
+        await service.backfill(test_user.id, account.id)
+
+        rows = await db.scalar(
+            select(func.count(CashLedgerCoverage.id)).where(
+                CashLedgerCoverage.account_id == account.id
+            )
+        )
+        assert rows == 1
+
+    async def test_a_purely_manual_ledger_still_uses_the_user_assertion(
+        self, db: AsyncSession, test_user
+    ):
+        """No backfill has run, so there is no broker provenance to read. A
+        user who entered cash covering their whole history is the only evidence
+        available, and it is accepted as such."""
+        from app.db.models.cash import CashTransaction
+
+        account = await create_test_account(db, test_user, name="Roth")
+        equity = await create_test_equity(db, symbol="MANUAL")
+        db.add(
+            CashTransaction(
+                user_id=test_user.id,
+                account_id=account.id,
+                kind=TradeType.DEPOSIT,
+                amount=Decimal("10000"),
+                occurred_at=_ago(400),
+            )
+        )
+        await create_test_trade(
+            db, equity, test_user, quantity=Decimal("10"), price=Decimal("100"),
+            executed_at=_ago(300), account_id=account.id,
+        )
+        await db.commit()
+
+        coverage = await CashLedgerService(db).coverage(test_user.id, [account.id])
+        assert coverage.opening_balance_is_known is True
+        assert coverage.complete_from is None
+
+
+class TestCoverageCrossUserIsolation:
+    async def test_coverage_rows_are_user_scoped(self, db: AsyncSession, test_user):
+        from app.db.models.cash import CashLedgerCoverage
+
+        other = await create_test_user(db, email="cov-b@example.com")
+        a_account = await create_test_account(db, test_user, name="A Roth")
+        await _link(db, test_user, a_account.id)
+        run = await _run(
+            db, test_user,
+            notes="HISTORY GAP: ...",
+            window_start=_ago(59), window_end=_ago(0),
+        )
+        await _txn(db, test_user, run, external_id="schwab:cov:iso", days_ago=45)
+        await db.commit()
+
+        await CashBackfillService(db).backfill(test_user.id, a_account.id)
+
+        service = CashLedgerService(db)
+        # B looking at A's account id must not inherit A's provenance.
+        b_coverage = await service.coverage(other.id, [a_account.id])
+        assert b_coverage.provenance_note is None
+        assert b_coverage.opening_balance_is_known is True  # B has no activity
+
+        stored = await db.scalar(
+            select(CashLedgerCoverage).where(
+                CashLedgerCoverage.account_id == a_account.id
+            )
+        )
+        assert stored is not None
+        assert stored.user_id == test_user.id

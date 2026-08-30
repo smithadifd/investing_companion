@@ -80,6 +80,11 @@ class CashCoverage(BaseModel):
     balance was before it. Rather than invent an opening balance - the exact
     fabrication ``plans/investing_companion/trade-readiness-card.md`` refused -
     NAV reports what it knows and flags what it does not.
+
+    ``cash_starts_at`` (a row date) and ``complete_from`` (an import window)
+    answer DIFFERENT questions, and conflating them was a real bug: "there is
+    cash before the first trade" is not "the cash history is complete". See
+    ``CashLedgerService.coverage``.
     """
 
     cash_starts_at: datetime | None = Field(
@@ -88,11 +93,34 @@ class CashCoverage(BaseModel):
     first_activity_at: datetime | None = Field(
         None, description="Earliest trade in scope; null = no activity at all"
     )
+    complete_from: datetime | None = Field(
+        None,
+        description=(
+            "Earliest instant cash movements are known COMPLETE from — the "
+            "earliest window a broker import actually delivered. Null = no "
+            "import provenance (a purely manual ledger)"
+        ),
+    )
+    is_true_origin: bool = Field(
+        False,
+        description=(
+            "True only when an import window was unclamped AND reached back "
+            "past every known trade. Never asserted by a clamped 60-day pull"
+        ),
+    )
+    provenance_source: str | None = Field(
+        None, description="Which lane established `complete_from` (e.g. schwab_api)"
+    )
+    provenance_note: str | None = Field(
+        None,
+        description="The import run's HISTORY GAP note — why `is_true_origin` is False",
+    )
     opening_balance_is_known: bool = Field(
         ...,
         description=(
-            "False when trades predate the first cash row (or there are no cash "
-            "rows at all) — the balance before that point is unknown, not zero"
+            "False when the cash history cannot be shown to be complete: no "
+            "cash rows at all, trades predating the first cash row, or a broker "
+            "import whose window was clamped short of the account's start"
         ),
     )
 

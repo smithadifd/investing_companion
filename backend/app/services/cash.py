@@ -40,7 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.models.account import Account
-from app.db.models.cash import CashTransaction
+from app.db.models.cash import CashLedgerCoverage, CashTransaction
 from app.db.models.trade import TradeType
 from app.schemas.account import AccountRef
 from app.schemas.cash import (
@@ -192,11 +192,40 @@ class CashLedgerService:
     ) -> CashCoverage:
         """How far back the ledger actually knows this scope's cash history.
 
-        Q-E's honest answer. The opening balance is *known* only when the cash
-        ledger starts no later than the first trade in scope; otherwise there
-        was money in the account before anything we can see, and NAV must say
-        so rather than treating the gap as zero. An account with no activity at
-        all is fully known (nothing happened), not a gap.
+        Q-E's honest answer, and a corrected one. This used to decide
+        "is the opening balance known?" by comparing the earliest cash ROW
+        against the earliest trade. That answers *"is there cash before the
+        first trade?"*, which is a different question: a 60-day Schwab pull
+        satisfies it trivially (a deposit 45 days ago, a trade 40 days ago)
+        while omitting years of earlier cash activity the clamped window never
+        reached - so NAV reported a confidently non-estimated total return over
+        an incomplete picture.
+
+        The deciding evidence is the import WINDOW, not the row dates, and it
+        is persisted by the backfill in ``cash_ledger_coverage`` precisely
+        because it is not recoverable from anything else later. Three cases, in
+        order:
+
+        1. **Import provenance exists.** Trust it, and only it. Known iff every
+           account in scope reports ``is_true_origin`` - i.e. its pull was
+           unclamped and reached back past every trade it holds.
+        2. **No provenance (a purely manual ledger).** Fall back to the row
+           comparison. It is a weak signal, but here it means something real:
+           the *user* entered cash covering their whole history, which is a
+           human assertion rather than a machine's guess.
+        3. **No activity at all.** Known - nothing happened, so nothing is
+           missing.
+
+        RESIDUAL GAP, stated rather than papered over: even an unclamped window
+        reaching past every known trade cannot rule out a deposit made before
+        that window and before any trade, because nothing in the system
+        witnesses such an account. ``is_true_origin`` means "complete as far as
+        anything here can establish", not "provably complete". Closing that
+        would need a broker statement import, which is out of scope.
+
+        For a multi-account scope, ``complete_from`` is the LATEST of the
+        per-account values: the whole scope is only complete from the point at
+        which its worst-covered member is.
         """
         from app.db.models.trade import Trade
 
@@ -211,7 +240,32 @@ class CashLedgerService:
             )
         )
 
-        if first_activity is None:
+        provenance_stmt = select(CashLedgerCoverage).where(
+            CashLedgerCoverage.user_id == user_id
+        )
+        if account_ids is not None:
+            provenance_stmt = provenance_stmt.where(
+                CashLedgerCoverage.account_id.in_(account_ids)
+            )
+        provenance = list((await self.db.execute(provenance_stmt)).scalars().all())
+
+        complete_from: datetime | None = None
+        provenance_source: str | None = None
+        provenance_note: str | None = None
+        is_true_origin = False
+
+        if provenance:
+            starts = [p.complete_from for p in provenance if p.complete_from]
+            complete_from = max(starts) if starts else None
+            is_true_origin = all(p.is_true_origin for p in provenance)
+            provenance_source = provenance[0].source
+            provenance_note = next((p.note for p in provenance if p.note), None)
+
+        if first_activity is None and cash_start is None:
+            known = True
+        elif provenance:
+            known = is_true_origin
+        elif first_activity is None:
             known = True
         elif cash_start is None:
             known = False
@@ -221,8 +275,43 @@ class CashLedgerService:
         return CashCoverage(
             cash_starts_at=cash_start,
             first_activity_at=first_activity,
+            complete_from=complete_from,
+            is_true_origin=is_true_origin,
+            provenance_source=provenance_source,
+            provenance_note=provenance_note,
             opening_balance_is_known=known,
         )
+
+    async def record_coverage(
+        self,
+        user_id: UUID,
+        account_id: int,
+        *,
+        complete_from: datetime | None,
+        is_true_origin: bool,
+        source: str,
+        note: str | None,
+    ) -> None:
+        """Upsert this account's import-coverage provenance.
+
+        Upsert, not insert: the row describes the CURRENT best knowledge, and a
+        later pull with a wider window should improve it rather than leave two
+        rows disagreeing. Keyed by ``uq_cash_ledger_coverage_user_account``.
+        """
+        row = await self.db.scalar(
+            select(CashLedgerCoverage).where(
+                CashLedgerCoverage.user_id == user_id,
+                CashLedgerCoverage.account_id == account_id,
+            )
+        )
+        if row is None:
+            row = CashLedgerCoverage(user_id=user_id, account_id=account_id)
+            self.db.add(row)
+        row.complete_from = complete_from
+        row.is_true_origin = is_true_origin
+        row.source = source
+        row.note = note
+        await self.db.commit()
 
     async def list_transactions(
         self,

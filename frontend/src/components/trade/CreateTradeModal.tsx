@@ -79,11 +79,17 @@ export function CreateTradeModal({
   // so the form can't build a body the backend will 422.
   const isSplit = tradeType === 'split';
   const isDividend = tradeType === 'dividend';
+  // A dividend's cash leg is folded PER ACCOUNT, so an unassigned one shows in
+  // the whole-ledger view and then silently vanishes from every account-scoped
+  // cash balance and NAV. The API rejects it; the form must not offer it.
+  const needsAccount = isDividend;
+  const missingAccount = needsAccount && accountId === null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!equitySymbol || !quantity || (!isSplit && !price)) return;
+    if (missingAccount) return;
 
     const data: TradeCreate = {
       symbol: equitySymbol.toUpperCase(),
@@ -188,7 +194,18 @@ export function CreateTradeModal({
 
           {/* Account (only shown once accounts exist). Never on a split: one
               split row adjusts every account holding the symbol. */}
-          {!isSplit && <AccountSelect value={accountId} onChange={setAccountId} />}
+          {!isSplit && (
+            <div>
+              <AccountSelect value={accountId} onChange={setAccountId} />
+              {missingAccount && (
+                <p role="alert" className="text-sm text-amber-600 dark:text-amber-400 mt-1">
+                  A dividend must name the account its cash landed in — an
+                  unassigned dividend would disappear from that account&apos;s
+                  balance and total return.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Quantity and Price */}
           <div className={isSplit ? '' : 'grid grid-cols-2 gap-4'}>
@@ -323,7 +340,7 @@ export function CreateTradeModal({
             </button>
             <button
               type="submit"
-              disabled={createTrade.isPending}
+              disabled={createTrade.isPending || missingAccount}
               className={`flex items-center gap-2 px-4 py-2 text-white rounded-lg transition-colors disabled:opacity-50 ${
                 GREEN_TYPES.includes(tradeType)
                   ? 'bg-emerald-600 hover:bg-emerald-700'

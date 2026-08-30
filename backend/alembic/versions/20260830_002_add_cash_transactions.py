@@ -90,8 +90,16 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint('id'),
         sa.CheckConstraint('amount > 0', name='ck_cash_transactions_amount_positive'),
+        # ``kind::text`` is load-bearing, not stylistic. The bare
+        # ``kind IN ('deposit', 'withdrawal')`` compares against ENUM
+        # LITERALS, and Postgres refuses to use an enum value in the same
+        # transaction that added it - which is exactly what happens here,
+        # because ``alembic upgrade head`` runs this revision and
+        # 20260830_001 (the ADD VALUEs) inside ONE transaction. Casting to
+        # text references no enum value, so the constraint can be created
+        # immediately, and it still rejects a non-cash `kind`.
         sa.CheckConstraint(
-            "kind IN ('deposit', 'withdrawal')",
+            "kind::text IN ('deposit', 'withdrawal')",
             name='ck_cash_transactions_kind_is_cash',
         ),
     )

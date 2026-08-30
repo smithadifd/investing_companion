@@ -120,8 +120,17 @@ class CashTransaction(Base, TimestampMixin):
         # trade_type_enum carries eight values; only two of them are cash.
         # Fail-closed at the schema layer so a `split` can never be filed as a
         # cash movement and silently enter the balance fold.
+        #
+        # ``kind::text IN (...)`` rather than ``kind IN (...)``, and that cast
+        # is load-bearing: the bare form compares against ENUM LITERALS, which
+        # Postgres forbids in the same transaction that added those values
+        # (UnsafeNewEnumValueUsageError). Alembic wraps `upgrade head` in ONE
+        # transaction, so a deploy tail running 20260830_001 (ADD VALUE) and
+        # _002 (this table) together fails outright without the cast. The text
+        # comparison references no enum value and still bites - see the
+        # constraint tests in tests/test_services/test_cash_ledger.py.
         CheckConstraint(
-            f"kind IN ('{_KIND_VALUES}')",
+            f"kind::text IN ('{_KIND_VALUES}')",
             name="ck_cash_transactions_kind_is_cash",
         ),
         Index(

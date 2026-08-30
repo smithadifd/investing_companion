@@ -345,3 +345,30 @@ class TestCashLedgerConstraints:
 
         service = CashLedgerService(db)
         assert await service.cash_balance(test_user.id, [acct.id]) == Decimal("200")
+class TestKindCheckSurvivesTheMigration:
+    """A deploy-time hazard that no ordinary test can reach.
+
+    ``alembic upgrade head`` runs 20260830_001 (which ADDs the enum values) and
+    20260830_002 (which creates this table) inside ONE transaction, and
+    Postgres refuses to USE an enum value in the transaction that added it. So
+    a CHECK written as ``kind IN ('deposit', 'withdrawal')`` - comparing
+    against enum LITERALS - makes the whole migration abort with
+    ``UnsafeNewEnumValueUsageError`` on a real deploy, while passing every test
+    here (the suite builds its schema with ``create_all``, which mints the type
+    with all eight values at once and never ALTERs it).
+
+    Casting to text references no enum value and is what makes the migration
+    applyable. This pins that, because the failure mode is invisible until a
+    deploy tail runs.
+    """
+
+    def test_the_kind_check_compares_text_not_enum_literals(self):
+        check = next(
+            c
+            for c in CashTransaction.__table__.constraints
+            if getattr(c, "name", None) == "ck_cash_transactions_kind_is_cash"
+        )
+        assert "kind::text" in str(check.sqltext), (
+            "The kind CHECK must cast to text. A bare enum-literal comparison "
+            "aborts `alembic upgrade head` and cannot be caught by create_all."
+        )

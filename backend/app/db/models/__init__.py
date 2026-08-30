@@ -16,6 +16,7 @@ from app.db.models.broker_import import (
     ImportKind,
     ImportStatus,
 )
+from app.db.models.cash import CashTransaction
 from app.db.models.economic_event import (
     EconomicEvent,
     EventImportance,
@@ -48,6 +49,7 @@ __all__ = [
     "AlertDeliveryStatus",
     "AlertHistory",
     "BrokerImportRun",
+    "CashTransaction",
     "EconomicEvent",
     "EventImportance",
     "EventSource",

@@ -9,6 +9,7 @@ from app.core.dependencies import get_current_user, require_not_demo
 from app.db.models.trade import TradeType
 from app.db.models.user import User
 from app.db.session import get_db
+from app.schemas.cash import NavSummary
 from app.schemas.common import (
     DataResponse,
     ListResponse,
@@ -26,6 +27,7 @@ from app.schemas.trade import (
     TradeResponse,
     TradeUpdate,
 )
+from app.services.nav import NavService
 from app.services.trade import SyntheticAdoptionConflictError, TradeService
 
 router = APIRouter()
@@ -34,6 +36,11 @@ router = APIRouter()
 def get_trade_service(db: AsyncSession = Depends(get_db)) -> TradeService:
     """Dependency to get trade service instance."""
     return TradeService(db)
+
+
+def get_nav_service(db: AsyncSession = Depends(get_db)) -> NavService:
+    """Dependency to get the NAV service instance."""
+    return NavService(db)
 
 
 @router.get("", response_model=ListResponse[TradeResponse])
@@ -124,6 +131,46 @@ async def get_portfolio(
     """
     portfolio = await service.get_portfolio(current_user.id, by_account=by_account)
     return DataResponse(data=portfolio, meta=ResponseMeta.now())
+
+
+@router.get("/nav", response_model=DataResponse[NavSummary])
+async def get_nav(
+    account_id: int | None = Query(
+        None,
+        description=(
+            "Account to value. Omit for the whole ledger (every account plus "
+            "the unassigned trade bucket)"
+        ),
+    ),
+    current_user: User = Depends(get_current_user),
+    service: NavService = Depends(get_nav_service),
+) -> DataResponse[NavSummary]:
+    """
+    Get net asset value and total return for one account, or for everything.
+
+    A separate surface from `/portfolio` on purpose: the cash fold and the
+    per-position open-lot walks behind this response are work the dashboard's
+    hot path must not pay for on every render.
+
+    The headline is `total_return_amount` — absolute dollars, unambiguous.
+    `total_return_percent` divides it by net contributions and is NOT a
+    time-weighted return; it is null when there are no contributions to divide
+    by.
+
+    `is_estimated` is true whenever an input is missing (a failed quote, an
+    opening balance from before the cash ledger's coverage begins, or a FIFO
+    ledger that disagrees with itself), with one entry in `estimate_reasons`
+    per gap. A missing input is never silently read as zero.
+    """
+    nav = await service.get_nav(current_user.id, account_id)
+
+    if nav is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found",
+        )
+
+    return DataResponse(data=nav, meta=ResponseMeta.now())
 
 
 @router.get("/performance", response_model=DataResponse[PerformanceReport])

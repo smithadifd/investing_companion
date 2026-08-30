@@ -16,7 +16,15 @@ direction lives in ``trade_type``, so quantity is an unsigned magnitude and
 * gifted or inherited shares recorded at 0 pending a basis lookup,
 * a spin-off / stock-dividend lot booked at 0 before allocation,
 * a synthetic adoption trade whose ``basis_is_estimated`` price was never
-  filled in.
+  filled in,
+* **a ``split`` row** (added 2026-08-30 by the total-return build): its price
+  is a deliberate sentinel 0 and its ``quantity`` carries the ratio. Unlike the
+  four above, this one is not a legacy accident that might clear up - the app
+  MINTS zero-price split rows by design, so ``price > 0`` is now permanently
+  wrong for this table. Promote the ``price >= 0`` variant, or qualify the
+  strict one with ``trade_type <> 'split'``. See the sibling
+  ``20260830_003_add_trade_type_shape_checks.py``, which enforces the
+  complementary rule (a split's price MUST be 0).
 
 Applying ``price > 0`` to a table containing any of those either fails the
 migration outright (Postgres validates CHECK constraints against existing rows

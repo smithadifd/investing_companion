@@ -34,3 +34,4 @@ rewrite from memory.
 | File | Blocked on |
 |------|------------|
 | `20260729_002_add_trade_price_check.py` | A prod-data answer: does any `trades` row legitimately carry `price = 0` (vested RSU / gift / spin-off) before `price > 0` can be enforced? Run `backend/scripts/check_trade_constraint_violations.py` against prod; its PRICE section is the input to that call. |
+| `20260830_003_add_trade_type_shape_checks.py` | A prod-data answer: are there `split` rows with a price/account, `dividend` rows with no account, or `deposit`/`withdrawal` rows in `trades`? The docstring carries the exact counting query. Note it makes the strict `price > 0` variant of `20260729_002` permanently wrong — a split's price is a designed 0. |

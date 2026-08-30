@@ -1,0 +1,290 @@
+"""Broker-cash backfill - establishing the opening balance from Schwab's own
+transaction history (Q-E, ratified).
+
+Q-E asked how a real account with years of prior deposits gets a ledger. The
+ratified answer is the automated one: **backfill where Schwab's 60-day
+transaction window reaches, and read ``is_estimated`` before it.** Not
+hand-entry, and not start-at-zero.
+
+WHERE THE CREDENTIALS ARE (and are not). This service touches no token, makes
+no network call and never constructs a Schwab client. It reads
+``imported_transactions`` - rows the existing ``schwab_ingestion`` pull has
+already written and already redacted (the real account number never reaches
+that table; only Schwab's opaque per-account hash does). That table is the seam
+between the credentialed half of the system and everything downstream, and the
+broker-CSV lane already crosses it too. Backfill is therefore a pure DB->DB
+adoption, which is also why it is testable without a broker.
+
+WHAT IT ADOPTS is a positive ALLOW-list of external cash movements. Everything
+else is skipped AND LISTED with a reason - the promise
+``schemas/reconciliation.py`` already makes for the ``non_trade`` lane:
+"listed, never matched, never silently dropped". Two exclusions are decisions
+rather than omissions:
+
+* ``DIVIDEND_OR_INTEREST`` - dividends are manual-entry only (Q-B) and are
+  equity-scoped ``trades`` rows. Adopting one as cash would put dividend money
+  in the ledger with no equity, and then double-count it the moment the user
+  records the dividend properly.
+* ``JOURNAL`` - an internal transfer between two of the user's own accounts. If
+  both accounts are linked, both legs would be adopted and net out; if only one
+  is, the user's net contributions are silently overstated. Skipped and listed
+  for a human, because the service cannot tell the two cases apart.
+
+IDEMPOTENT on ``(user_id, external_transaction_id)`` via
+``uq_cash_transactions_external_id``. Deliberately NOT on
+``source_import_run_id``: a run id is a different value on every pull, so
+keying on it would re-mint the same deposit each time.
+"""
+
+from decimal import Decimal
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models.account import Account
+from app.db.models.broker_import import (
+    BrokerImportRun,
+    ImportedTransaction,
+    ImportKind,
+    ImportStatus,
+)
+from app.db.models.cash import CashTransaction
+from app.db.models.trade import TradeType
+from app.schemas.cash import (
+    CashBackfillResult,
+    CashBackfillSkipped,
+    CashTransactionCreate,
+)
+from app.services import schwab_ingestion
+from app.services.account_link import AccountLinkService
+from app.services.cash import CashLedgerService
+
+# The allow-list: broker transaction types that are an EXTERNAL cash movement
+# into or out of the account. Positive, not a NOT-IN exclusion, so a Schwab
+# type nobody has classified is skipped by default rather than folded into the
+# balance on a hunch - the same instinct that makes the reconciliation match
+# pool and the FIFO walks fail closed.
+_EXTERNAL_CASH_TYPES = frozenset(
+    {
+        "ACH_RECEIPT",
+        "ACH_DISBURSEMENT",
+        "CASH_RECEIPT",
+        "CASH_DISBURSEMENT",
+        "ELECTRONIC_FUND",
+        "WIRE_IN",
+        "WIRE_OUT",
+    }
+)
+
+# Types deliberately excluded, each with the reason a human gets to read.
+_EXPLAINED_EXCLUSIONS = {
+    "DIVIDEND_OR_INTEREST": (
+        "dividend/interest income is manual-entry only and is recorded as an "
+        "equity-scoped trade, not a cash-ledger row - adopting it here would "
+        "double-count it"
+    ),
+    "JOURNAL": (
+        "a journal is an internal transfer between accounts, not an external "
+        "contribution - adopt it by hand once you know which side it belongs to"
+    ),
+    "TRADE": "a fill, not a cash movement - it is reconciled against your trades",
+    "RECEIVE_AND_DELIVER": "a share transfer, not a cash movement",
+    "MONEY_MARKET": "an internal sweep, not an external contribution",
+    "MARGIN_CALL": "not an external contribution",
+    "SMA_ADJUSTMENT": "a margin bookkeeping entry, not a cash movement",
+    "MEMORANDUM": "an informational entry with no cash effect",
+}
+
+
+class CashBackfillService:
+    """Adopts already-ingested broker cash movements into the cash ledger."""
+
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+        self.links = AccountLinkService(db)
+        self.cash = CashLedgerService(db)
+
+    async def backfill(
+        self, user_id: UUID, account_id: int, source: str = "schwab_api"
+    ) -> CashBackfillResult | None:
+        """Adopt this account's broker cash movements. Idempotent.
+
+        ``None`` when the account is not this user's, or has no ACTIVE link
+        (the caller maps those to 404 and 409 respectively - the same gate
+        ``ReconciliationService`` uses). Every query below is filtered on the
+        AUTHENTICATED ``user_id``, not only on ``account_id``: the FK would
+        happily let one user name another's account, and the ownership check is
+        the only thing that does not.
+        """
+        owned = await self.db.scalar(
+            select(Account.id).where(
+                Account.id == account_id, Account.user_id == user_id
+            )
+        )
+        if owned is None:
+            return None
+
+        link = await self.links.get_active_link(user_id, account_id, source)
+        if link is None:
+            return None
+
+        broker_rows = list(
+            (
+                await self.db.execute(
+                    select(ImportedTransaction)
+                    .where(
+                        ImportedTransaction.user_id == user_id,
+                        ImportedTransaction.account_hash == link.account_hash,
+                    )
+                    .order_by(
+                        ImportedTransaction.occurred_at, ImportedTransaction.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        adopted_ids = set(
+            (
+                await self.db.execute(
+                    select(CashTransaction.external_transaction_id).where(
+                        CashTransaction.user_id == user_id,
+                        CashTransaction.external_transaction_id.isnot(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        created = []
+        skipped: list[CashBackfillSkipped] = []
+        already_present = 0
+
+        for txn in broker_rows:
+            if txn.external_transaction_id in adopted_ids:
+                already_present += 1
+                continue
+
+            kind, amount, reason = self._classify(txn)
+            if reason is not None:
+                skipped.append(
+                    CashBackfillSkipped(
+                        external_transaction_id=txn.external_transaction_id,
+                        broker_type=txn.transaction_type,
+                        occurred_at=txn.occurred_at,
+                        net_amount=_finite(txn.net_amount),
+                        reason=reason,
+                    )
+                )
+                continue
+
+            row = await self.cash.create_transaction(
+                user_id,
+                CashTransactionCreate(
+                    account_id=account_id,
+                    kind=kind,
+                    amount=amount,
+                    occurred_at=txn.occurred_at,
+                    notes=f"Adopted from broker {txn.transaction_type}",
+                ),
+                source=txn.source,
+                source_import_run_id=txn.import_run_id,
+                external_transaction_id=txn.external_transaction_id,
+            )
+            if row is not None:
+                created.append(row)
+                adopted_ids.add(txn.external_transaction_id)
+
+        return CashBackfillResult(
+            account_id=account_id,
+            created=created,
+            already_present=already_present,
+            skipped=skipped,
+            coverage=await self.cash.coverage(user_id, [account_id]),
+            history_gap_note=await self._history_gap_note(user_id, link.account_hash),
+            transaction_history_limit_days=(
+                schwab_ingestion.TRANSACTION_HISTORY_LIMIT_DAYS
+            ),
+        )
+
+    @staticmethod
+    def _classify(
+        txn: ImportedTransaction,
+    ) -> tuple[TradeType | None, Decimal | None, str | None]:
+        """``(kind, amount, None)`` to adopt, or ``(None, None, reason)`` to skip.
+
+        Never raises and never guesses: every path out is either a decision
+        with a direction or a reason a human can read.
+        """
+        kind_str = (txn.transaction_type or "").upper()
+
+        if kind_str not in _EXTERNAL_CASH_TYPES:
+            reason = _EXPLAINED_EXCLUSIONS.get(kind_str)
+            if reason is None:
+                reason = (
+                    f"{kind_str!r} is not a recognised external cash movement - "
+                    "skipped rather than guessed at; record it by hand if it is one"
+                )
+            return None, None, reason
+
+        if txn.symbol:
+            return (
+                None,
+                None,
+                f"carries an instrument leg ({txn.symbol}), so it is not the plain "
+                "cash movement its type claims - review it by hand",
+            )
+
+        amount = _finite(txn.net_amount)
+        if amount is None or amount == 0:
+            return (
+                None,
+                None,
+                "no usable net amount (null, zero or non-finite) - there is no "
+                "cash movement to record",
+            )
+
+        if amount > 0:
+            return TradeType.DEPOSIT, amount, None
+        return TradeType.WITHDRAWAL, -amount, None
+
+    async def _history_gap_note(self, user_id: UUID, account_hash: str) -> str | None:
+        """The most recent complete transactions run's HISTORY GAP note, if any.
+
+        Schwab's transactions endpoint only accepts start dates within the
+        trailing 60 days and has no pagination past that boundary, so a pull
+        whose requested window predated it was clamped and the skipped span is
+        unrecoverable via the API. Surfacing the note here is what stops the
+        ledger's start date reading as "this is when the account began".
+        """
+        note = await self.db.scalar(
+            select(BrokerImportRun.notes)
+            .where(
+                BrokerImportRun.user_id == user_id,
+                BrokerImportRun.account_hash == account_hash,
+                BrokerImportRun.kind == ImportKind.TRANSACTIONS,
+                BrokerImportRun.status == ImportStatus.COMPLETE,
+            )
+            .order_by(BrokerImportRun.created_at.desc(), BrokerImportRun.id.desc())
+            .limit(1)
+        )
+        if note and note.startswith(schwab_ingestion.HISTORY_GAP_NOTE_PREFIX):
+            return note
+        return None
+
+
+def _finite(value: Decimal | None) -> Decimal | None:
+    """``None`` for a non-finite Decimal, else the value unchanged.
+
+    Postgres ``numeric`` stores NaN and Infinity happily and pydantic refuses
+    to serialize them, so every read of a stored decimal into a response model
+    has to guard - see ``services/reconciliation._finite``, which makes the
+    argument at length. A NaN reaching the classifier would also raise
+    ``InvalidOperation`` on the ``> 0`` comparison below.
+    """
+    if value is None or not value.is_finite():
+        return None
+    return value

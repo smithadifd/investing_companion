@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -732,6 +732,23 @@ class TradeService:
                             open_fee_ps,
                         )
 
+            elif trade.trade_type == TradeType.SPLIT:
+                # A split is a property of the SECURITY, not of one account:
+                # it re-denominates every partition holding this equity from a
+                # SINGLE row. That is why the row carries no account_id and why
+                # this branch loops over all queue keys instead of using
+                # `acct`. Deliberately independent of the row's own
+                # account_id - if one ever carries an account (a hand-inserted
+                # row, or a future revisit of D6), applying it security-wide is
+                # still the correct reading.
+                #
+                # It writes no TradePair: a split realizes nothing.
+                ratio = trade.quantity
+                for key, queue in long_queues.items():
+                    long_queues[key] = split_adjusted_lots(queue, ratio)
+                for key, queue in short_queues.items():
+                    short_queues[key] = split_adjusted_lots(queue, ratio)
+
             elif trade.trade_type == TradeType.SHORT:
                 # Opening short position
                 short_queues.setdefault(acct, []).append(
@@ -806,10 +823,19 @@ class TradeService:
             Trade.user_id == user_id,
             Trade.equity_id == equity_id,
         ]
-        if account_id is None:
-            conditions.append(Trade.account_id.is_(None))
-        else:
-            conditions.append(Trade.account_id == account_id)
+        account_scope = (
+            Trade.account_id.is_(None)
+            if account_id is None
+            else Trade.account_id == account_id
+        )
+        # SPLIT rows are security-wide and carry no account, so an
+        # `account_id == <int>` filter would silently drop them and this walk
+        # would report PRE-split lots to the Schwab basis reconciliation -
+        # false drift against the broker. Or-ed in rather than relying on the
+        # NULL account, so the walk stays correct if a split row ever carries
+        # one. (For account_id=None the or_ is a harmless no-op: a split's
+        # NULL account already satisfies the left side.)
+        conditions.append(or_(account_scope, Trade.trade_type == TradeType.SPLIT))
 
         stmt = (
             select(Trade)
@@ -829,6 +855,13 @@ class TradeService:
                     (trade.id, trade.quantity, trade.price, trade.executed_at,
                      _fee_per_share(trade))
                 )
+            elif trade.trade_type == TradeType.SPLIT:
+                # The clone of the mutating walk's split branch, through the
+                # one shared helper so the two cannot drift. Both sides, since
+                # a split re-denominates a short position exactly as it does a
+                # long one.
+                long_queue = split_adjusted_lots(long_queue, trade.quantity)
+                short_queue = split_adjusted_lots(short_queue, trade.quantity)
             elif trade.trade_type == TradeType.SHORT:
                 short_queue.append(
                     (trade.id, trade.quantity, trade.price, trade.executed_at,

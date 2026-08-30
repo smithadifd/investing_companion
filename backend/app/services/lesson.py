@@ -26,7 +26,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db.models.equity import Equity
 from app.db.models.lesson import Lesson
-from app.db.models.trade import Trade
+from app.db.models.trade import SHARE_AFFECTING_TRADE_TYPES, Trade
 from app.db.models.watchlist import Watchlist, WatchlistItem
 from app.schemas.lesson import LessonCreate, LessonResponse, LessonUpdate
 from app.services.equity import EquityService
@@ -86,13 +86,25 @@ class LessonService:
     async def create_lesson(
         self, user_id: UUID, data: LessonCreate
     ) -> LessonResponse | None:
-        """Resolve the equity from trade_id, equity_id, or symbol (in that order)."""
+        """Resolve the equity from trade_id, equity_id, or symbol (in that order).
+
+        A lesson attaches to a *fill* - a decision someone made. The
+        ``SHARE_AFFECTING_TRADE_TYPES`` allow-list keeps a ``dividend`` or
+        ``split`` row (which nobody decided) from being linkable: those are
+        corporate actions, not trades, and a journal entry hung off one would
+        pollute the learning loop the pack feeds to the advisor. Same positive
+        allow-list as the reconciliation match pool, so a future enum member is
+        excluded by default. An ineligible id reads as "unknown trade", which
+        is what the caller already handles.
+        """
         equity = None
         trade_id = None
         if data.trade_id is not None:
             trade = await self.db.scalar(
                 select(Trade).where(
-                    Trade.id == data.trade_id, Trade.user_id == user_id
+                    Trade.id == data.trade_id,
+                    Trade.user_id == user_id,
+                    Trade.trade_type.in_(SHARE_AFFECTING_TRADE_TYPES),
                 )
             )
             if not trade:
@@ -136,9 +148,12 @@ class LessonService:
             lesson.tags = data.tags or None
         if "trade_id" in data.model_fields_set:
             if data.trade_id is not None:
+                # Same fill allow-list as create_lesson - see its docstring.
                 trade = await self.db.scalar(
                     select(Trade).where(
-                        Trade.id == data.trade_id, Trade.user_id == user_id
+                        Trade.id == data.trade_id,
+                        Trade.user_id == user_id,
+                        Trade.trade_type.in_(SHARE_AFFECTING_TRADE_TYPES),
                     )
                 )
                 if not trade:

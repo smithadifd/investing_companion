@@ -946,7 +946,23 @@ export interface TransactionReconciliation {
 }
 
 // Trade types
-export type TradeType = 'buy' | 'sell' | 'short' | 'cover';
+//
+// The four FILLS plus the two equity-scoped rows that share the `trades`
+// table. `deposit`/`withdrawal` are deliberately NOT here: they have no equity
+// leg and live in the cash ledger — see `CashTransactionKind` below.
+//
+// NOTE for anyone widening this again: TypeScript will NOT flag the const
+// arrays that enumerate it (a subset of a widened union still type-checks), so
+// `CreateTradeModal`/`EditTradeModal`'s `TRADE_TYPES` and the `TradeTypeBadge`
+// colour map need a manual pass every time.
+export type TradeType = 'buy' | 'sell' | 'short' | 'cover' | 'dividend' | 'split';
+
+/** The four fills — a real share transaction at a broker. */
+export const FILL_TRADE_TYPES = ['buy', 'sell', 'short', 'cover'] as const;
+export type FillTradeType = (typeof FILL_TRADE_TYPES)[number];
+
+/** Account-scoped cash with no equity leg — the `cash_transactions` table. */
+export type CashTransactionKind = 'deposit' | 'withdrawal';
 
 export interface TradeEquity {
   id: number;

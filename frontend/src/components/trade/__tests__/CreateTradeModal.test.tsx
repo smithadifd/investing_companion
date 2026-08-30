@@ -201,4 +201,73 @@ describe('CreateTradeModal', () => {
     await user.click(screen.getByText('Cover'));
     expect(screen.getByText('Log Cover')).toBeInTheDocument();
   });
+  // --- total-return build: the two non-fill types that share the trades table
+  // SEAM UNDER TEST: the create form's request-body contract. A split's price
+  // is the sentinel 0 and it carries no account; TypeScript cannot catch a
+  // TRADE_TYPES array that forgets a union member, so this does.
+
+  it('offers the dividend and split types', () => {
+    render(<CreateTradeModal isOpen={true} onClose={onClose} />);
+    expect(screen.getByText('Dividend')).toBeInTheDocument();
+    expect(screen.getByText('Split')).toBeInTheDocument();
+  });
+
+  it('submits a dividend as shares-held x per-share amount', async () => {
+    const user = userEvent.setup();
+    render(<CreateTradeModal isOpen={true} onClose={onClose} />);
+
+    await user.type(screen.getByTestId('equity-search'), 'AAPL');
+    await user.click(screen.getByText('Dividend'));
+    await user.type(screen.getByLabelText('Shares Held'), '100');
+    await user.type(screen.getByLabelText('Dividend per Share'), '1.20');
+    await user.click(screen.getByText('Log Dividend'));
+
+    await waitFor(() => {
+      expect(mockMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          symbol: 'AAPL',
+          trade_type: 'dividend',
+          quantity: 100,
+          price: 1.2,
+        }),
+      );
+    });
+  });
+
+  it('submits a split with price 0, no fees and no account', async () => {
+    const user = userEvent.setup();
+    render(<CreateTradeModal isOpen={true} onClose={onClose} />);
+
+    await user.type(screen.getByTestId('equity-search'), 'AAPL');
+    await user.click(screen.getByText('Split'));
+
+    // The price field is gone entirely — a split has no price to type.
+    expect(screen.queryByLabelText('Price per Share')).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Split Ratio'), '4');
+    await user.click(screen.getByText('Log Split'));
+
+    await waitFor(() => {
+      expect(mockMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          symbol: 'AAPL',
+          trade_type: 'split',
+          quantity: 4,
+          price: 0,
+          fees: 0,
+          account_id: null,
+        }),
+      );
+    });
+  });
+
+  it('does not show a trade value for a split (quantity is a ratio)', async () => {
+    const user = userEvent.setup();
+    render(<CreateTradeModal isOpen={true} onClose={onClose} />);
+
+    await user.click(screen.getByText('Split'));
+    await user.type(screen.getByLabelText('Split Ratio'), '4');
+
+    expect(screen.queryByText('Trade Value:')).not.toBeInTheDocument();
+  });
 });

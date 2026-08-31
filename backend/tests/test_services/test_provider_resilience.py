@@ -18,6 +18,7 @@ from app.services.data_providers.base import (
     MarketDataProvider,
     ProviderCapability,
     ProviderError,
+    ProviderUnentitledError,
 )
 from app.services.data_providers.resilience import (
     CircuitBreaker,
@@ -276,6 +277,56 @@ class TestHalfOpenSingleFlight:
         assert results.count("ok") == 1
         assert results.count("rejected") == 19
         assert breaker.state == CircuitState.CLOSED  # probe succeeded -> closed
+
+
+class TestHalfOpenProbeReleaseOnUnentitled:
+    """A half-open probe that hits ``ProviderUnentitledError`` must still
+    release the single-probe admission.
+
+    Regression: ``ProviderUnentitledError`` is re-raised before ``_call``
+    reaches either ``record_success`` or ``record_failure`` (see the comment
+    on that except clause) -- deliberately, since it is not a health event.
+    But nothing else clears ``_probe_in_flight`` once the breaker is already
+    HALF_OPEN (the promotion that resets it only fires on the OPEN ->
+    HALF_OPEN transition). Left unreleased, the flag stays stuck ``True``
+    forever and ``allow()`` fast-fails every later call -- including ones for
+    surfaces this same provider IS entitled to -- as if a probe were
+    perpetually in flight.
+    """
+
+    async def test_unentitled_probe_does_not_wedge_the_breaker(self):
+        clock = _FakeClock()
+        breaker = CircuitBreaker(
+            failure_threshold=1, recovery_timeout=10, clock=clock
+        )
+        breaker.record_failure()  # -> OPEN
+        clock.advance(10)  # cool-down elapses -> HALF_OPEN, one probe available
+        assert breaker.state == CircuitState.HALF_OPEN
+
+        provider = ScriptedProvider(
+            script=[ProviderUnentitledError("plan does not include this surface")],
+            default=_quote(),
+        )
+        resilient = ResilientProvider(
+            provider, max_retries=2, breaker=breaker, sleep=AsyncMock()
+        )
+
+        # The single admitted half-open probe hits an unentitled surface.
+        with pytest.raises(ProviderUnentitledError):
+            await resilient.get_quote("AAPL")
+        assert breaker.state == CircuitState.HALF_OPEN, "not a health event"
+
+        # Without the fix this second call raises CircuitOpenError: the
+        # probe-in-flight flag never cleared, so `allow()` rejects every
+        # later call forever, wedging out even entitled surfaces.
+        quote = await resilient.get_quote("AAPL")
+        assert quote is not None
+        assert provider.calls == 2, (
+            "the second, entitled call must actually reach the upstream"
+        )
+        assert breaker.state == CircuitState.CLOSED, (
+            "the fresh probe succeeded and closed the breaker"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -770,3 +821,158 @@ class TestStalenessIsMonotonic:
         failover = FailoverQuoteProvider([StaticProvider("yahoo", _quote())])
         quote = await failover.get_quote("AAPL")
         assert quote.stale is False
+
+
+class TestExplicitQuotePrimary:
+    """``quote_primary`` — the one thing that outranks the delayed demotion.
+
+    Demotion stays the default: with no election a delayed provider is still
+    consulted after every live source, wherever the caller put it. The election
+    is the *deliberate* override — the operator configured a paid feed and asked
+    for it first — and it is expressed at the seam where selection already
+    lives (the chain builder), not as a fact the provider asserts about itself.
+    """
+
+    @staticmethod
+    def _delayed(name="massive", quote=None, caps=ALL_CAPS):
+        provider = StaticProvider(name, quote, caps=caps)
+        provider.delayed_quotes = True
+        provider.quote_delay_minutes = 15
+        return provider
+
+    async def test_elected_delayed_primary_is_consulted_before_live_sources(self):
+        """The row's whole point: the election beats the demotion."""
+        delayed = self._delayed(quote=_quote(price="90"))
+        live = StaticProvider("yahoo", _quote(price="100"))
+        failover = FailoverQuoteProvider([delayed, live], quote_primary=delayed)
+
+        assert [p.name for p in failover.quote_order()] == ["massive", "yahoo"]
+
+        quote = await failover.get_quote("AAPL")
+        assert quote.source == "massive"
+        assert quote.price == Decimal("90")
+        assert live.calls == 0
+
+    async def test_an_elected_delayed_primary_is_still_stamped_stale(self):
+        """Electing it does not make it fresh — it is contractually behind."""
+        delayed = self._delayed(quote=_quote(price="90"))
+        failover = FailoverQuoteProvider(
+            [delayed, StaticProvider("yahoo", _quote())], quote_primary=delayed
+        )
+        quote = await failover.get_quote("AAPL")
+        assert quote.stale is True
+
+    async def test_no_election_leaves_demotion_exactly_as_it_was(self):
+        """The keyless install must be byte-identical to today."""
+        delayed = self._delayed(quote=_quote(price="90"))
+        live = StaticProvider("yahoo", _quote(price="100"))
+        failover = FailoverQuoteProvider([delayed, live])
+
+        assert [p.name for p in failover.quote_order()] == ["yahoo", "massive"]
+        quote = await failover.get_quote("AAPL")
+        assert quote.source == "yahoo"
+
+    def test_electing_a_provider_outside_the_chain_is_rejected(self):
+        """A primary that is not in the chain would silently never be consulted."""
+        with pytest.raises(ValueError):
+            FailoverQuoteProvider(
+                [StaticProvider("yahoo")], quote_primary=self._delayed()
+            )
+
+    async def test_the_chain_behind_the_election_keeps_its_own_head(self):
+        """Falling through to the free chain is not degradation.
+
+        The elected primary is an *addition* in front of the chain, so the rest
+        is ranked as if the election did not exist: Yahoo is still the head of
+        the free chain and its quote is still fresh. Ranking it as a fallback
+        would badge every live Yahoo price "delayed" for the whole life of a
+        keyed install whose Massive quote surface is unentitled.
+        """
+        delayed = self._delayed(quote=None)  # entitled but nothing to say
+        yahoo = StaticProvider("yahoo", _quote(price="100"))
+        stooq = StaticProvider("stooq", _quote(price="99"))
+        failover = FailoverQuoteProvider(
+            [delayed, yahoo, stooq], quote_primary=delayed
+        )
+
+        quote = await failover.get_quote("AAPL")
+        assert quote.source == "yahoo"
+        assert quote.stale is False
+
+    async def test_the_free_chain_still_stamps_its_own_fallbacks_stale(self):
+        """Re-ranking the remainder must not disarm staleness altogether."""
+        delayed = self._delayed(quote=None)
+        yahoo = StaticProvider("yahoo", None)
+        stooq = StaticProvider("stooq", _quote(price="99"))
+        failover = FailoverQuoteProvider(
+            [delayed, yahoo, stooq], quote_primary=delayed
+        )
+
+        quote = await failover.get_quote("AAPL")
+        assert quote.source == "stooq"
+        assert quote.stale is True
+
+    async def test_live_first_ordering_survives_behind_the_election(self):
+        """Only the elected provider jumps the queue; the rest is unchanged."""
+        elected = self._delayed(name="massive")
+        other_delayed = self._delayed(name="other_delayed")
+        yahoo = StaticProvider("yahoo")
+        failover = FailoverQuoteProvider(
+            [elected, other_delayed, yahoo], quote_primary=elected
+        )
+        assert [p.name for p in failover.quote_order()] == [
+            "massive",
+            "yahoo",
+            "other_delayed",
+        ]
+
+    async def test_an_unentitled_primary_fast_fails_to_the_free_chain(self):
+        """Missing entitlement routes on immediately — no retries, no sleeps.
+
+        ``ProviderUnentitledError`` is re-raised untouched by
+        ``ResilientProvider``, so the elected primary can never become the
+        rate-determining step for an install that does not own the surface.
+        """
+        sleeps: list[float] = []
+
+        async def _record_sleep(delay):
+            sleeps.append(delay)
+
+        unentitled = self._delayed()
+        unentitled.get_quote = AsyncMock(
+            side_effect=ProviderUnentitledError("quote not entitled")
+        )
+        primary = ResilientProvider(
+            unentitled, max_retries=2, sleep=_record_sleep, jitter=False
+        )
+        yahoo = StaticProvider("yahoo", _quote(price="100"))
+        failover = FailoverQuoteProvider([primary, yahoo], quote_primary=primary)
+
+        quote = await failover.get_quote("AAPL")
+
+        assert quote.source == "yahoo"
+        assert quote.stale is False
+        assert unentitled.get_quote.await_count == 1, "no retry budget was spent"
+        assert sleeps == [], "an unentitled surface must not back off"
+        assert primary.breaker.failure_count == 0, "not a health event"
+
+    async def test_an_erroring_primary_falls_through_to_the_free_chain(self):
+        raising = RaisingProvider(CircuitOpenError("massive circuit is open"))
+        raising.delayed_quotes = True
+        yahoo = StaticProvider("yahoo", _quote(price="100"))
+        failover = FailoverQuoteProvider([raising, yahoo], quote_primary=raising)
+
+        quote = await failover.get_quote("AAPL")
+
+        assert raising.calls == 1
+        assert quote.source == "yahoo"
+        assert quote.stale is False
+
+    def test_election_does_not_change_the_chain_freshness_properties(self):
+        """A chain holding a live leaf is live, elected primary or not."""
+        delayed = self._delayed()
+        failover = FailoverQuoteProvider(
+            [delayed, StaticProvider("yahoo")], quote_primary=delayed
+        )
+        assert failover.delayed_quotes is False
+        assert failover.quote_delay_minutes == 0

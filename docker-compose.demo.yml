@@ -170,12 +170,24 @@ services:
     # than this config-only fix's scope and is left as a follow-up.
     #
     # Same --timeout=5 hardening as celery_worker above (explicit instead of
-    # relying on celery's undocumented 1.0s CLI default); still bounded by
-    # this healthcheck's own 10s `timeout:` ceiling.
+    # relying on celery's undocumented 1.0s CLI default).
+    #
+    # `timeout:` below is 30s, not celery_worker's 10s (BR16): the ping itself
+    # replies with "pong ... 1 node online" well inside 5s, but this container
+    # boots app.tasks.celery_app fresh on every invocation, which re-runs
+    # Settings' production validation and re-prints its two non-fatal startup
+    # WARNINGs (ENCRYPTION_KEY fallback + CORS_ORIGINS localhost, see
+    # core/config.py) on every single healthcheck exec, not just once at
+    # process start. That per-invocation overhead was pushing the total
+    # `CMD-SHELL` invocation past a 10s ceiling intermittently - a real pong
+    # arriving too late to be counted, not a flaky broker or a slow worker,
+    # so retries never helped. Widened to match `interval: 30s` above; the
+    # two WARNINGs are left visible/unsilenced (out of this config-only
+    # fix's scope - see ENCRYPTION_KEY/CORS handling in core/config.py).
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping --timeout=5"]
       interval: 30s
-      timeout: 10s
+      timeout: 30s
       retries: 3
       start_period: 30s
     depends_on:

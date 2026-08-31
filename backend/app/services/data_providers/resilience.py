@@ -143,6 +143,20 @@ class CircuitBreaker:
         self._failures = max(self._failures, self.failure_threshold)
         self._probe_in_flight = False
 
+    def release_probe(self) -> None:
+        """Release an admitted half-open probe without it being a health event.
+
+        ``record_success``/``record_failure`` already clear
+        ``_probe_in_flight`` on the normal paths. This is the backstop for a
+        call that ``allow()`` admitted but that resolves neither way — today
+        that is exactly ``ProviderUnentitledError``: not a health event, so
+        neither record method is the right one to call, but the single
+        half-open admission still has to be freed or no probe is ever sent
+        again. Idempotent: safe to call when no probe was in flight (closed,
+        or the probe already resolved).
+        """
+        self._probe_in_flight = False
+
 
 class ResilientProvider(MarketDataProvider):
     """Wrap a provider with retry + exponential backoff + a circuit breaker.
@@ -217,43 +231,58 @@ class ResilientProvider(MarketDataProvider):
         method = getattr(self._provider, method_name)
         last_exc: Exception | None = None
 
-        for attempt in range(self.max_retries + 1):
-            try:
-                result = await method(*args)
-            except ProviderUnentitledError:
-                # Not a health event and not retryable: the plan does not
-                # include this surface, and no amount of retrying will change
-                # that. Re-raised untouched so the failover chain routes past
-                # it, while the breaker — shared across every capability of
-                # this provider — stays exactly where it was. Counting an
-                # unowned dataset as a failure would take the surfaces we *do*
-                # own down with it.
-                raise
-            except Exception as exc:  # noqa: BLE001 — any upstream failure retries
-                last_exc = exc
-                logger.warning(
-                    "%s.%s attempt %d/%d failed: %s",
-                    self.name,
-                    method_name,
-                    attempt + 1,
-                    self.max_retries + 1,
-                    exc,
-                )
-                if attempt < self.max_retries:
-                    await self._sleep(self._backoff(attempt))
-                    continue
-                break
-            else:
-                # A clean result (including a "not found" None/[]) is success:
-                # the upstream is healthy, the symbol simply had no data.
-                self.breaker.record_success()
-                return result
+        # ``allow()`` above may have admitted this call as the single
+        # half-open probe. ``record_success``/``record_failure`` release that
+        # admission on the paths that reach them, but ``ProviderUnentitledError``
+        # deliberately reaches neither (see below) — so the release has to be
+        # unconditional, in a ``finally``, or an admitted probe that turns out
+        # to be unentitled leaves ``_probe_in_flight`` stuck ``True`` forever.
+        # Nothing else can transition a half-open breaker back out of that
+        # state, so every later call — including ones for surfaces this
+        # provider *is* entitled to — would fast-fail as if a probe were
+        # perpetually in flight. ``release_probe()`` is idempotent, so calling
+        # it again after ``record_success``/``record_failure`` already did is
+        # harmless.
+        try:
+            for attempt in range(self.max_retries + 1):
+                try:
+                    result = await method(*args)
+                except ProviderUnentitledError:
+                    # Not a health event and not retryable: the plan does not
+                    # include this surface, and no amount of retrying will change
+                    # that. Re-raised untouched so the failover chain routes past
+                    # it, while the breaker — shared across every capability of
+                    # this provider — stays exactly where it was. Counting an
+                    # unowned dataset as a failure would take the surfaces we *do*
+                    # own down with it.
+                    raise
+                except Exception as exc:  # noqa: BLE001 — any upstream failure retries
+                    last_exc = exc
+                    logger.warning(
+                        "%s.%s attempt %d/%d failed: %s",
+                        self.name,
+                        method_name,
+                        attempt + 1,
+                        self.max_retries + 1,
+                        exc,
+                    )
+                    if attempt < self.max_retries:
+                        await self._sleep(self._backoff(attempt))
+                        continue
+                    break
+                else:
+                    # A clean result (including a "not found" None/[]) is success:
+                    # the upstream is healthy, the symbol simply had no data.
+                    self.breaker.record_success()
+                    return result
 
-        self.breaker.record_failure()
-        raise ProviderError(
-            f"{self.name}.{method_name} failed after "
-            f"{self.max_retries + 1} attempts"
-        ) from last_exc
+            self.breaker.record_failure()
+            raise ProviderError(
+                f"{self.name}.{method_name} failed after "
+                f"{self.max_retries + 1} attempts"
+            ) from last_exc
+        finally:
+            self.breaker.release_probe()
 
     async def get_quote(self, symbol: str) -> QuoteResponse | None:
         return await self._call("get_quote", symbol)
@@ -367,18 +396,44 @@ class FailoverQuoteProvider(MarketDataProvider):
     The first provider is the primary; the rest are fallbacks. For each
     capability, providers that don't support it are skipped, a provider whose
     breaker is open (``CircuitOpenError``) or that raises is skipped, and the
-    first provider to return data wins. Anything served by a fallback (not the
-    primary) is stamped ``stale=True`` with ``source`` set to the winning
-    provider so the UI can show a "delayed / fallback data" badge.
+    first provider to return data wins. Anything served by a fallback (a
+    provider that is not at the head of its own chain) is stamped ``stale=True``
+    with ``source`` set to the winning provider so the UI can show a "delayed /
+    fallback data" badge.
 
-    **Quotes carry one extra, non-negotiable ordering rule.** A provider that
-    declares ``delayed_quotes = True`` (a plan contracted to serve prices behind
-    a fixed delay — Massive/Polygon's 15-minute Starter tier) is consulted only
-    after *every* live provider, no matter where the caller placed it in the
-    list, and any quote it wins is always stamped ``stale=True``. The ordering
-    is enforced here rather than left to the chain builder because getting it
-    wrong is silent: the UI would render a 15-minute-old price as current. See
-    ``_quote_candidates``.
+    **Quotes carry one extra ordering rule, and exactly one override.** A
+    provider that declares ``delayed_quotes = True`` (a plan contracted to serve
+    prices behind a fixed delay — Massive/Polygon's 15-minute Starter tier) is
+    consulted only after *every* live provider, no matter where the caller
+    placed it in the list, and any quote it wins is always stamped
+    ``stale=True``. The ordering is enforced here rather than left to the chain
+    builder because getting it wrong is silent: the UI would render a
+    15-minute-old price as current. See ``_quote_candidates``.
+
+    The override is ``quote_primary``: an **explicit election**, naming one
+    member of ``providers`` as the quote primary. An elected provider is
+    consulted first even when it is delayed. The distinction the demotion rule
+    needs is *accident vs. intent* — a delayed provider that merely happens to
+    sit at the head of the list is an editing mistake and is still demoted,
+    while a provider passed as ``quote_primary`` is an operator who configured a
+    paid feed and asked for it in front. Electing it changes only the consult
+    order: the quote is still stamped ``stale=True`` (``_is_delayed`` is
+    consulted independently of position), so a delayed price is never
+    laundered into a fresh one.
+
+    Two properties of the election are load-bearing:
+
+    - **It is passed in, never self-asserted.** Selection lives in the chain
+      builder (``get_quote_provider``); providers stay unaware of each other and
+      of their own rank. A provider that could elect *itself* would put the
+      15-minute-delayed decision back inside the thing that benefits from it.
+    - **The chain behind the election keeps its own head.** The elected primary
+      is an addition in *front* of the chain, so the remaining providers are
+      ranked as if the election had not happened — the free chain's first
+      provider is still a primary and its quote is still fresh. Ranking the
+      remainder as fallbacks would badge every live Yahoo price "delayed" for
+      the entire life of an install whose elected primary is unentitled for
+      quotes, which is a false alarm, not a safety margin.
 
     The rule is scoped to quotes on purpose. History, fundamentals and search
     are delay-insensitive — a daily bar or a P/E ratio from a delayed plan is
@@ -405,32 +460,63 @@ class FailoverQuoteProvider(MarketDataProvider):
 
     name = "failover"
 
-    def __init__(self, providers: Sequence[MarketDataProvider]) -> None:
+    def __init__(
+        self,
+        providers: Sequence[MarketDataProvider],
+        *,
+        quote_primary: MarketDataProvider | None = None,
+    ) -> None:
         if not providers:
             raise ValueError("FailoverQuoteProvider needs at least one provider")
         self.providers: list[MarketDataProvider] = list(providers)
+        if quote_primary is not None and not any(
+            provider is quote_primary for provider in self.providers
+        ):
+            # Identity, not equality: the elected object must be the same one
+            # the chain consults, or the election would silently do nothing —
+            # the exact failure mode (a delayed feed quietly demoted again)
+            # this parameter exists to prevent.
+            raise ValueError(
+                "quote_primary must be one of the providers in the chain"
+            )
+        #: The explicitly elected quote primary, or ``None`` for the default
+        #: live-first ordering. Public so the election is inspectable at
+        #: runtime rather than only visible in ``quote_order()``.
+        self.quote_primary = quote_primary
         self.capabilities = frozenset().union(
             *(getattr(p, "capabilities", frozenset()) for p in self.providers)
         )
 
-    def _quote_leaves(self) -> list[tuple[int, MarketDataProvider]]:
-        """``(priority, leaf)`` for every reachable quote source, caller order.
+    @staticmethod
+    def _leaves_of(
+        providers: Sequence[MarketDataProvider],
+    ) -> list[tuple[int, MarketDataProvider]]:
+        """``(priority, leaf)`` for every reachable quote source in ``providers``.
 
-        ``priority`` is the position in ``self.providers`` of the top-level
-        entry the leaf was reached through — deliberately *not* a re-numbering
-        of the flattened list. That keeps the pre-existing "fresh only from the
-        head of the chain" rule byte-identical: a flat chain gets exactly the
-        indices ``_candidates(QUOTE)`` used to yield (including the detail that
-        a provider lacking QUOTE capability still consumes its position), and a
+        ``priority`` is the position in ``providers`` of the top-level entry the
+        leaf was reached through — deliberately *not* a re-numbering of the
+        flattened list. That keeps the pre-existing "fresh only from the head of
+        the chain" rule byte-identical: a flat chain gets exactly the indices
+        ``_candidates(QUOTE)`` used to yield (including the detail that a
+        provider lacking QUOTE capability still consumes its position), and a
         leaf inside the primary inherits the primary's priority rather than
         being promoted or demoted by an accident of nesting depth.
+
+        Takes the list rather than reading ``self.providers`` so the same
+        numbering can be applied to the chain *behind* an elected primary. That
+        is the whole mechanism by which the election adds a source in front
+        without demoting the free chain's own head to a fallback.
         """
         pairs: list[tuple[int, MarketDataProvider]] = []
-        for index, provider in enumerate(self.providers):
+        for index, provider in enumerate(providers):
             if provider.supports(ProviderCapability.QUOTE):
                 for leaf in _flatten_quote_providers(provider):
                     pairs.append((index, leaf))
         return pairs
+
+    def _quote_leaves(self) -> list[tuple[int, MarketDataProvider]]:
+        """``(priority, leaf)`` for every reachable quote source, caller order."""
+        return self._leaves_of(self.providers)
 
     def _quote_capable(self) -> list[MarketDataProvider]:
         """Every leaf quote source reachable from this chain, in caller order.
@@ -481,25 +567,54 @@ class FailoverQuoteProvider(MarketDataProvider):
             if provider.supports(capability):
                 yield index, provider
 
+    @staticmethod
+    def _live_first(
+        pairs: list[tuple[int, MarketDataProvider]],
+    ) -> list[tuple[int, MarketDataProvider]]:
+        """Stable partition: delayed providers after live ones, order kept.
+
+        Only ever demotes a delayed provider; never reshuffles the live
+        providers among themselves.
+        """
+        live = [pair for pair in pairs if not _is_delayed(pair[1])]
+        delayed = [pair for pair in pairs if _is_delayed(pair[1])]
+        return live + delayed
+
     def _quote_candidates(self):
-        """Yield ``(index, provider)`` for quotes, delayed providers demoted.
+        """Yield ``(index, provider)`` for quotes: election first, then live-first.
 
         The candidate set is the **flattened** one, so the live/delayed
         partition is a single global decision over every reachable quote source
         rather than a per-level one that a nested chain can defeat.
 
-        ``index`` is the caller-declared priority from ``_quote_leaves`` — the
-        top-level position, not a re-numbering — so the existing "stale unless
-        it came from the head of the chain" rule is untouched; only the
-        *consult order* changes.
+        ``index`` is a caller-declared priority, not a rank in this generator's
+        output, so the existing "stale unless it came from the head of the
+        chain" rule keeps working off positions rather than off consult order.
+
+        With no election this is exactly the old behaviour: the top-level
+        positions from ``_quote_leaves``, live sources before delayed ones.
+
+        With an election the elected provider's leaves come first at priority
+        ``0``, and the **remaining** providers are then numbered and partitioned
+        among themselves — as if the elected primary were not in the list at
+        all. An elected primary is an addition in front of the chain, so the
+        chain behind it keeps its own head: the first free provider still
+        answers as a primary (fresh), and only *its* fallbacks are stamped
+        stale. The alternative — leaving the remainder on their original
+        indices — would mark every live quote from the free chain as delayed
+        fallback data for as long as the election stood.
         """
-        supported = self._quote_leaves()
-        live = [pair for pair in supported if not _is_delayed(pair[1])]
-        delayed = [pair for pair in supported if _is_delayed(pair[1])]
-        # Stable partition: only ever demotes a delayed provider, never
-        # reshuffles the live providers among themselves.
-        yield from live
-        yield from delayed
+        primary = self.quote_primary
+        if primary is None:
+            yield from self._live_first(self._quote_leaves())
+            return
+
+        # Elected: consulted first, at head priority, delayed or not. Staleness
+        # is unaffected — ``get_quote`` also consults ``_is_delayed``.
+        yield from self._leaves_of([primary])
+        yield from self._live_first(
+            self._leaves_of([p for p in self.providers if p is not primary])
+        )
 
     def quote_order(self) -> list[MarketDataProvider]:
         """Leaf quote providers in the order ``get_quote`` will consult them.

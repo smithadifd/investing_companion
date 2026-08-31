@@ -191,10 +191,15 @@ class Settings(BaseSettings):
     ALPHA_VANTAGE_API_KEY: str = ""
     # Massive (formerly Polygon.io). Keeps the POLYGON_ spelling so existing
     # deployments keep working across the rebrand. Key-gated: when empty,
-    # ``get_quote_provider()`` never builds the provider. Serves history /
-    # fundamentals / search; its quotes are 15-minute delayed on the Starter
-    # plan and are ranked below every live source
-    # (see app/services/data_providers/massive.py).
+    # ``get_quote_provider()`` never builds the provider and the free chain is
+    # exactly what it always was.
+    #
+    # Setting it PROMOTES Massive to primary on every surface — quote, history,
+    # fundamentals, search — with the free chain (Yahoo -> Stooq -> Alpha
+    # Vantage) behind it. Starter-plan quotes are 15 minutes delayed; that is
+    # made honest by the label the UI renders, not by demoting the feed. See
+    # app/services/data_providers/__init__.py for the election and
+    # app/services/data_providers/massive.py for the provider.
     POLYGON_API_KEY: str = ""
     # Which Massive products the key above actually holds, comma-separated, in
     # the app's own surface vocabulary: quote, history, fundamentals, search.

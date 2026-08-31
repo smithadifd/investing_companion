@@ -31,10 +31,16 @@ class QuoteResponse(BaseModel):
     volume: int
     market_cap: int | None = None
     timestamp: datetime
-    # Provider-resilience metadata: which provider produced the quote and
-    # whether it is degraded (served by a fallback because the primary was
-    # unavailable). ``timestamp`` above is the "as of" time the UI renders so a
-    # user can see when data went stale.
+    # Provider-resilience metadata: which provider produced the quote, and
+    # whether the price is behind. ``stale`` has two causes and deliberately
+    # does not distinguish them — a fallback served it because the primary was
+    # unavailable, OR the winning provider's plan is contractually delayed
+    # (Massive's 15-minute Starter tier stamps it at the source, elected primary
+    # or not). ``source`` is what separates the two for display: the UI maps a
+    # known contractually delayed provider to a neutral "15-min delayed" label
+    # and everything else to the degraded-fallback warning. ``timestamp`` above
+    # is the "as of" time the UI renders, so the age of the data itself is
+    # always visible whichever cause applies.
     source: str | None = None
     stale: bool = False
 

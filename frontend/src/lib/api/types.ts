@@ -22,9 +22,13 @@ export interface Quote {
   volume: number;
   market_cap: number | null;
   timestamp: string;
-  /** Provider that produced the quote (e.g. "yahoo", "stooq"). */
+  /** Provider that produced the quote (e.g. "yahoo", "stooq", "massive"). */
   source?: string | null;
-  /** True when served by a fallback because the primary was unavailable. */
+  /**
+   * True when the price is behind — either a fallback served it because the
+   * primary was unavailable, or the winning provider's plan is contractually
+   * delayed. `source` is what tells those apart; see `QuoteHeader`.
+   */
   stale?: boolean;
 }
 

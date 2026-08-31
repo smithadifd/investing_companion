@@ -79,11 +79,19 @@ class MarketDataProvider(ABC):
     # --- Quote freshness contract -------------------------------------------
     # ``True`` marks a provider whose *plan* contractually serves quotes behind
     # a fixed delay (e.g. Massive/Polygon's 15-minute-delayed Starter tier).
-    # ``FailoverQuoteProvider`` treats this as a hard ordering constraint: a
-    # delayed provider is only ever consulted AFTER every live one, and any
-    # quote it wins is always stamped ``stale=True``. Serving a contractually
-    # delayed price ahead of an available live price is a correctness bug — the
+    # ``FailoverQuoteProvider`` treats this as an ordering constraint: by
+    # default a delayed provider is consulted AFTER every live one, whatever
+    # position the chain builder gave it. Serving a contractually delayed price
+    # ahead of an available live price *by accident* is a correctness bug — the
     # UI would show a 15-minute-old number with no indication it was behind.
+    #
+    # The demotion yields to exactly one thing: an explicit ``quote_primary``
+    # election passed to ``FailoverQuoteProvider`` — an operator who configured
+    # a paid feed and asked for it first. The flag's other half is unconditional
+    # either way: any quote a delayed provider wins is always stamped
+    # ``stale=True``, elected or not, so the price is never presented as fresh.
+    # (What the election changes is the UI *copy*: a neutral "15-min delayed"
+    # label instead of a degraded-fallback warning.)
     #
     # This is deliberately narrower than "the data might lag". Stooq's quote is
     # built from an end-of-day bar and can trail the live print, but that lag is

@@ -37,7 +37,7 @@ def get_quote_provider() -> FailoverQuoteProvider:
     """Build (once) the resilient, failover-capable market-data provider.
 
     Sibling of ``get_extended_quote_provider``: *selection* lives here and the
-    providers stay unaware of each other. The chain is, in priority order:
+    providers stay unaware of each other. The free chain is, in priority order:
 
       1. **Yahoo**, wrapped in retry + exponential backoff + circuit-breaker
          (``ResilientProvider``) — the primary for quote/history/fundamentals/
@@ -46,16 +46,33 @@ def get_quote_provider() -> FailoverQuoteProvider:
          flaky Stooq is retried/broken independently.
       3. **Alpha Vantage** — a quote fallback added *only* when
          ``ALPHA_VANTAGE_API_KEY`` is set (key-gated; inert otherwise).
-      4. **Massive** (Polygon.io) — added *only* when ``POLYGON_API_KEY`` is
-         set. Appended last on purpose: the Starter plan is 15-minute delayed,
-         so it must never outrank a live quote source. That ordering is also
-         enforced structurally — ``MassiveProvider.delayed_quotes`` is ``True``
-         and ``FailoverQuoteProvider`` demotes any delayed provider below every
-         live one for quotes regardless of its position in this list. Appending
-         it here is the belt; the flag is the braces. Which of its surfaces are
-         usable is declared in ``MASSIVE_ENTITLEMENTS``; an unentitled surface
-         raises ``ProviderUnentitledError`` and the chain routes past it exactly
-         as it would past a failure.
+
+    **A configured ``POLYGON_API_KEY`` promotes Massive (Polygon.io) to the
+    front of that chain on every surface, and elects it as the quote primary.**
+    A key is an explicit purchase of a better feed, so the paid source leads
+    rather than backstops. Nothing about the free chain changes: without the
+    key this function builds exactly the list above and elects nobody.
+
+    Massive's Starter plan is 15-minute delayed, and the promotion deliberately
+    does *not* pretend otherwise:
+
+    - The quote still comes back ``stale=True`` (stamped by ``parse_snapshot``
+      at the source), and the UI renders that provenance as a neutral
+      "15-min delayed" label instead of a degraded-fallback warning.
+    - The structural demotion in ``FailoverQuoteProvider`` is untouched and
+      still the default. It is overridden only by the explicit ``quote_primary``
+      election passed below, so a chain that puts a delayed provider first *by
+      accident* is still corrected — the guard survives, it just now
+      distinguishes an accident from a decision.
+    - The election is an addition in front of the chain, so Yahoo remains the
+      free chain's own head: when Massive cannot answer, Yahoo's quote is still
+      reported fresh rather than badged as fallback data.
+
+    Which of Massive's surfaces are usable is declared in
+    ``MASSIVE_ENTITLEMENTS``; an unentitled surface raises
+    ``ProviderUnentitledError`` *before the request leaves the process* and the
+    chain routes past it exactly as it would past a failure, so an unowned
+    surface costs nothing on the way to the free chain.
 
     A quote served by any fallback is stamped ``stale=True`` with its ``source``
     so the UI can show a degraded-data badge. Cached at module scope; call
@@ -83,10 +100,12 @@ def get_quote_provider() -> FailoverQuoteProvider:
     except Exception as exc:  # noqa: BLE001 — a bad optional provider must not break the chain
         logger.warning("Alpha Vantage fallback unavailable: %s", exc)
 
-    # Key-gated, and appended LAST: Massive's Starter plan serves 15-minute
-    # delayed quotes, which must never be preferred over a live source. Its
-    # history / fundamentals / search are delay-insensitive and benefit from
-    # being in the chain at all.
+    # Key-gated, and PROMOTED TO THE FRONT: a configured key is an explicit
+    # purchase of the paid feed, so Massive leads every surface. Quotes need the
+    # election as well as the position — the delayed demotion in
+    # ``FailoverQuoteProvider`` outranks list order by design, and only an
+    # explicit ``quote_primary`` yields to intent.
+    quote_primary: MarketDataProvider | None = None
     try:
         from app.services.data_providers.massive import (
             MassiveProvider,
@@ -95,18 +114,24 @@ def get_quote_provider() -> FailoverQuoteProvider:
 
         if is_massive_configured():
             massive = MassiveProvider()
-            chain.append(ResilientProvider(massive))
+            # One object, used as both the chain member and the election — the
+            # chain checks identity, so a second instance would never be
+            # consulted.
+            quote_primary = ResilientProvider(massive)
+            chain.insert(0, quote_primary)
             logger.info(
-                "Massive (Polygon.io) provider enabled (API key configured); "
-                "quotes are delayed and rank below every live source. "
-                "Entitled surfaces: %s (MASSIVE_ENTITLEMENTS) — anything else "
-                "routes to the next provider",
+                "Massive (Polygon.io) provider enabled (API key configured) and "
+                "elected PRIMARY on every surface; its quotes are 15-minute "
+                "delayed and are labelled as such rather than ranked below the "
+                "free chain. Entitled surfaces: %s (MASSIVE_ENTITLEMENTS) — "
+                "anything else routes to the next provider",
                 massive.entitlements.describe(),
             )
     except Exception as exc:  # noqa: BLE001 — a bad optional provider must not break the chain
         logger.warning("Massive provider unavailable: %s", exc)
+        quote_primary = None
 
-    _quote_provider = FailoverQuoteProvider(chain)
+    _quote_provider = FailoverQuoteProvider(chain, quote_primary=quote_primary)
     return _quote_provider
 
 

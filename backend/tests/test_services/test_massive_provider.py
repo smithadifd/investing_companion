@@ -20,7 +20,12 @@ from decimal import Decimal
 
 import pytest
 
-from app.schemas.equity import OHLCVData, QuoteResponse
+from app.schemas.equity import (
+    EquitySearchResult,
+    FundamentalsResponse,
+    OHLCVData,
+    QuoteResponse,
+)
 from app.services.data_providers.base import (
     MarketDataProvider,
     ProviderCapability,
@@ -43,6 +48,18 @@ from app.services.data_providers.resilience import (
 
 # A fake key. Never a real credential — the provider is never given one in tests.
 TEST_KEY = "test-key"
+
+# Surface name -> the chain method that serves it, for the parametrized
+# primary-first / fast-fail tests below.
+_SURFACE_CALL = {
+    "history": "get_history",
+    "fundamentals": "get_fundamentals",
+    "search": "search",
+}
+
+# A non-empty fundamentals answer, so "the primary answered" is distinguishable
+# from the all-None response the chain deliberately treats as no answer.
+_FUNDAMENTALS = FundamentalsResponse(pe_ratio=Decimal("21.5"))
 
 _SNAPSHOT = {
     "status": "OK",
@@ -733,7 +750,16 @@ class TestDelayedQuoteChainPosition:
 
 
 class TestChainWiring:
-    """``get_quote_provider()`` builds the chain with Massive appended last."""
+    """``get_quote_provider()`` — a configured key promotes Massive to primary.
+
+    **This reverses the original wiring on purpose** (row BQ1). Massive used to
+    be appended last so its delayed quotes could never outrank a live source;
+    the paid key is now the elected primary on every surface, and the delayed
+    quote is made honest by the label rather than by the ordering. The
+    *structural* demotion is untouched and still the default — it is only
+    yielded to by the explicit ``quote_primary`` election, so a hand-mis-ordered
+    chain is still corrected (see ``test_ordering_survives_a_mis_ordered_chain``).
+    """
 
     def test_absent_without_a_key(self, monkeypatch):
         from app.core.config import settings
@@ -748,7 +774,23 @@ class TestChainWiring:
         finally:
             data_providers.reset_quote_provider()
 
-    def test_appended_last_when_keyed(self, monkeypatch):
+    def test_keyless_chain_is_unchanged_and_elects_nobody(self, monkeypatch):
+        """The free install must be exactly what it was before this row."""
+        from app.core.config import settings
+        from app.services import data_providers
+
+        monkeypatch.setattr(settings, "POLYGON_API_KEY", "")
+        monkeypatch.setattr(settings, "ALPHA_VANTAGE_API_KEY", "")
+        data_providers.reset_quote_provider()
+        try:
+            chain = data_providers.get_quote_provider()
+            assert [p.name for p in chain.providers] == ["yahoo", "stooq"]
+            assert chain.quote_primary is None
+            assert [p.name for p in chain.quote_order()] == ["yahoo", "stooq"]
+        finally:
+            data_providers.reset_quote_provider()
+
+    def test_promoted_to_primary_when_keyed(self, monkeypatch):
         from app.core.config import settings
         from app.services import data_providers
 
@@ -758,10 +800,50 @@ class TestChainWiring:
         try:
             chain = data_providers.get_quote_provider()
             names = [p.name for p in chain.providers]
-            assert names[-1] == "massive"
-            assert names[0] == "yahoo"
-            # And the enforced quote order agrees with the hand-built order.
-            assert [p.name for p in chain.quote_order()][-1] == "massive"
+            assert names[0] == "massive", "Massive leads every surface when keyed"
+            assert names[1] == "yahoo"
+            # Quotes need the explicit election to beat the delayed demotion.
+            assert chain.quote_primary is not None
+            assert chain.quote_primary.name == "massive"
+            assert [p.name for p in chain.quote_order()][0] == "massive"
+        finally:
+            data_providers.reset_quote_provider()
+
+    def test_the_elected_primary_is_the_chain_member_itself(self, monkeypatch):
+        """Identity, not a second instance — a copy would never be consulted."""
+        from app.core.config import settings
+        from app.services import data_providers
+
+        monkeypatch.setattr(settings, "POLYGON_API_KEY", TEST_KEY)
+        data_providers.reset_quote_provider()
+        try:
+            chain = data_providers.get_quote_provider()
+            assert any(p is chain.quote_primary for p in chain.providers)
+        finally:
+            data_providers.reset_quote_provider()
+
+    def test_the_free_chain_keeps_its_order_behind_the_election(self, monkeypatch):
+        """Promotion adds a head; it must not reshuffle what was already there."""
+        from app.core.config import settings
+        from app.services import data_providers
+
+        monkeypatch.setattr(settings, "POLYGON_API_KEY", TEST_KEY)
+        monkeypatch.setattr(settings, "ALPHA_VANTAGE_API_KEY", TEST_KEY)
+        data_providers.reset_quote_provider()
+        try:
+            chain = data_providers.get_quote_provider()
+            assert [p.name for p in chain.providers] == [
+                "massive",
+                "yahoo",
+                "stooq",
+                "alpha_vantage",
+            ]
+            assert [p.name for p in chain.quote_order()] == [
+                "massive",
+                "yahoo",
+                "stooq",
+                "alpha_vantage",
+            ]
         finally:
             data_providers.reset_quote_provider()
 
@@ -778,3 +860,121 @@ class TestChainWiring:
                 assert massive.supports(capability)
         finally:
             data_providers.reset_quote_provider()
+
+
+class TestPrimaryFirstOnEverySurface:
+    """Seam (c): history / fundamentals / search resolve Massive first too.
+
+    Those surfaces never had a delay rule to fight — ``_candidates`` has always
+    followed the caller's order — so putting Massive at the head of the chain is
+    the whole mechanism. What is worth pinning is the pair of properties that
+    make it safe: it is consulted *first*, and an unentitled or failing surface
+    routes on to the free chain immediately, without spending a retry budget or
+    a network round trip.
+    """
+
+    class _Recorder(MarketDataProvider):
+        capabilities = frozenset(ProviderCapability)
+
+        def __init__(self, name, *, unentitled=False, empty=False):
+            self.name = name
+            self._unentitled = unentitled
+            self._empty = empty
+            self.calls: list[str] = []
+
+        def _answer(self, surface, value):
+            self.calls.append(surface)
+            if self._unentitled:
+                raise ProviderUnentitledError(f"{self.name} lacks {surface}")
+            return [] if self._empty and isinstance(value, list) else value
+
+        async def get_history(self, symbol, period="1y", interval="1d"):
+            return self._answer(
+                "history",
+                [
+                    OHLCVData(
+                        timestamp=datetime(2026, 8, 30),
+                        open=Decimal("1"),
+                        high=Decimal("1"),
+                        low=Decimal("1"),
+                        close=Decimal("1"),
+                        volume=1,
+                    )
+                ],
+            )
+
+        async def get_fundamentals(self, symbol):
+            self.calls.append("fundamentals")
+            if self._unentitled:
+                raise ProviderUnentitledError(f"{self.name} lacks fundamentals")
+            return None if self._empty else _FUNDAMENTALS
+
+        async def search(self, query, limit=20):
+            return self._answer(
+                "search", [EquitySearchResult(symbol="AAPL", name="Apple Inc.")]
+            )
+
+    async def test_history_resolves_the_head_of_the_chain_first(self):
+        massive = self._Recorder("massive")
+        yahoo = self._Recorder("yahoo")
+        chain = FailoverQuoteProvider([massive, yahoo], quote_primary=massive)
+
+        bars = await chain.get_history("AAPL")
+
+        assert bars, "the primary answered"
+        assert massive.calls == ["history"]
+        assert yahoo.calls == [], "the fallback was never consulted"
+
+    async def test_fundamentals_resolve_the_head_of_the_chain_first(self):
+        massive = self._Recorder("massive")
+        yahoo = self._Recorder("yahoo")
+        chain = FailoverQuoteProvider([massive, yahoo], quote_primary=massive)
+
+        assert await chain.get_fundamentals("AAPL") is _FUNDAMENTALS
+        assert yahoo.calls == []
+
+    async def test_search_resolves_the_head_of_the_chain_first(self):
+        massive = self._Recorder("massive")
+        yahoo = self._Recorder("yahoo")
+        chain = FailoverQuoteProvider([massive, yahoo], quote_primary=massive)
+
+        assert await chain.search("apple")
+        assert yahoo.calls == []
+
+    @pytest.mark.parametrize("surface", ["history", "fundamentals", "search"])
+    async def test_an_unentitled_surface_fast_fails_to_the_free_chain(self, surface):
+        """No retries, no round trip — the free chain is the rate-determining step.
+
+        ``ProviderUnentitledError`` is raised before the request leaves the
+        process and is re-raised untouched by ``ResilientProvider``, so a key
+        that does not own a surface costs nothing on the way past it.
+        """
+        sleeps: list[float] = []
+
+        async def _record_sleep(delay):
+            sleeps.append(delay)
+
+        massive = self._Recorder("massive", unentitled=True)
+        primary = ResilientProvider(
+            massive, max_retries=2, sleep=_record_sleep, jitter=False
+        )
+        yahoo = self._Recorder("yahoo")
+        chain = FailoverQuoteProvider([primary, yahoo], quote_primary=primary)
+
+        result = await getattr(chain, _SURFACE_CALL[surface])("AAPL")
+
+        assert result, "the free chain answered"
+        assert massive.calls == [surface], "the retry budget was not spent"
+        assert sleeps == []
+        assert primary.breaker.failure_count == 0, "not a health event"
+        assert yahoo.calls == [surface]
+
+    @pytest.mark.parametrize("surface", ["history", "fundamentals", "search"])
+    async def test_an_empty_primary_answer_falls_through(self, surface):
+        """A primary that has nothing to say must not short-circuit the chain."""
+        massive = self._Recorder("massive", empty=True)
+        yahoo = self._Recorder("yahoo")
+        chain = FailoverQuoteProvider([massive, yahoo], quote_primary=massive)
+
+        assert await getattr(chain, _SURFACE_CALL[surface])("AAPL")
+        assert yahoo.calls == [surface]

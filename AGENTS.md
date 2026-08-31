@@ -105,12 +105,21 @@ open or it returns no data, the call falls through to a fallback and the quote i
 `stale`/`source` so the UI can flag degraded data. `get_quote_provider()` (`__init__.py`)
 builds the chain — the sibling of `get_extended_quote_provider` (extended-hours selection).
 
+**Who leads depends on one key.** Without `POLYGON_API_KEY` the chain is the free one
+(Yahoo → Stooq → Alpha Vantage). *With* it, Massive is promoted to the front on every surface and
+elected the quote primary (`FailoverQuoteProvider(chain, quote_primary=…)`). Quotes need the
+election as well as the position: `delayed_quotes=True` demotes a delayed provider below every live
+one regardless of list order, and only an explicit election yields to that — so a chain mis-ordered
+*by accident* is still corrected. The election is an addition in front of the chain, so Yahoo stays
+the free chain's own head and its quotes are still reported fresh when Massive cannot answer.
+Extended-hours quotes are a separate seam and stay on Yahoo.
+
 | Provider | Role | Usage | Notes |
 |----------|------|-------|-------|
-| Yahoo Finance | Primary | Quotes, fundamentals, history, search; `^VIX` and other index/forex/futures | Unofficial — be gentle; may break; now retry/backoff/breaker-wrapped |
+| Massive (Polygon.io) | **Primary when keyed** (opt-in) | Quotes, history, fundamentals, search (`massive.py`) | Paid key `POLYGON_API_KEY`; promoted to the head of the chain and elected `quote_primary`. Quotes are 15-min delayed (`delayed_quotes=True`) and the UI labels them neutrally ("15-min delayed"), not as a fallback warning. Per-product entitlements declared in `MASSIVE_ENTITLEMENTS`; an unentitled surface raises before the request leaves the process and routes on |
+| Yahoo Finance | Primary of the free chain | Quotes, fundamentals, history, search; `^VIX` and other index/forex/futures | Unofficial — be gentle; may break; retry/backoff/breaker-wrapped. Also the default extended-hours source |
 | Stooq | Fallback | Quotes + daily history (`stooq.py`) | **No key**; US equities/ETFs; always active |
 | Alpha Vantage | Fallback (opt-in) | Quotes (`alpha_vantage.py`) | Free key `ALPHA_VANTAGE_API_KEY`, ~5 req/min; key-gated, inert without it |
-| Massive (Polygon.io) | Fallback (opt-in) | History, fundamentals, search + delayed quotes (`massive.py`) | Paid key `POLYGON_API_KEY`; quotes are 15-min delayed (`delayed_quotes=True`) so they rank below every live source. Per-product entitlements declared in `MASSIVE_ENTITLEMENTS` |
 | Schwab | Ingestion (quotes opt-in, default OFF) | Brokerage transactions + positions (`schwab_ingestion.py`). Extended-hours quotes ONLY when `SCHWAB_QUOTES_ENABLED=true` | Opt-in OAuth; tokens expire every 7 days. The two roles are decoupled (#273): expiry stops transaction sync, not prices |
 
 **AI advisor contract** — an external Claude advisor reads a versioned context pack and writes changes

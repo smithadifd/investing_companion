@@ -23,15 +23,23 @@ keeps working. That is the entire point of the integration.
   1. *Here.* Every quote this provider produces is stamped ``stale=True`` at
      the source, and a snapshot with no usable timestamp is not quoted at all.
      Both hold however the provider is composed — wrapped in the failover
-     chain, wrapped only in ``ResilientProvider``, or called directly.
-  2. *In the chain.* ``delayed_quotes = True`` is a hard ordering constraint
-     ``FailoverQuoteProvider`` enforces: Massive is consulted for quotes only
-     after every live source, wherever the chain builder happens to place it.
+     chain, wrapped only in ``ResilientProvider``, or called directly, and
+     whether or not the chain builder has elected this provider primary.
+  2. *In the chain.* ``delayed_quotes = True`` is an ordering constraint
+     ``FailoverQuoteProvider`` enforces by default: a delayed provider is
+     consulted only after every live source, wherever the chain builder happens
+     to place it. It yields to exactly one thing — an explicit
+     ``quote_primary`` election. A configured ``POLYGON_API_KEY`` is that
+     election (see ``get_quote_provider``): the operator bought this feed and
+     asked for it in front, so Massive leads. What the election does *not* buy
+     is a fresh label — (1) still applies, and the UI renders the delay as a
+     neutral "15-min delayed" badge.
 
-  The two are independent on purpose. Ordering that lived only in the
-  chain-building call order could be quietly undone by a later edit; staleness
-  that lived only in the failover layer evaporated the moment this provider was
-  used outside one.
+  The two layers stay independent on purpose. Ordering that lived only in the
+  chain-building call order could be quietly undone by a later edit — which is
+  why promotion has to be *stated* rather than implied by list position;
+  staleness that lived only in the failover layer evaporated the moment this
+  provider was used outside one.
 
 **Entitlements are declared, not discovered.** Massive sells its surfaces as
 separate products — a key can hold stock aggregates and not Stocks Financials —
@@ -480,7 +488,8 @@ def parse_snapshot(symbol: str, payload: dict) -> QuoteResponse | None:
     # snapshot's ``day``/``prevDay`` bars carry no time field at all). Refusing
     # to quote is the only answer that cannot mislead, and it is cheap: it is a
     # clean not-found, so the failover chain simply moves on to the next
-    # provider, and this provider is already ranked last for quotes.
+    # provider — including when this provider is the elected quote primary, in
+    # which case the free chain answers exactly as it would have anyway.
     timestamp = (
         _ns_to_naive_utc(last_trade.get("t"))
         or _ns_to_naive_utc(ticker.get("updated"))
@@ -774,10 +783,11 @@ class MassiveProvider(MarketDataProvider):
     async def get_quote(self, symbol: str) -> QuoteResponse | None:
         """Snapshot quote — **15 minutes delayed on the Starter plan**.
 
-        Implemented, but ranked last for quotes: ``delayed_quotes = True`` makes
-        ``FailoverQuoteProvider`` consult every live source first. The returned
+        Consulted first when the chain builder has elected this provider quote
+        primary (a configured ``POLYGON_API_KEY``), and otherwise ranked behind
+        every live source by ``delayed_quotes = True``. Either way the returned
         quote is stamped ``stale=True`` by ``parse_snapshot`` itself, so it is
-        honest about its age even with no failover layer above it.
+        honest about its age with or without a failover layer above it.
         """
         path = f"/v2/snapshot/locale/us/markets/stocks/tickers/{normalize_symbol(symbol)}"
         payload = await self._fetch_json(path, capability=ProviderCapability.QUOTE)

@@ -946,7 +946,136 @@ export interface TransactionReconciliation {
 }
 
 // Trade types
-export type TradeType = 'buy' | 'sell' | 'short' | 'cover';
+//
+// The four FILLS plus the two equity-scoped rows that share the `trades`
+// table. `deposit`/`withdrawal` are deliberately NOT here: they have no equity
+// leg and live in the cash ledger — see `CashTransactionKind` below.
+//
+// NOTE for anyone widening this again: TypeScript will NOT flag the const
+// arrays that enumerate it (a subset of a widened union still type-checks), so
+// `CreateTradeModal`/`EditTradeModal`'s `TRADE_TYPES` and the `TradeTypeBadge`
+// colour map need a manual pass every time.
+export type TradeType = 'buy' | 'sell' | 'short' | 'cover' | 'dividend' | 'split';
+
+/** The four fills — a real share transaction at a broker. */
+export const FILL_TRADE_TYPES = ['buy', 'sell', 'short', 'cover'] as const;
+export type FillTradeType = (typeof FILL_TRADE_TYPES)[number];
+
+/** Account-scoped cash with no equity leg — the `cash_transactions` table. */
+export type CashTransactionKind = 'deposit' | 'withdrawal';
+
+export interface CashTransaction {
+  id: number;
+  user_id: string;
+  account_id: number;
+  account: AccountRef | null;
+  kind: CashTransactionKind;
+  /** Always an unsigned magnitude — direction lives in `kind` */
+  amount: number | string;
+  /** +amount for a deposit, -amount for a withdrawal */
+  signed_amount: number | string;
+  occurred_at: string;
+  notes: string | null;
+  source: string;
+  source_import_run_id: number | null;
+  external_transaction_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CashTransactionCreate {
+  account_id: number;
+  kind: CashTransactionKind;
+  amount: number;
+  occurred_at: string;
+  notes?: string;
+}
+
+/**
+ * One account's own completeness answer inside a scope.
+ *
+ * Completeness is a PER-ACCOUNT property; the scope's verdict is a fold over
+ * these. `account_id` is null for the unassigned trade bucket.
+ */
+export interface CashCoverageMember {
+  account_id: number | null;
+  account_name: string | null;
+  is_known: boolean;
+  cash_starts_at: string | null;
+  first_activity_at: string | null;
+  complete_from: string | null;
+  has_history_gap: boolean;
+  /** Why this account is not known; null when it is */
+  reason: string | null;
+}
+
+/**
+ * How far back the cash ledger actually knows this scope's history.
+ *
+ * `cash_starts_at` (a row date) and `complete_from` (an import window) answer
+ * DIFFERENT questions — "is there cash before the first trade?" is not "is the
+ * cash history complete?". Only `opening_balance_is_known` settles it, and it
+ * is true only when EVERY entry in `members` is individually known.
+ */
+export interface CashCoverage {
+  cash_starts_at: string | null;
+  first_activity_at: string | null;
+  /** Earliest instant cash is known COMPLETE from; null = no import provenance */
+  complete_from: string | null;
+  /** Derived, never stored: every member's import window is unclamped and complete */
+  is_true_origin: boolean;
+  provenance_source: string | null;
+  provenance_note: string | null;
+  opening_balance_is_known: boolean;
+  members: CashCoverageMember[];
+}
+
+/**
+ * Net asset value and total return.
+ *
+ * The headline is `total_return_amount` — absolute dollars. `total_return_percent`
+ * is NOT a time-weighted return and is null when there are no contributions.
+ * `unrealized_pnl` here is read off the FIFO open lots and will differ from the
+ * Positions tab's figure after a profitable partial sale — see the backend's
+ * NavService._unrealized_from_lots.
+ */
+export interface NavSummary {
+  account_id: number | null;
+  account: AccountRef | null;
+  cash_balance: number | string;
+  positions_market_value: number | string;
+  nav: number | string;
+  net_contributions: number | string;
+  realized_pnl: number | string;
+  unrealized_pnl: number | string;
+  dividends_received: number | string;
+  /** Reported only — total_return_amount does not subtract it again */
+  fees_paid: number | string;
+  total_return_amount: number | string;
+  total_return_percent: number | string | null;
+  as_of: string;
+  is_estimated: boolean;
+  estimate_reasons: string[];
+  coverage: CashCoverage;
+}
+
+export interface CashBackfillSkipped {
+  external_transaction_id: string;
+  broker_type: string;
+  occurred_at: string;
+  net_amount: number | string | null;
+  reason: string;
+}
+
+export interface CashBackfillResult {
+  account_id: number;
+  created: CashTransaction[];
+  already_present: number;
+  skipped: CashBackfillSkipped[];
+  coverage: CashCoverage;
+  history_gap_note: string | null;
+  transaction_history_limit_days: number;
+}
 
 export interface TradeEquity {
   id: number;

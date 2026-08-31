@@ -38,7 +38,7 @@ from app.db.models.broker_import import (
     ImportedTransaction,
     ImportKind,
 )
-from app.db.models.trade import Trade, TradeType
+from app.db.models.trade import SHARE_AFFECTING_TRADE_TYPES, Trade, TradeType
 from app.schemas.reconciliation import (
     ReconciliationPosition,
     ReconciliationResponse,
@@ -330,13 +330,31 @@ class ReconciliationService:
         window_start: datetime,
         window_end: datetime,
     ) -> list[Trade]:
-        """This user's IC trades for this account in the window.
+        """This user's IC **fills** for this account in the window.
 
         Synthetic (adoption) trades are excluded from the match pool on
         purpose: a synthetic row is a position-level quantity plug, not a fill
         that ever happened at the broker. Matching one against a broker
         transaction would manufacture a false "matched" and hide a genuine
         broker-only fill behind it.
+
+        The ``trade_type`` filter is the same argument for the same reason. It
+        is a POSITIVE allow-list (``SHARE_AFFECTING_TRADE_TYPES`` -
+        buy/sell/short/cover), not a ``NOT IN`` exclusion, so a future enum
+        member is kept out by default rather than silently entering the pool.
+        Without it a manually recorded ``dividend`` lands in the pool under a
+        ``"dividend"`` bucket key that no broker row can ever produce
+        (:meth:`_broker_side` returns only the four fill sides, and a cash
+        movement with no instrument leg is routed to ``non_trade`` before it
+        gets that far), so it falls through to ``ic_only`` - a false "IC has a
+        trade the broker does not report" on the one screen whose whole purpose
+        is trustworthy diffs.
+
+        This also covers ``split`` rows independently of D6. A split's
+        ``account_id`` is NULL today, which keeps it out of the ``account_id ==``
+        filter above - but that is a side effect of an unrelated decision, not
+        a guard. If splits ever become per-account rows the exposure returns
+        silently; the allow-list is what actually closes it.
         """
         stmt = (
             select(Trade)
@@ -347,6 +365,7 @@ class ReconciliationService:
                 Trade.executed_at >= window_start,
                 Trade.executed_at < window_end,
                 Trade.is_synthetic.is_(False),
+                Trade.trade_type.in_(SHARE_AFFECTING_TRADE_TYPES),
             )
             .order_by(Trade.executed_at, Trade.id)
         )

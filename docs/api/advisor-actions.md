@@ -1,6 +1,6 @@
 # Advisor Action Vocabulary
 
-**`advisor_actions_version`: 1.3** — MAJOR.MINOR (MINOR = additive action/field/enum; MAJOR =
+**`advisor_actions_version`: 1.4** — MAJOR.MINOR (MINOR = additive action/field/enum; MAJOR =
 rename/removal). The context pack emits this same value as `advisor_actions_version`, so an
 advisor can detect when *this* uploaded copy is behind: if the pack's version is higher than the
 one stamped here, ask for a re-upload before relying on the vocabulary (tolerate minor gaps).
@@ -51,6 +51,13 @@ Summary: Carry-trade tier adjustments + new defense watchlist entries
    trade_type: buy
    quantity: 100
    price: 49.20
+   ⚠️ approval required
+
+5. LOG_TRADE — CCJ
+   trade_type: dividend
+   quantity: 300
+   price: 0.12
+   account: Roth
    ⚠️ approval required
 ```
 
@@ -140,7 +147,29 @@ Notes:
 
 | Action | Fields |
 |--------|--------|
-| `LOG_TRADE` | **`equity_symbol`**, **`trade_type`** (`buy` / `sell` / `short` / `cover`), **`quantity`**, **`price`**, `fees`, `notes` — **always `⚠️ approval required`** |
+| `LOG_TRADE` | **`equity_symbol`**, **`trade_type`** (`buy` / `sell` / `short` / `cover` / `dividend` / `split`), **`quantity`**, **`price`**, `fees`, `account` (account **name**), `notes` — **always `⚠️ approval required`** |
+
+Two of those six are not fills, and their fields mean different things:
+
+- **`dividend`** — cash paid on shares held. `quantity` is the number of shares it paid on,
+  `price` is the per-share amount, `fees` is any withholding. It changes no share count.
+  **`account` is REQUIRED** here (and only here): a dividend's cash is folded per account, so an
+  unassigned one would show in the whole-ledger view and then vanish from that account's balance
+  and total return. Omit it and the action comes back `flagged`. Dividends are **manual entry
+  only**: propose one when the user tells you a dividend landed, never from a calendar ex-date,
+  and never guess the per-share amount.
+- **`split`** — a stock split. `quantity` is the **ratio** (`4` for a 4:1, `0.25` for a 1:4
+  reverse), `price` **must be `0`**, `fees` **must be `0`** (nothing spends them — a split moves
+  no cash), and it carries **no `account`** — a split belongs to the security and adjusts every
+  account holding it, so one row is the whole entry. Splits are manual entry too; nothing in the
+  app ingests them.
+
+`account` is ignored for the four fills, which keep their existing unassigned-by-default
+behaviour.
+
+`deposit` and `withdrawal` are **not** `LOG_TRADE` values. They have no equity leg and live in the
+cash ledger, which has no handoff verb — if the user wants a deposit recorded, say so in prose and
+let them enter it. Proposing `LOG_TRADE` with either value comes back `flagged`.
 
 ### Trigger playbook (standing orders)
 
@@ -223,3 +252,4 @@ write-vocabulary change (a new action that adds no pack field) bumps **this** ve
 | 1.1 | 2026-06-15 | Added `UPDATE_TRIGGER` — edit a standing order in place (`rule` / `action` / `tier` / `name` / linked alerts); `rule`/`action` edits are approval-gated. And `RETIRE_TRIGGER` — terminal close of a standing order (approval-gated, trigger-only; `POST /triggers/{id}/retire`). Both are pure write-vocab (no read-side pack field added), so pack `schema_version` stayed 1.5 |
 | 1.2 | 2026-06-16 | Added `UPDATE_CALENDAR_EVENT` — correct a calendar event in place (`title` / `event_date` / `event_type` / `description` / `importance`; `PUT /events/{id}`) — and `REMOVE_CALENDAR_EVENT` — delete one (`DELETE /events/{id}`). Both target by event title (+ `event_date` to disambiguate), are benign (no approval), and operate on user-created custom events only — auto-fetched system events come back `flagged`. Pure write-vocab (no read-side pack field added), so pack `schema_version` stayed 1.6 |
 | 1.3 | 2026-07-18 | Documented the `percent_up` / `percent_down` alert `condition_type` values (percent change over `comparison_period` vs a percent `threshold_value`) and added the `comparison_period` field to `ADD_ALERT`. The create endpoint, `AlertCreate` schema (enum + `comparison_period` validation), and evaluator have accepted these since #48/#51 was fixed; this catches the written contract up so an advisor can construct a valid percent alert. Additive (enum values + a field), so MINOR; pack `schema_version` unchanged (no read-side pack field added) |
+| 1.4 | 2026-08-30 | Widened `LOG_TRADE`'s `trade_type` enum with `dividend` and `split` (the total-return build, foundry `plans/investing_companion/total-return-design.md`). Both are manual-entry only and both repurpose `quantity`/`price` — documented above. Added the `account` field (account **name**; the executor resolves it), **required for `dividend`** because dividend cash is folded per account and an unassigned one disappears from that account's balance and NAV; forbidden for `split`, ignored for fills. `split` also requires `fees: 0`. Deliberately NOT added: a cash-ledger verb. `deposit`/`withdrawal` now exist as API endpoints (`/api/v1/cash`), but adding a write verb for money movement is a separate decision from adding a trade type, so the write vocabulary stays silent on it and such a `LOG_TRADE` comes back `flagged`. Additive (enum values + one field), so MINOR; pack `schema_version` unchanged — NAV is a new endpoint, not a new context-pack field |

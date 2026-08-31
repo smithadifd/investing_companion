@@ -18,6 +18,12 @@ vi.mock('@/lib/hooks/useLessons', () => ({
   }),
 }));
 
+vi.mock('@/lib/hooks/useAccount', () => ({
+  useAccounts: () => ({
+    data: [{ id: 3, name: 'Roth', account_type: 'roth' }],
+  }),
+}));
+
 vi.mock('@/components/equity/EquitySearchInput', () => ({
   EquitySearchInput: ({
     value,
@@ -200,5 +206,120 @@ describe('CreateTradeModal', () => {
     expect(screen.getByText('Log Short')).toBeInTheDocument();
     await user.click(screen.getByText('Cover'));
     expect(screen.getByText('Log Cover')).toBeInTheDocument();
+  });
+  // --- total-return build: the two non-fill types that share the trades table
+  // SEAM UNDER TEST: the create form's request-body contract. A split's price
+  // is the sentinel 0 and it carries no account; TypeScript cannot catch a
+  // TRADE_TYPES array that forgets a union member, so this does.
+
+  it('offers the dividend and split types', () => {
+    render(<CreateTradeModal isOpen={true} onClose={onClose} />);
+    expect(screen.getByText('Dividend')).toBeInTheDocument();
+    expect(screen.getByText('Split')).toBeInTheDocument();
+  });
+
+  it('submits a dividend as shares-held x per-share amount', async () => {
+    const user = userEvent.setup();
+    render(<CreateTradeModal isOpen={true} onClose={onClose} />);
+
+    await user.type(screen.getByTestId('equity-search'), 'AAPL');
+    await user.click(screen.getByText('Dividend'));
+    await user.selectOptions(screen.getByLabelText('Account'), '3');
+    await user.type(screen.getByLabelText('Shares Held'), '100');
+    await user.type(screen.getByLabelText('Dividend per Share'), '1.20');
+    await user.click(screen.getByText('Log Dividend'));
+
+    await waitFor(() => {
+      expect(mockMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          symbol: 'AAPL',
+          trade_type: 'dividend',
+          quantity: 100,
+          price: 1.2,
+        }),
+      );
+    });
+  });
+
+  it('submits a split with price 0, no fees and no account', async () => {
+    const user = userEvent.setup();
+    render(<CreateTradeModal isOpen={true} onClose={onClose} />);
+
+    await user.type(screen.getByTestId('equity-search'), 'AAPL');
+    await user.click(screen.getByText('Split'));
+
+    // The price field is gone entirely — a split has no price to type.
+    expect(screen.queryByLabelText('Price per Share')).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Split Ratio'), '4');
+    await user.click(screen.getByText('Log Split'));
+
+    await waitFor(() => {
+      expect(mockMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          symbol: 'AAPL',
+          trade_type: 'split',
+          quantity: 4,
+          price: 0,
+          fees: 0,
+          account_id: null,
+        }),
+      );
+    });
+  });
+
+  it('does not show a trade value for a split (quantity is a ratio)', async () => {
+    const user = userEvent.setup();
+    render(<CreateTradeModal isOpen={true} onClose={onClose} />);
+
+    await user.click(screen.getByText('Split'));
+    await user.type(screen.getByLabelText('Split Ratio'), '4');
+
+    expect(screen.queryByText('Trade Value:')).not.toBeInTheDocument();
+  });
+  // REVIEW FINDING 3: an unassigned dividend appears in the whole-ledger cash
+  // view and then silently vanishes from every account-scoped cash and NAV
+  // figure, because those filter on account_id. The API refuses one; the form
+  // must not offer it.
+
+  it('blocks a dividend with no account and says why', async () => {
+    const user = userEvent.setup();
+    render(<CreateTradeModal isOpen={true} onClose={onClose} />);
+
+    await user.type(screen.getByTestId('equity-search'), 'AAPL');
+    await user.click(screen.getByText('Dividend'));
+    await user.type(screen.getByLabelText('Shares Held'), '100');
+    await user.type(screen.getByLabelText('Dividend per Share'), '1.20');
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /must name the account its cash landed in/,
+    );
+    await user.click(screen.getByText('Log Dividend'));
+    expect(mockMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('submits a dividend once an account is chosen', async () => {
+    const user = userEvent.setup();
+    render(<CreateTradeModal isOpen={true} onClose={onClose} />);
+
+    await user.type(screen.getByTestId('equity-search'), 'AAPL');
+    await user.click(screen.getByText('Dividend'));
+    await user.selectOptions(screen.getByLabelText('Account'), '3');
+    await user.type(screen.getByLabelText('Shares Held'), '100');
+    await user.type(screen.getByLabelText('Dividend per Share'), '1.20');
+    await user.click(screen.getByText('Log Dividend'));
+
+    await waitFor(() => {
+      expect(mockMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ trade_type: 'dividend', account_id: 3 }),
+      );
+    });
+  });
+
+  it('does not demand an account for a fill', async () => {
+    const user = userEvent.setup();
+    render(<CreateTradeModal isOpen={true} onClose={onClose} />);
+    await user.click(screen.getByText('Buy'));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

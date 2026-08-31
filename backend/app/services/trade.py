@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -27,6 +27,7 @@ from app.schemas.trade import (
     TradePairResponse,
     TradeResponse,
     TradeUpdate,
+    validate_trade_shape,
 )
 from app.services.equity import EquityService
 
@@ -62,6 +63,86 @@ def _fee_per_share(trade: Trade) -> Decimal:
 # Each open lot: (trade_id, remaining_qty, price, executed_at, fee_per_share) -
 # the same tuple shape _recalculate_pairs' FIFO queues carry.
 OpenLot = tuple[int, Decimal, Decimal, datetime, Decimal]
+
+
+def split_adjusted_lots(lots: list[OpenLot], ratio: Decimal) -> list[OpenLot]:
+    """Re-denominate open FIFO lots across a stock split. Pure; returns a new list.
+
+    THE SHARED LOT-MUTATION SEAM. ``_recalculate_pairs`` (the mutating walk)
+    and ``_get_open_lots`` (its read-only clone) are a deliberate clone pair
+    whose spec-pinned differences are documented at :meth:`_get_open_lots`.
+    A split branch would be a *third* place they must agree, and drift there is
+    a live correctness risk: ``_get_open_lots().basis()`` feeds the Schwab
+    basis reconciliation, where a split-unaware basis reports false broker
+    drift. So the transform lives here once and both walks call it.
+
+    ``ratio`` is the split row's ``quantity`` - 4 for a 4:1, ``0.25`` for a 1:4
+    reverse::
+
+        remaining_qty  *= ratio
+        price          /= ratio
+        fee_per_share  /= ratio     # the fee was levied per PRE-split share
+
+    ``trade_id`` and ``executed_at`` are untouched, so the lot keeps pointing
+    at the original opening trade and ``holding_period_days`` stays honest.
+
+    The correctness property is that **lot value is invariant**:
+    ``remaining_qty * price`` is unchanged (exactly so for a ratio whose
+    reciprocal is representable in base 10 - 4:1, 2:1, 1:4 - and to Decimal's
+    28-significant-digit context otherwise, e.g. 3:1).
+
+    An empty ``lots`` (a split dated before the first buy) is a no-op, not an
+    error. ``ratio`` cannot be zero: ``ck_trades_quantity_positive`` forbids it
+    at the DB.
+    """
+    if not lots:
+        return []
+    return [
+        (trade_id, qty * ratio, price / ratio, executed_at, fee_ps / ratio)
+        for trade_id, qty, price, executed_at, fee_ps in lots
+    ]
+
+
+def _fold_position(rows: list[Trade]) -> tuple[Decimal, Decimal]:
+    """Fold an ordered run of ``trades`` rows into ``(net_quantity, total_cost)``.
+
+    THE FAIL-CLOSED DISPATCH. This replaced a bare ``else`` that treated every
+    unrecognised ``trade_type`` as a SELL/SHORT - so adding any member to the
+    enum made new rows silently *subtract* shares and cost (a $120 dividend
+    shrank the position). The dispatch is now exhaustive and raises on anything
+    it was not taught, which is the whole point: the next new member must make
+    a decision here rather than inherit a wrong one.
+
+    ``rows`` must already be in ``(executed_at, id)`` order - a split only
+    re-denominates the shares held *before* it.
+    """
+    net_quantity = Decimal("0")
+    total_cost = Decimal("0")
+    for t in rows:
+        if t.trade_type in (TradeType.BUY, TradeType.COVER):
+            net_quantity += t.quantity
+            total_cost += t.quantity * t.price + t.fees
+        elif t.trade_type in (TradeType.SELL, TradeType.SHORT):
+            net_quantity -= t.quantity
+            total_cost -= t.quantity * t.price - t.fees
+        elif t.trade_type == TradeType.SPLIT:
+            # Share count is re-denominated; what was paid for those shares
+            # is not. Leaving total_cost alone is what keeps avg_cost_basis
+            # (= total_cost / net_quantity) correct across the split.
+            net_quantity *= t.quantity
+        elif t.trade_type == TradeType.DIVIDEND:
+            # Cash-only. Its cash leg is folded by CashLedgerService; adding
+            # it to total_cost here would double-count it against the
+            # position's basis.
+            continue
+        else:
+            raise ValueError(
+                f"Trade {t.id} carries trade_type {t.trade_type.value!r}, which "
+                "has no equity leg and must not be stored in `trades` - it "
+                "belongs in cash_transactions. Refusing to fold it into a "
+                "position rather than guessing a direction."
+            )
+    return net_quantity, total_cost
 
 
 @dataclass
@@ -313,6 +394,15 @@ class TradeService:
             trade.watchlist_item_id = data.watchlist_item_id
         if reassign_account:
             trade.account_id = data.account_id
+
+        # Every TradeUpdate field is optional, so the (type, price, account)
+        # rules can only be checked against the RESULTING row - e.g. a patch
+        # that flips trade_type to `split` without also sending price=0, or
+        # one that reassigns a split onto an account. ValueError -> 422 via
+        # the endpoint's existing handler.
+        validate_trade_shape(
+            trade.trade_type, trade.price, trade.account_id, trade.fees
+        )
 
         try:
             await self.db.commit()
@@ -644,6 +734,23 @@ class TradeService:
                             open_fee_ps,
                         )
 
+            elif trade.trade_type == TradeType.SPLIT:
+                # A split is a property of the SECURITY, not of one account:
+                # it re-denominates every partition holding this equity from a
+                # SINGLE row. That is why the row carries no account_id and why
+                # this branch loops over all queue keys instead of using
+                # `acct`. Deliberately independent of the row's own
+                # account_id - if one ever carries an account (a hand-inserted
+                # row, or a future revisit of D6), applying it security-wide is
+                # still the correct reading.
+                #
+                # It writes no TradePair: a split realizes nothing.
+                ratio = trade.quantity
+                for key, queue in long_queues.items():
+                    long_queues[key] = split_adjusted_lots(queue, ratio)
+                for key, queue in short_queues.items():
+                    short_queues[key] = split_adjusted_lots(queue, ratio)
+
             elif trade.trade_type == TradeType.SHORT:
                 # Opening short position
                 short_queues.setdefault(acct, []).append(
@@ -718,10 +825,19 @@ class TradeService:
             Trade.user_id == user_id,
             Trade.equity_id == equity_id,
         ]
-        if account_id is None:
-            conditions.append(Trade.account_id.is_(None))
-        else:
-            conditions.append(Trade.account_id == account_id)
+        account_scope = (
+            Trade.account_id.is_(None)
+            if account_id is None
+            else Trade.account_id == account_id
+        )
+        # SPLIT rows are security-wide and carry no account, so an
+        # `account_id == <int>` filter would silently drop them and this walk
+        # would report PRE-split lots to the Schwab basis reconciliation -
+        # false drift against the broker. Or-ed in rather than relying on the
+        # NULL account, so the walk stays correct if a split row ever carries
+        # one. (For account_id=None the or_ is a harmless no-op: a split's
+        # NULL account already satisfies the left side.)
+        conditions.append(or_(account_scope, Trade.trade_type == TradeType.SPLIT))
 
         stmt = (
             select(Trade)
@@ -741,6 +857,13 @@ class TradeService:
                     (trade.id, trade.quantity, trade.price, trade.executed_at,
                      _fee_per_share(trade))
                 )
+            elif trade.trade_type == TradeType.SPLIT:
+                # The clone of the mutating walk's split branch, through the
+                # one shared helper so the two cannot drift. Both sides, since
+                # a split re-denominates a short position exactly as it does a
+                # long one.
+                long_queue = split_adjusted_lots(long_queue, trade.quantity)
+                short_queue = split_adjusted_lots(short_queue, trade.quantity)
             elif trade.trade_type == TradeType.SHORT:
                 short_queue.append(
                     (trade.id, trade.quantity, trade.price, trade.executed_at,
@@ -812,11 +935,27 @@ class TradeService:
         result = await self.db.execute(stmt)
         trades = result.scalars().all()
 
+        # A split is a property of the SECURITY, not of one account (design
+        # doc, Surface 3 "Ordering and scope"): one row re-denominates every
+        # account holding that equity, and it carries no account_id of its
+        # own. So split rows are pulled out of the per-account grouping and
+        # overlaid onto every group for their equity - otherwise a 4:1 split
+        # would either manufacture a phantom "unassigned" position or, worse,
+        # leave the Roth partition reporting pre-split share counts against
+        # post-split FIFO lots.
+        splits_by_equity: dict[int, list[Trade]] = {}
+        fills: list[Trade] = []
+        for t in trades:
+            if t.trade_type == TradeType.SPLIT:
+                splits_by_equity.setdefault(t.equity_id, []).append(t)
+            else:
+                fills.append(t)
+
         def group_key(t: Trade):
             return (t.equity_id, t.account_id) if by_account else (t.equity_id,)
 
         positions = []
-        for _key, group in groupby(trades, key=group_key):
+        for _key, group in groupby(fills, key=group_key):
             group_list = list(group)
             if not group_list:
                 continue
@@ -826,19 +965,18 @@ class TradeService:
             account_id = group_list[0].account_id if by_account else None
             account_obj = group_list[0].account if by_account else None
 
-            # Calculate net position
-            net_quantity = Decimal("0")
-            total_cost = Decimal("0")
+            # first/last are this account's own activity - a security-wide
+            # split is not a trade in this account and must not move them.
             first_trade = group_list[0].executed_at
             last_trade = group_list[-1].executed_at
 
-            for t in group_list:
-                if t.trade_type in (TradeType.BUY, TradeType.COVER):
-                    net_quantity += t.quantity
-                    total_cost += t.quantity * t.price + t.fees
-                else:  # SELL or SHORT
-                    net_quantity -= t.quantity
-                    total_cost -= t.quantity * t.price - t.fees
+            rows = group_list
+            if eq_id in splits_by_equity:
+                rows = sorted(
+                    group_list + splits_by_equity[eq_id],
+                    key=lambda t: (t.executed_at, t.id),
+                )
+            net_quantity, total_cost = _fold_position(rows)
 
             # Calculate average cost basis
             avg_cost = abs(total_cost / net_quantity) if net_quantity != 0 else Decimal("0")

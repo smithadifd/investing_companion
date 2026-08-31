@@ -14,6 +14,7 @@ import {
   Trash2,
   Pencil,
   Users,
+  PiggyBank,
 } from 'lucide-react';
 import {
   useTrades,
@@ -30,6 +31,7 @@ import { CreateTradeModal } from '@/components/trade/CreateTradeModal';
 import { EditTradeModal } from '@/components/trade/EditTradeModal';
 import { QuickTradeModal } from '@/components/trade/QuickTradeModal';
 import { AccountManager } from '@/components/trade/AccountManager';
+import { NavPanel } from '@/components/trade/NavPanel';
 
 // Helper to convert string/number to number
 function toNumber(value: number | string | null | undefined): number {
@@ -74,12 +76,21 @@ function formatDateTime(dateString: string): string {
 }
 
 // Trade type badge
+//
+// `type` is a plain string, so TypeScript will NOT flag a missing entry when
+// `TradeType` is widened — an unmapped type just renders unstyled. Keep this
+// map in step with `TradeType` in lib/api/types.ts by hand. `deposit`/
+// `withdrawal` are here because the same badge renders cash-ledger rows.
 function TradeTypeBadge({ type }: { type: string }) {
   const colors: Record<string, string> = {
     buy: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
     sell: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
     short: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
     cover: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+    dividend: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400',
+    split: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+    deposit: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400',
+    withdrawal: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400',
   };
 
   return (
@@ -545,11 +556,15 @@ function PositionSizer() {
   );
 }
 
-type TabType = 'trades' | 'portfolio' | 'performance' | 'sizer';
+type TabType = 'trades' | 'portfolio' | 'nav' | 'performance' | 'sizer';
 
 const TAB_ITEMS = [
   { id: 'trades', label: 'Trades', Icon: BarChart3 },
   { id: 'portfolio', label: 'Positions', Icon: Wallet },
+  // NAV is its own tab, not a widening of Positions: the cash fold and the
+  // per-position open-lot walks behind it are work the Positions view (and
+  // the dashboard that shares its query) must not pay for.
+  { id: 'nav', label: 'Total Return', Icon: PiggyBank },
   { id: 'performance', label: 'Performance', Icon: LineChart },
   { id: 'sizer', label: 'Position Sizer', Icon: Calculator },
 ] as const;
@@ -843,6 +858,12 @@ export default function TradesPage() {
                 </p>
               </div>
             )}
+          </div>
+        )}
+
+        {activeTab === 'nav' && (
+          <div role="tabpanel" id="trades-tabpanel-nav" aria-labelledby="trades-tab-nav">
+            <NavPanel />
           </div>
         )}
 

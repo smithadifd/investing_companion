@@ -21,7 +21,7 @@ from app.schemas.reconciliation import (
     ReconciliationResponse,
     TransactionReconciliationResponse,
 )
-from app.services.account import AccountService
+from app.services.account import AccountHasCashHistoryError, AccountService
 from app.services.account_link import (
     AccountLinkService,
     AccountNotFoundError,
@@ -174,8 +174,18 @@ async def delete_account(
     current_user: User = Depends(get_current_user),
     service: AccountService = Depends(get_account_service),
 ) -> None:
-    """Delete an account. Its trades become unassigned (FK SET NULL)."""
-    deleted = await service.delete_account(account_id, current_user.id)
+    """Delete an account.
+
+    Its trades become unassigned (FK SET NULL) and are never destroyed. Cash
+    transactions have no unassigned bucket to fall into (`account_id` is NOT
+    NULL), so an account that still holds cash history is refused with **409**
+    rather than silently cascading that history away - delete the cash rows
+    first.
+    """
+    try:
+        deleted = await service.delete_account(account_id, current_user.id)
+    except AccountHasCashHistoryError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Account not found"

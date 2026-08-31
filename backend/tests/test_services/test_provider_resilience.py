@@ -279,6 +279,56 @@ class TestHalfOpenSingleFlight:
         assert breaker.state == CircuitState.CLOSED  # probe succeeded -> closed
 
 
+class TestHalfOpenProbeReleaseOnUnentitled:
+    """A half-open probe that hits ``ProviderUnentitledError`` must still
+    release the single-probe admission.
+
+    Regression: ``ProviderUnentitledError`` is re-raised before ``_call``
+    reaches either ``record_success`` or ``record_failure`` (see the comment
+    on that except clause) -- deliberately, since it is not a health event.
+    But nothing else clears ``_probe_in_flight`` once the breaker is already
+    HALF_OPEN (the promotion that resets it only fires on the OPEN ->
+    HALF_OPEN transition). Left unreleased, the flag stays stuck ``True``
+    forever and ``allow()`` fast-fails every later call -- including ones for
+    surfaces this same provider IS entitled to -- as if a probe were
+    perpetually in flight.
+    """
+
+    async def test_unentitled_probe_does_not_wedge_the_breaker(self):
+        clock = _FakeClock()
+        breaker = CircuitBreaker(
+            failure_threshold=1, recovery_timeout=10, clock=clock
+        )
+        breaker.record_failure()  # -> OPEN
+        clock.advance(10)  # cool-down elapses -> HALF_OPEN, one probe available
+        assert breaker.state == CircuitState.HALF_OPEN
+
+        provider = ScriptedProvider(
+            script=[ProviderUnentitledError("plan does not include this surface")],
+            default=_quote(),
+        )
+        resilient = ResilientProvider(
+            provider, max_retries=2, breaker=breaker, sleep=AsyncMock()
+        )
+
+        # The single admitted half-open probe hits an unentitled surface.
+        with pytest.raises(ProviderUnentitledError):
+            await resilient.get_quote("AAPL")
+        assert breaker.state == CircuitState.HALF_OPEN, "not a health event"
+
+        # Without the fix this second call raises CircuitOpenError: the
+        # probe-in-flight flag never cleared, so `allow()` rejects every
+        # later call forever, wedging out even entitled surfaces.
+        quote = await resilient.get_quote("AAPL")
+        assert quote is not None
+        assert provider.calls == 2, (
+            "the second, entitled call must actually reach the upstream"
+        )
+        assert breaker.state == CircuitState.CLOSED, (
+            "the fresh probe succeeded and closed the breaker"
+        )
+
+
 # ---------------------------------------------------------------------------
 # FailoverQuoteProvider: health-based failover + stale stamping
 # ---------------------------------------------------------------------------

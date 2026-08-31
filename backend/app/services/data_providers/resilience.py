@@ -143,6 +143,20 @@ class CircuitBreaker:
         self._failures = max(self._failures, self.failure_threshold)
         self._probe_in_flight = False
 
+    def release_probe(self) -> None:
+        """Release an admitted half-open probe without it being a health event.
+
+        ``record_success``/``record_failure`` already clear
+        ``_probe_in_flight`` on the normal paths. This is the backstop for a
+        call that ``allow()`` admitted but that resolves neither way — today
+        that is exactly ``ProviderUnentitledError``: not a health event, so
+        neither record method is the right one to call, but the single
+        half-open admission still has to be freed or no probe is ever sent
+        again. Idempotent: safe to call when no probe was in flight (closed,
+        or the probe already resolved).
+        """
+        self._probe_in_flight = False
+
 
 class ResilientProvider(MarketDataProvider):
     """Wrap a provider with retry + exponential backoff + a circuit breaker.
@@ -217,43 +231,58 @@ class ResilientProvider(MarketDataProvider):
         method = getattr(self._provider, method_name)
         last_exc: Exception | None = None
 
-        for attempt in range(self.max_retries + 1):
-            try:
-                result = await method(*args)
-            except ProviderUnentitledError:
-                # Not a health event and not retryable: the plan does not
-                # include this surface, and no amount of retrying will change
-                # that. Re-raised untouched so the failover chain routes past
-                # it, while the breaker — shared across every capability of
-                # this provider — stays exactly where it was. Counting an
-                # unowned dataset as a failure would take the surfaces we *do*
-                # own down with it.
-                raise
-            except Exception as exc:  # noqa: BLE001 — any upstream failure retries
-                last_exc = exc
-                logger.warning(
-                    "%s.%s attempt %d/%d failed: %s",
-                    self.name,
-                    method_name,
-                    attempt + 1,
-                    self.max_retries + 1,
-                    exc,
-                )
-                if attempt < self.max_retries:
-                    await self._sleep(self._backoff(attempt))
-                    continue
-                break
-            else:
-                # A clean result (including a "not found" None/[]) is success:
-                # the upstream is healthy, the symbol simply had no data.
-                self.breaker.record_success()
-                return result
+        # ``allow()`` above may have admitted this call as the single
+        # half-open probe. ``record_success``/``record_failure`` release that
+        # admission on the paths that reach them, but ``ProviderUnentitledError``
+        # deliberately reaches neither (see below) — so the release has to be
+        # unconditional, in a ``finally``, or an admitted probe that turns out
+        # to be unentitled leaves ``_probe_in_flight`` stuck ``True`` forever.
+        # Nothing else can transition a half-open breaker back out of that
+        # state, so every later call — including ones for surfaces this
+        # provider *is* entitled to — would fast-fail as if a probe were
+        # perpetually in flight. ``release_probe()`` is idempotent, so calling
+        # it again after ``record_success``/``record_failure`` already did is
+        # harmless.
+        try:
+            for attempt in range(self.max_retries + 1):
+                try:
+                    result = await method(*args)
+                except ProviderUnentitledError:
+                    # Not a health event and not retryable: the plan does not
+                    # include this surface, and no amount of retrying will change
+                    # that. Re-raised untouched so the failover chain routes past
+                    # it, while the breaker — shared across every capability of
+                    # this provider — stays exactly where it was. Counting an
+                    # unowned dataset as a failure would take the surfaces we *do*
+                    # own down with it.
+                    raise
+                except Exception as exc:  # noqa: BLE001 — any upstream failure retries
+                    last_exc = exc
+                    logger.warning(
+                        "%s.%s attempt %d/%d failed: %s",
+                        self.name,
+                        method_name,
+                        attempt + 1,
+                        self.max_retries + 1,
+                        exc,
+                    )
+                    if attempt < self.max_retries:
+                        await self._sleep(self._backoff(attempt))
+                        continue
+                    break
+                else:
+                    # A clean result (including a "not found" None/[]) is success:
+                    # the upstream is healthy, the symbol simply had no data.
+                    self.breaker.record_success()
+                    return result
 
-        self.breaker.record_failure()
-        raise ProviderError(
-            f"{self.name}.{method_name} failed after "
-            f"{self.max_retries + 1} attempts"
-        ) from last_exc
+            self.breaker.record_failure()
+            raise ProviderError(
+                f"{self.name}.{method_name} failed after "
+                f"{self.max_retries + 1} attempts"
+            ) from last_exc
+        finally:
+            self.breaker.release_probe()
 
     async def get_quote(self, symbol: str) -> QuoteResponse | None:
         return await self._call("get_quote", symbol)

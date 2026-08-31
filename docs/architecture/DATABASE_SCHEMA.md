@@ -41,6 +41,16 @@ PostgreSQL 15+ with TimescaleDB extension for time-series data. Uses SQLAlchemy 
 ┌─────────────────┐     ┌─────────────────┐
 │     trades      │────>│   trade_pairs   │  (Phase 6)
 └─────────────────┘     └─────────────────┘
+        │
+        │  cash_balance / NAV are FOLDS over both, never stored
+        v
+┌──────────────────────┐     ┌─────────────────┐
+│  cash_transactions   │────>│    accounts     │  RESTRICT: cash blocks
+└──────────────────────┘     └─────────────────┘  an account delete
+                                     ^
+┌──────────────────────┐             │
+│ cash_ledger_coverage │─────────────┘  CASCADE: regenerable provenance
+└──────────────────────┘
 ```
 
 ---
@@ -424,32 +434,74 @@ INSERT INTO market_indices (symbol, name, region, asset_class, category, display
 
 ### trades
 
+The enum is named `trade_type_enum` and its values are **lowercase** — this
+block previously declared `trade_type` with uppercase values, which never
+matched the live type created by `20260201_004_add_trades_tables.py`.
+
 ```sql
-CREATE TYPE trade_type AS ENUM ('BUY', 'SELL', 'SHORT', 'COVER');
+CREATE TYPE trade_type_enum AS ENUM (
+    'buy', 'sell', 'short', 'cover',
+    -- added by 20260830_001 (total-return build)
+    'dividend',    -- equity-scoped cash-in:      quantity = shares it paid on,
+                   --                             price = per-share amount,
+                   --                             fees = withholding
+    'split',       -- equity-scoped share adjust: quantity = ratio (4 = 4:1,
+                   --                             0.25 = 1:4 reverse), price = 0,
+                   --                             account_id NULL (a split
+                   --                             belongs to the security)
+    'deposit',     -- account-scoped cash-in  -> cash_transactions, NOT trades
+    'withdrawal'   -- account-scoped cash-out -> cash_transactions, NOT trades
+);
 
 CREATE TABLE trades (
     id SERIAL PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    equity_id INTEGER NOT NULL REFERENCES equities(id),
+    equity_id INTEGER NOT NULL REFERENCES equities(id) ON DELETE CASCADE,
 
-    trade_type trade_type NOT NULL,
-    quantity DECIMAL(16, 6) NOT NULL,
-    price DECIMAL(16, 6) NOT NULL,
-    fees DECIMAL(10, 2) DEFAULT 0,
+    trade_type trade_type_enum NOT NULL,
+    quantity NUMERIC(18, 8) NOT NULL,
+    -- Deliberately NOT check-constrained: a zero cost basis is legitimate
+    -- (vested RSU, gifted lot) and a `split` row's price is a designed 0.
+    price NUMERIC(18, 8) NOT NULL,
+    fees NUMERIC(12, 2) NOT NULL DEFAULT 0,
 
     executed_at TIMESTAMPTZ NOT NULL,
-    account VARCHAR(50),  -- 'Roth IRA', 'Taxable', '401k'
+    -- NULL = the unassigned position bucket. SET NULL so deleting an account
+    -- keeps its trade history.
+    account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
 
     notes TEXT,
-    thesis_reference INTEGER REFERENCES watchlist_items(id),
+    watchlist_item_id INTEGER REFERENCES watchlist_items(id) ON DELETE SET NULL,
 
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    -- Provenance / adoption (20260724_001)
+    source VARCHAR(50) NOT NULL DEFAULT 'manual',
+    is_synthetic BOOLEAN NOT NULL DEFAULT false,
+    basis_is_estimated BOOLEAN NOT NULL DEFAULT false,
+    source_import_run_id INTEGER REFERENCES broker_import_runs(id) ON DELETE SET NULL,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT ck_trades_quantity_positive CHECK (quantity > 0)
 );
 
-CREATE INDEX idx_trades_user ON trades(user_id);
-CREATE INDEX idx_trades_equity ON trades(equity_id);
-CREATE INDEX idx_trades_executed ON trades(executed_at DESC);
+CREATE INDEX ix_trades_user_id ON trades(user_id);
+CREATE INDEX ix_trades_equity_id ON trades(equity_id);
+CREATE INDEX ix_trades_account_id ON trades(account_id);
+CREATE INDEX idx_trades_user_equity ON trades(user_id, equity_id);
+CREATE INDEX idx_trades_executed_at ON trades(executed_at);
+CREATE INDEX idx_trades_user_executed ON trades(user_id, executed_at);
+CREATE INDEX idx_trades_user_account_equity ON trades(user_id, account_id, equity_id);
+CREATE UNIQUE INDEX uq_trades_synthetic_adoption
+    ON trades(user_id, account_id, equity_id, source_import_run_id)
+    WHERE is_synthetic;
 ```
+
+Further shape rules (a `split` must have `price = 0` and no account; a
+`dividend` must name an account; `deposit`/`withdrawal` must never appear here)
+are enforced at the API layer today and are written as DB CHECKs held in
+`backend/alembic/deferred/20260830_003_add_trade_type_shape_checks.py` pending
+a prod-data inspection.
 
 ### trade_pairs
 For P&L calculation, matching opens with closes.
@@ -472,6 +524,114 @@ CREATE TABLE trade_pairs (
 
 CREATE INDEX idx_trade_pairs_user ON trade_pairs(user_id);
 CREATE INDEX idx_trade_pairs_equity ON trade_pairs(equity_id);
+```
+
+### cash_transactions
+
+Per-account cash ledger — deposits and withdrawals only. Added by
+`20260830_002` (total-return build, Surface 2).
+
+**There is no stored balance anywhere.** `cash_balance` is a fold over this
+table plus `trades` (see `backend/app/services/cash.py`), the same
+derived-not-stored pattern as positions and `trade_pairs`. A dividend is NOT
+double-entered: its single record is the `trades` row, and its cash leg is
+computed, never written here.
+
+```sql
+CREATE TABLE cash_transactions (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- NOT NULL, unlike trades.account_id: cash that belongs to no account is
+    -- meaningless. RESTRICT (corrected by 20260830_003 from the CASCADE this
+    -- table first shipped with): DELETE /api/v1/accounts/{id} is a real hard
+    -- delete, so CASCADE silently destroyed every deposit and withdrawal ever
+    -- recorded against the account -- behind a dialog written for trades' SET
+    -- NULL that promised nothing would be lost. There is no unassigned bucket
+    -- for money, so the account delete is refused (409) instead.
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+
+    -- Reuses trade_type_enum; the CHECK below is what narrows it to cash.
+    kind trade_type_enum NOT NULL,
+    -- Unsigned magnitude; direction lives in `kind`.
+    amount NUMERIC(18, 2) NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    notes TEXT,
+
+    -- Provenance, mirroring trades
+    source VARCHAR(50) NOT NULL DEFAULT 'manual',
+    source_import_run_id INTEGER REFERENCES broker_import_runs(id) ON DELETE SET NULL,
+    -- The broker's own (account-scoped) transaction id; NULL for a hand entry.
+    -- THIS is the backfill's idempotency key, not source_import_run_id, which
+    -- is a different value on every pull.
+    external_transaction_id VARCHAR(64),
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT ck_cash_transactions_amount_positive CHECK (amount > 0),
+    CONSTRAINT ck_cash_transactions_kind_is_cash
+        CHECK (kind IN ('deposit', 'withdrawal'))
+);
+
+CREATE INDEX ix_cash_transactions_user_id ON cash_transactions(user_id);
+CREATE INDEX ix_cash_transactions_account_id ON cash_transactions(account_id);
+CREATE INDEX idx_cash_transactions_user_account_time
+    ON cash_transactions(user_id, account_id, occurred_at);
+CREATE UNIQUE INDEX uq_cash_transactions_external_id
+    ON cash_transactions(user_id, external_transaction_id)
+    WHERE external_transaction_id IS NOT NULL;
+```
+
+### cash_ledger_coverage
+
+How much of an account's cash history is actually KNOWN. Added by
+`20260830_004`.
+
+The only table in this design that stores something derived, and deliberately:
+the balance can always be re-folded from rows that are all still present, but
+the shape of a broker pull that happened weeks ago is not recoverable from
+anything else. NAV originally re-derived "is the opening balance known?" by
+comparing the earliest cash row against the earliest trade, which a clamped
+60-day pull satisfies trivially while omitting years of earlier cash — so it
+reported a confidently non-estimated total return over an incomplete picture.
+
+**EVIDENCE ONLY, never a conclusion** (`20260830_005`). The first cut stored
+`is_true_origin` — "the history is complete" — computed once at backfill time,
+which meant a trade backdated afterwards could not invalidate it. Completeness
+is now derived on every read by `CashLedgerService.coverage`, per account,
+against live activity; this table keeps only the two facts that cannot be
+recomputed.
+
+```sql
+CREATE TABLE cash_ledger_coverage (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- CASCADE here, deliberately unlike its sibling above: this row is
+    -- regenerable provenance about a pull, not financial history, so it is
+    -- not worth blocking an account deletion over.
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+
+    -- Earliest instant cash movements are known COMPLETE from -- the earliest
+    -- window a broker import actually delivered, NOT the earliest row that
+    -- happened to arrive. NULL = no import provenance (a manual ledger).
+    complete_from TIMESTAMPTZ,
+    -- Some pull was clamped to the provider's history horizon and no later
+    -- pull reached back past that floor. Sticky: a routine incremental pull
+    -- recovers nothing, so it must not clear this. Defaults TRUE so a row
+    -- written by anything that does not know better reads as "assume a gap".
+    has_history_gap BOOLEAN NOT NULL DEFAULT true,
+    source VARCHAR(50) NOT NULL DEFAULT 'schwab_api',
+    -- The run's HISTORY GAP note: the readable reason is_true_origin is false.
+    note TEXT,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_cash_ledger_coverage_user_account UNIQUE (user_id, account_id)
+);
+
+CREATE INDEX ix_cash_ledger_coverage_user_id ON cash_ledger_coverage(user_id);
+CREATE INDEX ix_cash_ledger_coverage_account_id ON cash_ledger_coverage(account_id);
 ```
 
 ---

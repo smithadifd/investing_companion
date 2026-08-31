@@ -33,12 +33,62 @@ if TYPE_CHECKING:
 
 
 class TradeType(str, enum.Enum):
-    """Types of trades."""
+    """Types of trades.
+
+    Four of these are *fills* (buy/sell/short/cover) and four are not. The
+    non-fill members were added by the total-return build and are stored in
+    two different homes discriminated by the member:
+
+    * ``dividend`` / ``split`` - equity-scoped, so they live in ``trades``
+      (``trades.equity_id`` stays NOT NULL).
+    * ``deposit`` / ``withdrawal`` - account-scoped cash with no equity, so
+      they live in ``cash_transactions`` (which reuses THIS enum for its
+      ``kind`` column). A row carrying one of them in ``trades`` is malformed;
+      the API rejects it and the position fold raises on it rather than
+      guessing.
+
+    Use :data:`SHARE_AFFECTING_TRADE_TYPES` rather than re-listing the fills:
+    it is a positive allow-list, so a future fifth member is excluded by
+    default rather than silently entering a match pool / lesson prompt / FIFO
+    queue.
+    """
 
     BUY = "buy"
     SELL = "sell"
     SHORT = "short"
     COVER = "cover"
+    # --- total-return build (foundry plans/investing_companion/total-return-design.md) ---
+    DIVIDEND = "dividend"  # equity-scoped cash-in       -> trades
+    SPLIT = "split"  # equity-scoped share adjust  -> trades
+    DEPOSIT = "deposit"  # account-scoped cash-in      -> cash_transactions
+    WITHDRAWAL = "withdrawal"  # account-scoped cash-out     -> cash_transactions
+
+
+# The fills: the only types that represent a share transaction at a broker.
+# A POSITIVE allow-list on purpose (Surface 1 of the design doc) - every
+# consumer that means "a real fill" must test membership here instead of
+# excluding the members it happens to know about, so adding a ninth member
+# cannot silently widen a match pool.
+SHARE_AFFECTING_TRADE_TYPES: tuple["TradeType", ...] = (
+    TradeType.BUY,
+    TradeType.SELL,
+    TradeType.SHORT,
+    TradeType.COVER,
+)
+
+# Members that are legal in ``trades`` but are NOT fills. Equity-scoped, so
+# ``trades`` is their home; neither one moves a FIFO queue by itself.
+NON_FILL_TRADE_TYPES: tuple["TradeType", ...] = (
+    TradeType.DIVIDEND,
+    TradeType.SPLIT,
+)
+
+# Members that must NEVER appear in ``trades`` - they have no equity leg and
+# belong in ``cash_transactions``.
+CASH_LEDGER_TRADE_TYPES: tuple["TradeType", ...] = (
+    TradeType.DEPOSIT,
+    TradeType.WITHDRAWAL,
+)
 
 
 class Trade(Base, TimestampMixin):
@@ -189,12 +239,24 @@ class Trade(Base, TimestampMixin):
 
     @property
     def is_opening(self) -> bool:
-        """Whether this trade opens a position (buy or short)."""
+        """Whether this trade opens a position (buy or short).
+
+        Explicitly False for ``dividend``/``split`` - a dividend is cash and a
+        split is a re-denomination; neither opens exposure. It was already
+        False for both by accident (they aren't buy or short); saying so here
+        means the next new member has to make a decision rather than inherit
+        one.
+        """
         return self.trade_type in (TradeType.BUY, TradeType.SHORT)
 
     @property
     def is_closing(self) -> bool:
-        """Whether this trade closes a position (sell or cover)."""
+        """Whether this trade closes a position (sell or cover).
+
+        Explicitly False for ``dividend``/``split``. ``TradeService.create_trade``
+        gates the lesson-capture prompt on this, so a dividend must never read
+        as a close.
+        """
         return self.trade_type in (TradeType.SELL, TradeType.COVER)
 
     def __repr__(self) -> str:

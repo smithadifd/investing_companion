@@ -17,7 +17,12 @@ const TRADE_TYPES: { value: TradeType; label: string }[] = [
   { value: 'sell', label: 'Sell' },
   { value: 'short', label: 'Short' },
   { value: 'cover', label: 'Cover' },
+  { value: 'dividend', label: 'Dividend' },
+  { value: 'split', label: 'Split' },
 ];
+
+const RED_TYPES: TradeType[] = ['sell', 'short'];
+const GREEN_TYPES: TradeType[] = ['buy', 'cover', 'dividend'];
 
 function toNumber(value: number | string | null | undefined): number {
   if (value === null || value === undefined) return 0;
@@ -37,17 +42,27 @@ export function EditTradeModal({ trade, onClose }: EditTradeModalProps) {
 
   const updateTrade = useUpdateTrade();
 
+  // A split's price is the sentinel 0 (quantity carries the ratio) and it
+  // holds no account — a split belongs to the security. The API 422s anything
+  // else, so the form never builds such a body.
+  const isSplit = tradeType === 'split';
+  const isDividend = tradeType === 'dividend';
+  // See CreateTradeModal: an unassigned dividend vanishes from every
+  // account-scoped cash and NAV figure, so the API refuses one.
+  const missingAccount = isDividend && accountId === null;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (missingAccount) return;
 
     const data: TradeUpdate = {
       trade_type: tradeType,
       quantity: parseFloat(quantity),
-      price: parseFloat(price),
-      fees: parseFloat(fees) || 0,
+      price: isSplit ? 0 : parseFloat(price),
+      fees: isSplit ? 0 : parseFloat(fees) || 0,
       executed_at: new Date(executedAt).toISOString(),
       notes: notes || undefined,
-      account_id: accountId,
+      account_id: isSplit ? null : accountId,
     };
 
     try {
@@ -58,9 +73,9 @@ export function EditTradeModal({ trade, onClose }: EditTradeModalProps) {
     }
   };
 
-  // Calculate total value
+  // Calculate total value (meaningless for a split: quantity is a ratio)
   const totalValue =
-    quantity && price ? parseFloat(quantity) * parseFloat(price) : 0;
+    !isSplit && quantity && price ? parseFloat(quantity) * parseFloat(price) : 0;
   const totalWithFees = totalValue + (parseFloat(fees) || 0);
 
   return (
@@ -82,7 +97,7 @@ export function EditTradeModal({ trade, onClose }: EditTradeModalProps) {
             <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">
               Trade Type
             </label>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               {TRADE_TYPES.map((type) => (
                 <button
                   key={type.value}
@@ -90,9 +105,11 @@ export function EditTradeModal({ trade, onClose }: EditTradeModalProps) {
                   onClick={() => setTradeType(type.value)}
                   className={`py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
                     tradeType === type.value
-                      ? type.value === 'buy' || type.value === 'cover'
+                      ? GREEN_TYPES.includes(type.value)
                         ? 'bg-emerald-600 text-white'
-                        : 'bg-red-600 text-white'
+                        : RED_TYPES.includes(type.value)
+                          ? 'bg-red-600 text-white'
+                          : 'bg-amber-600 text-white'
                       : 'bg-neutral-100 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-600'
                   }`}
                 >
@@ -103,10 +120,10 @@ export function EditTradeModal({ trade, onClose }: EditTradeModalProps) {
           </div>
 
           {/* Quantity and Price */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className={isSplit ? '' : 'grid grid-cols-2 gap-4'}>
             <div>
               <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
-                Quantity
+                {isSplit ? 'Split Ratio' : isDividend ? 'Shares Held' : 'Quantity'}
               </label>
               <input
                 type="number"
@@ -118,39 +135,52 @@ export function EditTradeModal({ trade, onClose }: EditTradeModalProps) {
                 required
               />
             </div>
+            {!isSplit && (
+              <div>
+                <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                  {isDividend ? 'Dividend per Share' : 'Price per Share'}
+                </label>
+                <input
+                  type="number"
+                  step="0.0001"
+                  min="0"
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  required
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Account (only shown once accounts exist). Never on a split. */}
+          {!isSplit && (
+            <div>
+              <AccountSelect value={accountId} onChange={setAccountId} />
+              {missingAccount && (
+                <p role="alert" className="text-sm text-amber-600 dark:text-amber-400 mt-1">
+                  A dividend must name the account its cash landed in.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Fees — a split has none */}
+          {!isSplit && (
             <div>
               <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
-                Price per Share
+                {isDividend ? 'Withholding/Fees' : 'Fees/Commission'}
               </label>
               <input
                 type="number"
-                step="0.0001"
+                step="0.01"
                 min="0"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
+                value={fees}
+                onChange={(e) => setFees(e.target.value)}
                 className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
               />
             </div>
-          </div>
-
-          {/* Account (only shown once accounts exist) */}
-          <AccountSelect value={accountId} onChange={setAccountId} />
-
-          {/* Fees */}
-          <div>
-            <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
-              Fees/Commission
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={fees}
-              onChange={(e) => setFees(e.target.value)}
-              className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
+          )}
 
           {/* Date/Time */}
           <div>
@@ -219,7 +249,7 @@ export function EditTradeModal({ trade, onClose }: EditTradeModalProps) {
             </button>
             <button
               type="submit"
-              disabled={updateTrade.isPending}
+              disabled={updateTrade.isPending || missingAccount}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
             >
               {updateTrade.isPending && <Loader2 className="h-4 w-4 animate-spin" />}

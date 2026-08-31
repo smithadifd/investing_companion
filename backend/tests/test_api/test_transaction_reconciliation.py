@@ -548,3 +548,140 @@ class TestTransactionReconciliationCrossUserIsolation:
         assert data["matched_count"] == 0
         assert data["broker_only_count"] == 1
         assert data["ic_only_count"] == 0
+
+
+class TestNonFillTypesStayOutOfTheMatchPool:
+    """SEAM UNDER TEST: the **match-pool seam** - ``_ic_trades``' definition of
+    "an IC row eligible to be matched against a broker fill", observed through
+    the public transactions view.
+
+    ``_ic_trades`` selected EVERY non-synthetic ``Trade`` in the window with no
+    ``trade_type`` filter at all. Once the enum grew, a manually recorded
+    dividend landed in the pool under a ``"dividend"`` key that no broker row
+    can ever produce (``_broker_side`` only ever returns buy/sell/short/cover,
+    and a cash movement with no instrument leg is routed to ``non_trade``
+    first), so it fell through to ``ic_only`` - the screen's own vocabulary for
+    *"IC has a trade the broker does not report"*. That is a false discrepancy
+    on the one screen whose entire purpose is trustworthy diffs.
+
+    The fix is a POSITIVE allow-list (``SHARE_AFFECTING_TRADE_TYPES``), the
+    same fail-closed instinct as the ``is_synthetic.is_(False)`` filter beside
+    it - so a future ninth member is excluded by default rather than silently
+    admitted.
+    """
+
+    async def test_dividend_row_is_not_reported_as_ic_only(
+        self, authed_client: AsyncClient, db: AsyncSession, test_user
+    ):
+        account = await create_test_account(db, test_user, name="Roth")
+        await _link(db, test_user, account.id)
+        await _txn_run(db, test_user)
+        aapl = await create_test_equity(db, symbol="AAPL")
+
+        await create_test_trade(
+            db, aapl, test_user, quantity=Decimal("100"), price=Decimal("1.20"),
+            trade_type=TradeType.DIVIDEND, executed_at=_ago(3),
+            account_id=account.id,
+        )
+
+        data = (await authed_client.get(URL.format(account.id))).json()["data"]
+        assert data["ic_only_count"] == 0, (
+            "A dividend surfaced as a false ic_only discrepancy."
+        )
+        assert data["transactions"] == []
+
+    async def test_brokers_own_dividend_still_reports_non_trade(
+        self, authed_client: AsyncClient, db: AsyncSession, test_user
+    ):
+        """The allow-list must not also silence the BROKER side: a Schwab
+        dividend has no instrument leg, so it keeps its `non_trade` row."""
+        account = await create_test_account(db, test_user, name="Roth")
+        await _link(db, test_user, account.id)
+        run = await _txn_run(db, test_user)
+        aapl = await create_test_equity(db, symbol="AAPL")
+
+        await _imported_txn(
+            db, test_user, run, symbol=None, quantity=None, price=None,
+            position_effect=None, transaction_type="DIVIDEND_OR_INTEREST",
+            occurred_at=_ago(3), external_id="div-broker-1",
+        )
+        await create_test_trade(
+            db, aapl, test_user, quantity=Decimal("100"), price=Decimal("1.20"),
+            trade_type=TradeType.DIVIDEND, executed_at=_ago(3),
+            account_id=account.id,
+        )
+
+        data = (await authed_client.get(URL.format(account.id))).json()["data"]
+        statuses = [r["status"] for r in data["transactions"]]
+        assert statuses == ["non_trade"]
+        assert data["ic_only_count"] == 0
+        assert data["matched_count"] == 0
+
+    @pytest.mark.parametrize("carries_account", [True, False])
+    async def test_split_row_is_not_reported_as_ic_only(
+        self, authed_client: AsyncClient, db: AsyncSession, test_user, carries_account
+    ):
+        """Written so it holds whether or not the split row carries an account.
+
+        Today a split's ``account_id`` is NULL (D6), which keeps it out of
+        ``_ic_trades``' ``account_id ==`` filter by accident. This is the guard
+        for that coupling: if D6 is ever revisited and splits become
+        per-account rows, the ``carries_account=True`` case must still pass on
+        the strength of the allow-list alone.
+        """
+        account = await create_test_account(db, test_user, name="Roth")
+        await _link(db, test_user, account.id)
+        await _txn_run(db, test_user)
+        aapl = await create_test_equity(db, symbol="AAPL")
+
+        await create_test_trade(
+            db, aapl, test_user, quantity=Decimal("4"), price=Decimal("0"),
+            trade_type=TradeType.SPLIT, executed_at=_ago(3),
+            account_id=account.id if carries_account else None,
+        )
+
+        data = (await authed_client.get(URL.format(account.id))).json()["data"]
+        assert data["ic_only_count"] == 0
+        assert data["transactions"] == []
+
+    async def test_a_member_outside_the_allow_list_is_excluded_by_default(
+        self, authed_client: AsyncClient, db: AsyncSession, test_user
+    ):
+        """The allow-list is an ALLOW-list, not a NOT-IN exclusion.
+
+        ``deposit`` stands in for "a member the match pool was never taught
+        about" - it must be excluded because it is not on the list, not because
+        someone remembered to name it.
+        """
+        account = await create_test_account(db, test_user, name="Roth")
+        await _link(db, test_user, account.id)
+        await _txn_run(db, test_user)
+        aapl = await create_test_equity(db, symbol="AAPL")
+
+        await create_test_trade(
+            db, aapl, test_user, quantity=Decimal("500"), price=Decimal("1"),
+            trade_type=TradeType.DEPOSIT, executed_at=_ago(3),
+            account_id=account.id,
+        )
+
+        data = (await authed_client.get(URL.format(account.id))).json()["data"]
+        assert data["ic_only_count"] == 0
+        assert data["transactions"] == []
+
+    async def test_a_real_fill_is_still_reported_as_ic_only(
+        self, authed_client: AsyncClient, db: AsyncSession, test_user
+    ):
+        """The allow-list must not silence the signal it exists to protect."""
+        account = await create_test_account(db, test_user, name="Roth")
+        await _link(db, test_user, account.id)
+        await _txn_run(db, test_user)
+        aapl = await create_test_equity(db, symbol="AAPL")
+
+        await create_test_trade(
+            db, aapl, test_user, quantity=Decimal("10"), price=Decimal("100"),
+            trade_type=TradeType.BUY, executed_at=_ago(3),
+            account_id=account.id,
+        )
+
+        data = (await authed_client.get(URL.format(account.id))).json()["data"]
+        assert data["ic_only_count"] == 1

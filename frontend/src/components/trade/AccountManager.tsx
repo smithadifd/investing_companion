@@ -195,11 +195,31 @@ export function AccountManager({ onClose }: AccountManagerProps) {
       {deleteId !== null && (
         <ConfirmModal
           title="Delete Account"
-          message="Delete this account? Its trades stay, but become unassigned."
+          message={
+            'Delete this account? Its trades stay, but become unassigned. ' +
+            'Cash transactions cannot be unassigned — if any are recorded ' +
+            'against this account, the delete is refused and you will be told ' +
+            'to remove them first.'
+          }
           confirmLabel="Delete"
-          onConfirm={() => {
-            deleteAccount.mutate(deleteId);
+          onConfirm={async () => {
+            const id = deleteId;
             setDeleteId(null);
+            try {
+              await deleteAccount.mutateAsync(id);
+              setError(null);
+            } catch (err) {
+              // 409 (cash history present) or any other failure — surface the
+              // backend's reason (it names the row count and where to go) in
+              // the same error slot `handleAdd` uses, so a blocked delete
+              // isn't silent: the modal closing on its own was previously the
+              // only feedback, and it looked identical to success.
+              setError(
+                err instanceof Error
+                  ? err.message
+                  : 'Could not delete account.'
+              );
+            }
           }}
           onCancel={() => setDeleteId(null)}
           variant="danger"

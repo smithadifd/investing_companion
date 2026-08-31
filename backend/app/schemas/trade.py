@@ -4,9 +4,9 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.db.models.trade import TradeType
+from app.db.models.trade import CASH_LEDGER_TRADE_TYPES, TradeType
 from app.schemas.account import AccountRef
 
 
@@ -22,12 +22,97 @@ class TradeEquity(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+def validate_trade_shape(
+    trade_type: TradeType,
+    price: Decimal,
+    account_id: int | None = None,
+    fees: Decimal | None = None,
+) -> None:
+    """Reject a malformed (type, price, account) combination on a ``trades`` row.
+
+    Raises ``ValueError`` (which pydantic wraps into a 422 at the schema layer,
+    and which ``TradeService.update_trade`` already maps to 422 at the service
+    layer). Three rules, all *tighter* than what shipped before, never looser:
+
+    * ``deposit``/``withdrawal`` are not trades at all - they have no equity leg
+      and belong in ``cash_transactions``.
+    * a ``split`` row's ``price`` is the sentinel ``0`` (its ``quantity`` is the
+      ratio: 4 for 4:1, 0.25 for a 1:4 reverse), and it carries **no account** -
+      a split is a property of the security, so one row adjusts every account
+      partition holding it (design doc, Surface 3 "Ordering and scope").
+    * a ``split`` row carries **no fees**. Nothing consumes them: the cash fold
+      gives a split zero cash effect and the FIFO unrealized walk ignores a
+      split row entirely - but ``NavSummary.fees_paid`` sums every
+      ``Trade.fees``, so a fee here would be reported as paid while never
+      actually leaving the account or reducing total return. Rejecting it is
+      cheaper than teaching four folds about a number that has no meaning.
+    * a ``dividend`` row **must name an account**. Its cash leg is folded per
+      account (``CashLedgerService`` filters on ``account_id``), so an
+      unassigned dividend shows up in the whole-ledger view and then silently
+      vanishes from every account-scoped cash and NAV figure. Dividend cash
+      that landed in no account is money with no home.
+    * every other member keeps the old ``price > 0`` requirement. The DB column
+      is deliberately not check-constrained (a zero basis is legitimate for a
+      vested RSU or a gifted lot), so this is an API-layer rule only.
+
+    WRITE-SIDE ONLY, deliberately. It is not attached to ``TradeBase``/
+    ``TradeResponse``: a stored row that predates these rules (or that a seed,
+    an importer or psql wrote around them) must stay *readable*. Attaching a
+    shape rule to a response model makes one bad row break the whole list
+    endpoint forever - the same failure ``reconciliation._finite`` exists to
+    prevent.
+    """
+    if trade_type in CASH_LEDGER_TRADE_TYPES:
+        raise ValueError(
+            f"{trade_type.value!r} is not a trade type: it has no equity leg. "
+            "Record it in the cash ledger (cash_transactions) instead."
+        )
+    if trade_type == TradeType.SPLIT:
+        if price != 0:
+            raise ValueError(
+                "price must be 0 on a split row - the ratio is carried by "
+                "quantity (4 for a 4:1, 0.25 for a 1:4 reverse)."
+            )
+        if account_id is not None:
+            raise ValueError(
+                "a split row must not carry an account_id: a split is a "
+                "property of the security and adjusts every account holding it."
+            )
+        if fees is not None and fees != 0:
+            raise ValueError(
+                "a split row must not carry fees: nothing spends them. The "
+                "cash fold gives a split zero cash effect, so a fee here would "
+                "be reported as paid without ever leaving the account."
+            )
+        return
+
+    if price <= 0:
+        raise ValueError(f"price must be greater than 0 for a {trade_type.value} trade")
+
+    if trade_type == TradeType.DIVIDEND and account_id is None:
+        raise ValueError(
+            "a dividend row must name an account_id: its cash leg is folded "
+            "per account, so an unassigned dividend disappears from every "
+            "account-scoped cash balance and NAV."
+        )
+
+
 class TradeBase(BaseModel):
-    """Base fields for trades."""
+    """Base fields for trades.
+
+    ``price`` is ``ge=0`` rather than ``gt=0`` because a ``split`` row's price
+    is the sentinel zero; the per-type rule lives in
+    :func:`validate_trade_shape`, which the write schemas apply. See that
+    docstring for why it is not applied here.
+    """
 
     trade_type: TradeType
     quantity: Decimal = Field(..., gt=0, description="Number of shares/units")
-    price: Decimal = Field(..., gt=0, description="Price per share/unit")
+    price: Decimal = Field(
+        ...,
+        ge=0,
+        description="Price per share/unit (0 only on a split row, where quantity is the ratio)",
+    )
     fees: Decimal = Field(default=Decimal("0"), ge=0, description="Transaction fees")
     executed_at: datetime = Field(..., description="When the trade was executed")
     notes: str | None = Field(None, max_length=5000)
@@ -50,13 +135,26 @@ class TradeCreate(TradeBase):
         # This runs for each field; full validation happens in the endpoint
         return v
 
+    @model_validator(mode="after")
+    def check_trade_shape(self) -> "TradeCreate":
+        validate_trade_shape(
+            self.trade_type, self.price, self.account_id, self.fees
+        )
+        return self
+
 
 class TradeUpdate(BaseModel):
-    """Schema for updating a trade."""
+    """Schema for updating a trade.
+
+    Every field is optional, so the (type, price, account) rules can only be
+    checked against the *resulting* row - ``TradeService.update_trade`` calls
+    :func:`validate_trade_shape` after applying the patch. ``price`` is ``ge=0``
+    here for the same reason it is on :class:`TradeBase`.
+    """
 
     trade_type: TradeType | None = None
     quantity: Decimal | None = Field(None, gt=0)
-    price: Decimal | None = Field(None, gt=0)
+    price: Decimal | None = Field(None, ge=0)
     fees: Decimal | None = Field(None, ge=0)
     executed_at: datetime | None = None
     notes: str | None = Field(None, max_length=5000)

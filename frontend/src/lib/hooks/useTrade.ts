@@ -59,6 +59,9 @@ export function useCreateTrade() {
       queryClient.invalidateQueries({ queryKey: ['dashboard', 'exposure'] });
       queryClient.invalidateQueries({ queryKey: ['performance'] });
       queryClient.invalidateQueries({ queryKey: ['trade-pairs'] });
+      // A trade moves cash (and a split re-denominates share counts),
+      // so the NAV fold is stale the moment one lands.
+      queryClient.invalidateQueries({ queryKey: ['nav'] });
     },
   });
 }
@@ -79,6 +82,9 @@ export function useUpdateTrade() {
       queryClient.invalidateQueries({ queryKey: ['dashboard', 'exposure'] });
       queryClient.invalidateQueries({ queryKey: ['performance'] });
       queryClient.invalidateQueries({ queryKey: ['trade-pairs'] });
+      // A trade moves cash (and a split re-denominates share counts),
+      // so the NAV fold is stale the moment one lands.
+      queryClient.invalidateQueries({ queryKey: ['nav'] });
     },
   });
 }
@@ -97,6 +103,9 @@ export function useDeleteTrade() {
       queryClient.invalidateQueries({ queryKey: ['dashboard', 'exposure'] });
       queryClient.invalidateQueries({ queryKey: ['performance'] });
       queryClient.invalidateQueries({ queryKey: ['trade-pairs'] });
+      // A trade moves cash (and a split re-denominates share counts),
+      // so the NAV fold is stale the moment one lands.
+      queryClient.invalidateQueries({ queryKey: ['nav'] });
     },
   });
 }

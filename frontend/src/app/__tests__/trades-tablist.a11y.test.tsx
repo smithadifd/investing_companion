@@ -21,7 +21,11 @@ describe('Trades tablist keyboard a11y (WAI-ARIA tabs pattern)', () => {
     render(<TradesPage />);
 
     const tabs = screen.getAllByRole('tab');
-    expect(tabs).toHaveLength(4);
+    // Count-agnostic on purpose: this asserts the roving-focus BEHAVIOUR, and
+    // a hard-coded length turns "a tab was added" into an a11y failure. The
+    // tab set itself is asserted by name below.
+    expect(tabs.length).toBeGreaterThanOrEqual(4);
+    const last = tabs.length - 1;
     expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
     // Non-selected tabs are out of the tab sequence (roving tabindex).
     expect(tabs[1]).toHaveAttribute('tabindex', '-1');
@@ -32,8 +36,8 @@ describe('Trades tablist keyboard a11y (WAI-ARIA tabs pattern)', () => {
     expect(tabs[1]).toHaveFocus();
 
     await user.keyboard('{End}');
-    expect(tabs[3]).toHaveAttribute('aria-selected', 'true');
-    expect(tabs[3]).toHaveFocus();
+    expect(tabs[last]).toHaveAttribute('aria-selected', 'true');
+    expect(tabs[last]).toHaveFocus();
 
     await user.keyboard('{Home}');
     expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
@@ -41,8 +45,21 @@ describe('Trades tablist keyboard a11y (WAI-ARIA tabs pattern)', () => {
 
     // Wraps from the first tab back to the last.
     await user.keyboard('{ArrowLeft}');
-    expect(tabs[3]).toHaveAttribute('aria-selected', 'true');
-    expect(tabs[3]).toHaveFocus();
+    expect(tabs[last]).toHaveAttribute('aria-selected', 'true');
+    expect(tabs[last]).toHaveFocus();
+  });
+
+  it('exposes every view as a tab, including Total Return', () => {
+    render(<TradesPage />);
+    expect(
+      screen.getAllByRole('tab').map((t) => t.textContent?.trim()),
+    ).toEqual([
+      'Trades',
+      'Positions',
+      'Total Return',
+      'Performance',
+      'Position Sizer',
+    ]);
   });
 
   it('the selected tab controls a labelled tabpanel', () => {

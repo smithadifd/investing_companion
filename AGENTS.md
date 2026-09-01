@@ -112,12 +112,15 @@ election as well as the position: `delayed_quotes=True` demotes a delayed provid
 one regardless of list order, and only an explicit election yields to that — so a chain mis-ordered
 *by accident* is still corrected. The election is an addition in front of the chain, so Yahoo stays
 the free chain's own head and its quotes are still reported fresh when Massive cannot answer.
-Extended-hours quotes are a separate seam and stay on Yahoo.
+Extended-hours quotes are a separate seam (`get_extended_quote_provider`): the same
+`POLYGON_API_KEY` promotes Massive to the front there too (BS10), with Yahoo (or Schwab, when its
+own separate opt-in is on) as the per-symbol fallback — the real-time chain above is untouched by
+this.
 
 | Provider | Role | Usage | Notes |
 |----------|------|-------|-------|
-| Massive (Polygon.io) | **Primary when keyed** (opt-in) | Quotes, history, fundamentals, search (`massive.py`) | Paid key `POLYGON_API_KEY`; promoted to the head of the chain and elected `quote_primary`. Quotes are 15-min delayed (`delayed_quotes=True`) and the UI labels them neutrally ("15-min delayed"), not as a fallback warning. Per-product entitlements declared in `MASSIVE_ENTITLEMENTS`; an unentitled surface raises before the request leaves the process and routes on |
-| Yahoo Finance | Primary of the free chain | Quotes, fundamentals, history, search; `^VIX` and other index/forex/futures | Unofficial — be gentle; may break; retry/backoff/breaker-wrapped. Also the default extended-hours source |
+| Massive (Polygon.io) | **Primary when keyed** (opt-in) | Quotes (incl. extended-hours), history, fundamentals, search (`massive.py`) | Paid key `POLYGON_API_KEY`; promoted to the head of the chain and elected `quote_primary`. Quotes are 15-min delayed (`delayed_quotes=True`) and the UI labels them neutrally ("15-min delayed"), not as a fallback warning. Per-product entitlements declared in `MASSIVE_ENTITLEMENTS`; an unentitled surface raises before the request leaves the process and routes on |
+| Yahoo Finance | Primary of the free chain | Quotes, fundamentals, history, search; `^VIX` and other index/forex/futures | Unofficial — be gentle; may break; retry/backoff/breaker-wrapped. Also the default extended-hours source (and Massive's own extended-hours fallback when keyed) |
 | Stooq | Fallback | Quotes + daily history (`stooq.py`) | **No key**; US equities/ETFs; always active |
 | Alpha Vantage | Fallback (opt-in) | Quotes (`alpha_vantage.py`) | Free key `ALPHA_VANTAGE_API_KEY`, ~5 req/min; key-gated, inert without it |
 | Schwab | Ingestion (quotes opt-in, default OFF) | Brokerage transactions + positions (`schwab_ingestion.py`). Extended-hours quotes ONLY when `SCHWAB_QUOTES_ENABLED=true` | Opt-in OAuth; tokens expire every 7 days. The two roles are decoupled (#273): expiry stops transaction sync, not prices |

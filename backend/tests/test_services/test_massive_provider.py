@@ -33,6 +33,7 @@ from app.services.data_providers.base import (
     ProviderUnentitledError,
 )
 from app.services.data_providers.massive import (
+    MassiveEntitlements,
     MassiveProvider,
     is_massive_configured,
     parse_aggregates,
@@ -978,3 +979,227 @@ class TestPrimaryFirstOnEverySurface:
 
         assert await getattr(chain, _SURFACE_CALL[surface])("AAPL")
         assert yahoo.calls == [surface]
+
+
+# ---------------------------------------------------------------------------
+# Extended-hours quotes (BS10) — session derivation off the data's own
+# timestamp, and the contractual label (source="massive", stale=True) carried
+# straight over from get_quote.
+# ---------------------------------------------------------------------------
+
+
+class TestSessionForTimestamp:
+    """``_session_for_timestamp`` — data-driven, not wall-clock-driven."""
+
+    def test_weekday_windows(self):
+        from app.services.data_providers.massive import _session_for_timestamp
+
+        # 2026-06-09 is a Tuesday. Values are naive-UTC ET+4h (EDT).
+        cases = [
+            ((2026, 6, 9, 7, 59), "closed"),  # 03:59 ET
+            ((2026, 6, 9, 8, 0), "pre"),  # 04:00 ET
+            ((2026, 6, 9, 13, 29), "pre"),  # 09:29 ET
+            ((2026, 6, 9, 13, 30), "regular"),  # 09:30 ET
+            ((2026, 6, 9, 19, 59), "regular"),  # 15:59 ET
+            ((2026, 6, 9, 20, 0), "post"),  # 16:00 ET
+            ((2026, 6, 9, 23, 59), "post"),  # 19:59 ET
+            ((2026, 6, 10, 0, 0), "closed"),  # 20:00 ET
+        ]
+        for (y, mo, d, h, mi), expected in cases:
+            assert _session_for_timestamp(datetime(y, mo, d, h, mi)) == expected
+
+    def test_weekend_is_closed(self):
+        from app.services.data_providers.massive import _session_for_timestamp
+
+        # 2026-06-13 is a Saturday; 14:00 UTC is 10:00 ET, deep in "regular"
+        # hours on a weekday — the weekday guard must still win.
+        saturday = datetime(2026, 6, 13, 14, 0)
+        assert _session_for_timestamp(saturday) == "closed"
+
+    def test_the_fixture_snapshot_lands_in_regular(self):
+        """Sanity check against the module's own _SNAPSHOT fixture: its
+        lastTrade.t (2020-11-12 10:45 ET, a Thursday) is inside regular hours,
+        so get_extended_quote below is expected to report "regular"."""
+        from app.services.data_providers.massive import _session_for_timestamp
+
+        snapshot = parse_snapshot("AAPL", _SNAPSHOT)
+        assert _session_for_timestamp(snapshot.timestamp) == "regular"
+
+
+class TestGetExtendedQuote:
+    """``MassiveProvider.get_extended_quote`` — built on ``get_quote``."""
+
+    async def test_maps_price_change_percent_session(self, monkeypatch):
+        _stub_http(monkeypatch, _StubResponse(200, _SNAPSHOT))
+        provider = MassiveProvider(api_key=TEST_KEY)
+
+        quote = await provider.get_extended_quote("AAPL")
+
+        assert quote["price"] == pytest.approx(120.47)
+        assert quote["change_percent"] == pytest.approx(0.82)
+        assert quote["session"] == "regular"
+
+    async def test_contractually_labeled_source_and_stale(self, monkeypatch):
+        """The same stamp get_quote already carries (IC#318's convention),
+        reused verbatim rather than invented fresh for this surface."""
+        _stub_http(monkeypatch, _StubResponse(200, _SNAPSHOT))
+        provider = MassiveProvider(api_key=TEST_KEY)
+
+        quote = await provider.get_extended_quote("AAPL")
+
+        assert quote["source"] == "massive"
+        assert quote["stale"] is True
+
+    async def test_unknown_symbol_returns_none(self, monkeypatch):
+        """A clean not-found (get_quote's own contract) propagates as None,
+        not as an empty/degraded dict."""
+        _stub_http(monkeypatch, _StubResponse(404, {"status": "NOT_FOUND"}))
+        provider = MassiveProvider(api_key=TEST_KEY)
+
+        assert await provider.get_extended_quote("NOPE") is None
+
+    async def test_a_get_quote_failure_propagates(self, monkeypatch):
+        """Errors are NOT swallowed here — MassiveExtendedQuoteProvider is the
+        layer responsible for falling back to Yahoo, not this method."""
+        _stub_http(monkeypatch, _StubResponse(401, {"status": "NOT_AUTHORIZED"}))
+        provider = MassiveProvider(api_key=TEST_KEY)
+
+        with pytest.raises(ProviderError):
+            await provider.get_extended_quote("AAPL")
+
+    async def test_unentitled_quote_surface_propagates_as_unentitled(self):
+        """Same routing signal get_quote raises — the chain (via the
+        extended-quote wrapper) treats it exactly like any other failure."""
+        provider = MassiveProvider(
+            api_key=TEST_KEY,
+            entitlements=MassiveEntitlements(declared=[]),
+        )
+
+        with pytest.raises(ProviderUnentitledError):
+            await provider.get_extended_quote("AAPL")
+
+
+class TestMassiveExtendedQuoteProvider:
+    """The per-symbol Massive-then-fallback composition, mirroring
+    SchwabProvider's own fallback shape."""
+
+    class _StubExtendedProvider:
+        """A minimal ExtendedQuoteProvider stand-in (not the real Massive/Yahoo
+        classes) so these tests pin the WRAPPER's behaviour in isolation."""
+
+        def __init__(self, name, *, result=None, error=None):
+            self.name = name
+            self._result = result
+            self._error = error
+            self.calls: list[str] = []
+            self.aclose_called = False
+
+        async def get_extended_quote(self, symbol):
+            self.calls.append(symbol)
+            if self._error is not None:
+                raise self._error
+            return self._result
+
+        async def aclose(self):
+            self.aclose_called = True
+
+    async def test_massive_first_when_it_answers(self):
+        from app.services.data_providers.massive import MassiveExtendedQuoteProvider
+
+        good = {
+            "price": 1.0,
+            "change_percent": 0.1,
+            "session": "pre",
+            "source": "massive",
+            "stale": True,
+        }
+        massive = self._StubExtendedProvider("massive", result=good)
+        yahoo = self._StubExtendedProvider("yahoo", result={"price": 2.0})
+
+        wrapper = MassiveExtendedQuoteProvider(massive, fallback=yahoo)
+        quote = await wrapper.get_extended_quote("AAPL")
+
+        assert quote is good
+        assert massive.calls == ["AAPL"]
+        assert yahoo.calls == [], "the fallback must not be consulted when Massive answers"
+
+    async def test_falls_back_on_a_raised_error(self):
+        from app.services.data_providers.massive import MassiveExtendedQuoteProvider
+        from app.services.data_providers.base import ProviderError
+
+        massive = self._StubExtendedProvider("massive", error=ProviderError("boom"))
+        fallback_quote = {"price": 2.0, "change_percent": 0.0, "session": "closed"}
+        yahoo = self._StubExtendedProvider("yahoo", result=fallback_quote)
+
+        wrapper = MassiveExtendedQuoteProvider(massive, fallback=yahoo)
+        quote = await wrapper.get_extended_quote("AAPL")
+
+        assert quote is fallback_quote
+        assert massive.calls == ["AAPL"]
+        assert yahoo.calls == ["AAPL"]
+
+    async def test_falls_back_on_a_clean_none(self):
+        """A None from Massive (its own not-found) also routes to the
+        fallback — not just a raised exception."""
+        from app.services.data_providers.massive import MassiveExtendedQuoteProvider
+
+        massive = self._StubExtendedProvider("massive", result=None)
+        fallback_quote = {"price": 2.0, "change_percent": 0.0, "session": "closed"}
+        yahoo = self._StubExtendedProvider("yahoo", result=fallback_quote)
+
+        wrapper = MassiveExtendedQuoteProvider(massive, fallback=yahoo)
+        quote = await wrapper.get_extended_quote("AAPL")
+
+        assert quote is fallback_quote
+
+    async def test_one_bad_symbol_does_not_poison_the_next_call(self):
+        """The fallback is consulted PER SYMBOL — a Massive failure on one
+        symbol must not disable Massive for the rest of the batch."""
+        from app.services.data_providers.massive import MassiveExtendedQuoteProvider
+
+        calls = {"AAPL": None, "MSFT": {"price": 3.0}}
+
+        class _FlakyMassive:
+            name = "massive"
+
+            async def get_extended_quote(self, symbol):
+                if symbol == "AAPL":
+                    raise ProviderError("transient")
+                return calls[symbol]
+
+        yahoo = self._StubExtendedProvider(
+            "yahoo", result={"price": 1.0, "session": "closed"}
+        )
+        wrapper = MassiveExtendedQuoteProvider(_FlakyMassive(), fallback=yahoo)
+
+        first = await wrapper.get_extended_quote("AAPL")
+        second = await wrapper.get_extended_quote("MSFT")
+
+        assert first == {"price": 1.0, "session": "closed"}, "AAPL fell back"
+        assert second == {"price": 3.0}, "MSFT still answered from Massive"
+        assert yahoo.calls == ["AAPL"], "only the failing symbol touched the fallback"
+
+    async def test_aclose_propagates_to_the_fallback(self):
+        """Massive opens no persistent connection; the fallback (e.g. a live
+        Schwab client) might, and must still get closed."""
+        from app.services.data_providers.massive import MassiveExtendedQuoteProvider
+
+        massive = self._StubExtendedProvider("massive", result=None)
+        yahoo = self._StubExtendedProvider("yahoo", result=None)
+        wrapper = MassiveExtendedQuoteProvider(massive, fallback=yahoo)
+
+        await wrapper.aclose()
+
+        assert yahoo.aclose_called is True
+
+    async def test_aclose_is_a_noop_when_the_fallback_has_none(self):
+        from app.services.data_providers.massive import MassiveExtendedQuoteProvider
+
+        massive = self._StubExtendedProvider("massive", result=None)
+
+        class _NoCloseFallback:
+            async def get_extended_quote(self, symbol):
+                return None
+
+        wrapper = MassiveExtendedQuoteProvider(massive, fallback=_NoCloseFallback())
+        await wrapper.aclose()  # must not raise

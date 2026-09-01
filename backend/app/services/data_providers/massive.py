@@ -53,18 +53,31 @@ Key handling: the key is sent as an ``Authorization: Bearer`` header, never as
 the ``apiKey`` query parameter Massive also accepts, so it cannot leak into
 request logs, error strings or proxy access logs.
 
+**Extended-hours quotes (BS10)** reuse the same delayed snapshot rather than a
+third endpoint: ``get_extended_quote`` wraps ``get_quote`` and derives
+pre/regular/post/closed from the quote's own timestamp (see
+``_session_for_timestamp``), stamping ``source="massive"``/``stale=True`` —
+the same contractual label ``get_quote`` already carries. Selection (whether
+Massive leads for extended-hours quotes at all, and what it falls back to)
+lives in ``get_extended_quote_provider`` (``__init__.py``), exactly like the
+regular quote chain's promotion in ``get_quote_provider`` — this module only
+declares what Massive itself can answer.
+
 Endpoints used:
     GET /v2/aggs/ticker/{t}/range/{mult}/{span}/{from}/{to}   history
-    GET /v2/snapshot/locale/us/markets/stocks/tickers/{t}      quote (delayed)
+    GET /v2/snapshot/locale/us/markets/stocks/tickers/{t}      quote (delayed;
+                                                                 also backs
+                                                                 get_extended_quote)
     GET /stocks/financials/v1/ratios?ticker={t}                fundamentals
     GET /v3/reference/tickers?search={q}                       search
 """
 
 import logging
 from collections.abc import Iterable
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -131,6 +144,52 @@ _PERIOD_DAYS: dict[str, int | None] = {
 # Earliest date used for "max" — the aggregates endpoint requires an explicit
 # lower bound, and no US equity tape predates this.
 _MAX_WINDOW_START = date(1970, 1, 1)
+
+# ---------------------------------------------------------------------------
+# Extended-hours session derivation (BS10)
+# ---------------------------------------------------------------------------
+#
+# Massive's snapshot carries no marketState-equivalent field the way Yahoo's
+# does, so the pre/regular/post/closed label is derived from the QUOTE'S OWN
+# timestamp (see ``_session_for_timestamp``) rather than a second endpoint.
+# The clock boundaries below intentionally mirror ``schwab.py``'s
+# ``_PRE_START``/``_REGULAR_START``/``_REGULAR_END``/``_POST_END`` table
+# exactly (same US-market session hours), but are defined locally rather than
+# imported — providers stay unaware of one another (``base.py``'s module
+# docstring) even when two of them happen to need the same market calendar
+# fact.
+_ET = ZoneInfo("America/New_York")
+_PRE_START = time(4, 0)
+_REGULAR_START = time(9, 30)
+_REGULAR_END = time(16, 0)
+_POST_END = time(20, 0)
+
+
+def _session_for_timestamp(quote_timestamp: datetime) -> str:
+    """pre/regular/post/closed from the quote's OWN timestamp, not the wall clock.
+
+    ``quote_timestamp`` is naive-UTC (``_ms_to_naive_utc``/``_ns_to_naive_utc``'s
+    convention — the same value ``parse_snapshot`` stamps on ``QuoteResponse.
+    timestamp``). Reading the session off the data's own trade/update time
+    rather than ``datetime.now()`` matters specifically because this feed is
+    15 minutes behind: a request made one minute into the post-market open can
+    still carry a last trade timestamped inside the regular session, and the
+    wall clock would mislabel it 'post' when the data itself is 'regular'. A
+    weekend timestamp (a stale Friday snapshot fetched Saturday) reads
+    'closed', the same degrade-safe default every other provider in this
+    package uses.
+    """
+    et = quote_timestamp.replace(tzinfo=timezone.utc).astimezone(_ET)
+    if et.weekday() >= 5:  # Saturday/Sunday
+        return "closed"
+    t = et.time()
+    if _PRE_START <= t < _REGULAR_START:
+        return "pre"
+    if _REGULAR_START <= t < _REGULAR_END:
+        return "regular"
+    if _REGULAR_END <= t < _POST_END:
+        return "post"
+    return "closed"
 
 # Massive ticker `type` codes -> the app's coarse asset_type vocabulary.
 _ASSET_TYPES: dict[str, str] = {
@@ -792,3 +851,94 @@ class MassiveProvider(MarketDataProvider):
         path = f"/v2/snapshot/locale/us/markets/stocks/tickers/{normalize_symbol(symbol)}"
         payload = await self._fetch_json(path, capability=ProviderCapability.QUOTE)
         return parse_snapshot(symbol, payload)
+
+    async def get_extended_quote(self, symbol: str) -> dict | None:
+        """Extended-hours quote — ``{price, change_percent, session, source, stale}``.
+
+        Built on the exact same delayed snapshot as ``get_quote`` (same
+        entitlement check, same HTTP status policy, same refusal to fabricate
+        a missing timestamp) rather than a second endpoint. Massive's snapshot
+        carries no marketState-equivalent field, so ``session`` is derived
+        from the quote's own timestamp via ``_session_for_timestamp`` —
+        data-driven like Yahoo's ``marketState`` read, not clock-driven like
+        Schwab's opt-in role.
+
+        ``change_percent`` is whatever ``parse_snapshot`` computed: always
+        against the prior regular session's close. Yahoo/Schwab compute a
+        post-market change against *today's* regular close instead; Massive's
+        snapshot has no separate "today's regular close" field to diff
+        against, so a post-market reading here is consistently vs the prior
+        close rather than mirroring that sibling convention exactly (BS10
+        Dn2 — see the PR description).
+
+        ``source``/``stale`` are always ``("massive", True)`` — the identical
+        stamp ``parse_snapshot`` puts on every quote this provider serves,
+        reused verbatim (IC#318's neutral-label convention) rather than
+        inventing new copy for this surface. Neither of today's
+        ``ExtendedQuoteProvider`` consumers (``collect_extended_movers``,
+        ``strategy_brief``, ``premarket_pulse``) reads them — they are here so
+        the dict is honestly labeled the moment a caller does.
+
+        Returns ``None`` exactly when ``get_quote`` does (unknown symbol, or a
+        snapshot with no usable timestamp — a clean not-found, never a
+        provider failure); raises whatever ``get_quote`` raises
+        (``ProviderError``/``ProviderUnentitledError``) so
+        ``MassiveExtendedQuoteProvider`` can route to its fallback exactly as
+        it routes past a ``get_quote`` failure elsewhere in the app.
+        """
+        quote = await self.get_quote(symbol)
+        if quote is None:
+            return None
+        return {
+            "price": float(quote.price),
+            "change_percent": float(quote.change_percent),
+            "session": _session_for_timestamp(quote.timestamp),
+            "source": quote.source,
+            "stale": quote.stale,
+        }
+
+
+class MassiveExtendedQuoteProvider:
+    """``ExtendedQuoteProvider`` backed by Massive, with a per-symbol fallback.
+
+    Mirrors ``SchwabProvider``'s shape (``schwab.py``): one symbol Massive
+    can't answer degrades to ``fallback`` rather than sinking the whole
+    briefing batch, and the fallback is used for a clean "can't quote this"
+    (``None``) exactly as for a raised error — Massive returning no data is
+    not a reason to skip the free chain's answer.
+
+    Composed in ``get_extended_quote_provider`` (``__init__.py``) — that is
+    the one place *selection* happens; this class only wires two already-built
+    providers together, and never on its own decides whether Massive should
+    be in the picture at all.
+    """
+
+    def __init__(self, massive: "MassiveProvider", fallback: Any) -> None:
+        self._massive = massive
+        self._fallback = fallback
+
+    async def get_extended_quote(self, symbol: str) -> dict | None:
+        try:
+            quote = await self._massive.get_extended_quote(symbol)
+        except Exception as exc:  # noqa: BLE001 — any Massive failure degrades to the fallback
+            logger.warning(
+                "Massive extended-quote failed for %s, falling back to %s: %s",
+                symbol,
+                getattr(self._fallback, "name", type(self._fallback).__name__),
+                exc,
+            )
+            return await self._fallback.get_extended_quote(symbol)
+        if quote is None:
+            return await self._fallback.get_extended_quote(symbol)
+        return quote
+
+    async def aclose(self) -> None:
+        """Propagate close-down to the fallback (e.g. a live Schwab client).
+
+        Massive itself opens no persistent connection to close — ``_fetch_json``
+        uses a fresh ``httpx.AsyncClient`` context manager per request — so
+        there is nothing of this object's own to release.
+        """
+        aclose = getattr(self._fallback, "aclose", None)
+        if aclose:
+            await aclose()

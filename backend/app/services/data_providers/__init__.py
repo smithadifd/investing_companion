@@ -144,6 +144,57 @@ def reset_quote_provider() -> None:
 async def get_extended_quote_provider(db: AsyncSession):
     """Pick the extended-hours quote provider for briefings.
 
+    **A configured ``POLYGON_API_KEY`` promotes Massive to the front of this
+    chain too (BS10) — the extended-hours sibling of ``get_quote_provider``'s
+    regular-quote promotion.** ``_get_base_extended_provider`` below computes
+    exactly what this function used to return on its own (Yahoo, or Schwab
+    when its own separate opt-in is on — see its docstring for that seam in
+    full); when Massive is configured, this function wraps that result as the
+    per-symbol fallback behind a ``MassiveExtendedQuoteProvider`` instead of
+    returning it directly. Unconfigured, this function returns exactly what
+    ``_get_base_extended_provider`` returns — unwrapped, same object, same
+    type — so a keyless install (or any install before BS10) sees no change
+    at all.
+
+    Massive's quotes are 15-minute delayed on the Starter plan, same as the
+    regular chain, and the same honesty rule applies: every quote Massive
+    serves here is stamped ``source="massive"``/``stale=True`` (see
+    ``MassiveProvider.get_extended_quote``) rather than presented as live.
+    Deliberately **not** a promotion of ``get_quote_provider``'s real-time
+    chain — that seam is untouched by this function and by this row.
+
+    A bad/erroring Massive falls through **per symbol** to the fallback
+    (``MassiveExtendedQuoteProvider``), matching ``SchwabProvider``'s existing
+    per-symbol fallback shape — one Massive hiccup never blanks a briefing
+    section that would otherwise have an answer.
+    """
+    base = await _get_base_extended_provider(db)
+
+    try:
+        from app.services.data_providers.massive import (
+            MassiveExtendedQuoteProvider,
+            MassiveProvider,
+            is_massive_configured,
+        )
+
+        if is_massive_configured():
+            massive = MassiveProvider()
+            logger.info(
+                "Massive (Polygon.io) elected primary for extended-hours "
+                "quotes (POLYGON_API_KEY configured); falling back to %s "
+                "per symbol",
+                getattr(base, "name", type(base).__name__),
+            )
+            return MassiveExtendedQuoteProvider(massive, fallback=base)
+    except Exception as exc:  # noqa: BLE001 — a bad optional provider must not break extended-hours quotes
+        logger.warning("Massive extended-quote provider unavailable: %s", exc)
+
+    return base
+
+
+async def _get_base_extended_provider(db: AsyncSession):
+    """Yahoo-or-Schwab half of extended-hours selection — Massive-unaware.
+
     **Yahoo by default, including when Schwab is connected (#273).** Schwab's
     quote role is opt-in and default-off (``SCHWAB_QUOTES_ENABLED``): a Schwab
     connection exists to ingest transactions and positions — the one thing no

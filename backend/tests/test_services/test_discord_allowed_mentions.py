@@ -6,8 +6,8 @@ strategy-brief, #210 catalysts, #211 trade-journal): even if untrusted text
 intact, Discord itself is told to resolve zero mentions into pings. Those
 sanitizers stay in place and are not touched or weakened here - this is a
 second, independent layer at the send choke point (``_post_webhook``), which
-all six webhook-posting methods on ``DiscordNotificationService`` route
-through.
+all seven webhook-posting methods on ``DiscordNotificationService`` route
+through (``send_alert_batch`` became the seventh in BZ14).
 
 No test in this module performs real network I/O: every ``DiscordNotification
 Service`` under test has its ``httpx.AsyncClient`` replaced by a mock before
@@ -126,7 +126,7 @@ async def test_post_webhook_helper_does_not_mutate_caller_payload():
 
 
 # ---------------------------------------------------------------------------
-# All six posting methods route through the helper and ship the field
+# All seven posting methods route through the helper and ship the field
 # ---------------------------------------------------------------------------
 
 
@@ -260,18 +260,38 @@ async def test_send_end_of_day_summary_payload_has_empty_parse():
 # ---------------------------------------------------------------------------
 # Explicit routing proof: each method calls _post_webhook, not client.post
 # directly (guards against a future edit re-introducing a raw client.post
-# bypass in any one of the six methods).
+# bypass in any one of the seven methods).
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_all_six_methods_route_through_post_webhook_helper(monkeypatch):
+async def test_all_seven_methods_route_through_post_webhook_helper(monkeypatch):
     client = _mock_client()
     notifier = _notifier(client)
 
     spy = AsyncMock(wraps=notifier._post_webhook)
     monkeypatch.setattr(notifier, "_post_webhook", spy)
 
+    await notifier.send_alert_batch(
+        [
+            {
+                "alert_name": "A",
+                "target_symbol": "AAPL",
+                "target_name": "Apple",
+                "condition_type": "above",
+                "threshold_value": "1",
+                "current_value": "2",
+            },
+            {
+                "alert_name": "B",
+                "target_symbol": "MSFT",
+                "target_name": "Microsoft",
+                "condition_type": "below",
+                "threshold_value": "3",
+                "current_value": "2",
+            },
+        ]
+    )
     await notifier.send_alert_notification(
         alert_name="A",
         target_symbol="AAPL",
@@ -303,10 +323,10 @@ async def test_all_six_methods_route_through_post_webhook_helper(monkeypatch):
         top_triggers=[],
     )
 
-    assert spy.await_count == 6
+    assert spy.await_count == 7
     # Every call the spy wrapped also actually reached the mock client -
     # proving _post_webhook (not some other path) is what talks to the wire.
-    assert client.post.await_count == 6
+    assert client.post.await_count == 7
 
 
 # ---------------------------------------------------------------------------

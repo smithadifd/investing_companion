@@ -15,6 +15,12 @@ updates:
     reviewers:
       - "smithadifd"
     open-pull-requests-limit: 5
+    groups:
+      # react and react-dom must stay on the exact same version (#64)
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
     ignore:
       # Tailwind v4 requires full config migration (CSS-first)
       - dependency-name: "tailwindcss"

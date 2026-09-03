@@ -70,10 +70,12 @@ def deliver_pending_notifications(self):
     window: Discord has no receiver dedup, so a crash after a successful POST
     but before the delivered-commit re-sends once the lease expires. That
     tradeoff is deliberate — never drop a price alert is worth a rare, bounded
-    duplicate. The claim leases ONE row at a time immediately before its send,
-    so this is safe to run on a short cadence, safe under any worker
-    concurrency (FOR UPDATE SKIP LOCKED), and safe to redeliver on worker loss
-    (``acks_late``). A reaper first sweeps rows stranded ``pending`` with
+    duplicate. The claim leases ONE GROUP at a time immediately before its
+    single send (every row a group covers is delivered by one batched Discord
+    embed since BZ14 — see ``AlertService.deliver_pending``), so this is safe
+    to run on a short cadence, safe under any worker concurrency (FOR UPDATE
+    SKIP LOCKED), and safe to redeliver on worker loss (``acks_late``). A
+    reaper first sweeps rows stranded ``pending`` with
     exhausted retries to a terminal ``failed`` state, so nothing is lost. On an
     unexpected error the task retries with backoff.
     """

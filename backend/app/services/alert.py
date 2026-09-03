@@ -57,6 +57,13 @@ PERIOD_LOOKBACK = {
 # retried forever.
 DELIVERY_LEASE_SECONDS = 120
 DELIVERY_BATCH_LIMIT = 100
+# Max rows covered by ONE grouped Discord send (BZ14). Sized so the rendered
+# embed stays comfortably inside Discord's 4096-char description budget: a
+# worst-case line is ~180 chars (the alert name is capped at
+# BATCH_LINE_NAME_LIMIT in the notification service), so 20 x 180 = 3600. A
+# backlog larger than this becomes SEVERAL grouped messages rather than one
+# truncated message — the cap bounds message size, it never drops an alert.
+DELIVERY_GROUP_LIMIT = 20
 # Hard TOTAL wall-clock bound on a single send, enforced with asyncio.wait_for
 # in _send_delivery (httpx's own timeout is per-operation, not a total bound and
 # not inclusive of any internal retries, so it can't be relied on here).
@@ -633,9 +640,12 @@ class AlertService:
     # Notifications are delivered via a transactional outbox. process_alert /
     # _process_zone_alert enqueue a `pending` AlertDelivery row in the SAME
     # transaction that records the trigger. A separate claim/deliver step — a
-    # Celery task on a short cadence, acks_late + bounded retry — claims ONE due
-    # row at a time (leasing it immediately before its own send), sends it, and
-    # marks it delivered/failed.
+    # Celery task on a short cadence, acks_late + bounded retry — claims ONE
+    # GROUP of due rows at a time (<= DELIVERY_GROUP_LIMIT, leased immediately
+    # before the group's own send), delivers the whole group in a SINGLE Discord
+    # send, and marks every member delivered/failed. A group of one uses the
+    # rich single-alert embed; two or more collapse into one batched embed with
+    # a deep-linked line each (BZ14).
     #
     # Delivery guarantee: AT-LEAST-ONCE with a bounded (<= max_attempts)
     # duplicate window. Discord has no receiver-side dedup, so a crash AFTER a
@@ -648,12 +658,19 @@ class AlertService:
     #   * two concurrent EVALUATIONS of the same trigger collapse to one enqueue
     #     (stable idempotency key + unique constraint), so overlapping runs do
     #     not each enqueue;
-    #   * claim-one-at-a-time + FOR UPDATE SKIP LOCKED + a per-row lease means a
-    #     row in flight is never re-claimed, so overlapping DELIVERY runs (any
-    #     worker concurrency) do not double-send it;
+    #   * claim-one-GROUP-at-a-time + FOR UPDATE SKIP LOCKED + a per-row lease
+    #     means a row in flight is never re-claimed, so overlapping DELIVERY runs
+    #     (any worker concurrency) do not double-send it. A group has no
+    #     unsent tail to lose — one send covers every member, under the same
+    #     DELIVERY_SEND_TIMEOUT_SECONDS bound a single row used to get;
+    #   * a batched send is ALL-OR-NOTHING for its group: one POST cannot half
+    #     succeed, so every member records the same outcome and a failure
+    #     leaves them all retryable (they are re-claimed independently next
+    #     drain, so a transient failure does not pin them into one group);
     #   * a row whose retries are exhausted reaches a terminal `failed` state —
-    #     either from _send_delivery, or from reap_stranded_deliveries for the
-    #     crash-after-final-claim edge — so nothing is stuck `pending` forever.
+    #     either from _send_delivery_group, or from reap_stranded_deliveries for
+    #     the crash-after-final-claim edge — so nothing is stuck `pending`
+    #     forever.
 
     @staticmethod
     def _build_delivery_payload(
@@ -753,6 +770,15 @@ class AlertService:
         not exhausted, and it holds no live lease. Claiming bumps ``attempts``
         and stamps a fresh lease, then commits — so the lease is durable before
         any send is attempted.
+
+        Ordering is ``created_at, id``. The ``id`` tiebreak is load-bearing,
+        not decoration: ``created_at`` defaults to ``func.now()``, which
+        Postgres resolves to TRANSACTION start time, so every row enqueued in
+        one transaction shares a timestamp — an entry-zone alert firing three
+        tiers writes three rows with identical ``created_at``. Ordering by the
+        timestamp alone left their relative order up to the planner, which was
+        invisible while each row got its own message and became user-visible
+        the moment a group renders as ordered lines in one embed (BZ14).
         """
         now = datetime.now(timezone.utc)
         lease_until = now + timedelta(seconds=lease_seconds)
@@ -767,7 +793,7 @@ class AlertService:
                 WHERE status = :pending
                   AND attempts < max_attempts
                   AND (lease_expires_at IS NULL OR lease_expires_at < :now)
-                ORDER BY created_at
+                ORDER BY created_at, id
                 LIMIT :limit
                 FOR UPDATE SKIP LOCKED
             )
@@ -793,7 +819,7 @@ class AlertService:
         rows = await self.db.execute(
             select(AlertDelivery)
             .where(AlertDelivery.id.in_(ids))
-            .order_by(AlertDelivery.created_at)
+            .order_by(AlertDelivery.created_at, AlertDelivery.id)
             .execution_options(populate_existing=True)
         )
         return list(rows.scalars().all())
@@ -803,31 +829,47 @@ class AlertService:
         limit: int = DELIVERY_BATCH_LIMIT,
         lease_seconds: int = DELIVERY_LEASE_SECONDS,
     ) -> dict:
-        """Drain up to ``limit`` pending deliveries, one claim-and-send at a
-        time. Called by Celery.
+        """Drain up to ``limit`` pending deliveries, one claim-and-send GROUP at
+        a time. Called by Celery.
 
-        Claiming ONE row per iteration (rather than a whole batch under a
-        single up-front lease) leases each row immediately before its own send.
-        That removes the batch-vs-lease amplifier: a slow send can never let a
-        not-yet-sent tail row's lease expire while this worker still holds it,
-        so a concurrent drain can't re-claim and double-send the tail. Safe
-        under any worker concurrency because the claim uses FOR UPDATE SKIP
-        LOCKED (disjoint single-row claims).
+        Every row this drain claims in one group is delivered by a SINGLE
+        Discord send (BZ14): a broad selloff that trips 30 alerts in one
+        evaluation cycle produces a couple of grouped messages instead of 30
+        webhook posts. Groups are capped at ``DELIVERY_GROUP_LIMIT``; a bigger
+        backlog simply becomes several groups, so nothing is ever dropped or
+        truncated to fit.
+
+        Lease safety is unchanged by the grouping. The pre-BZ14 reason for
+        claiming ONE row per iteration was the batch-vs-lease amplifier: under
+        per-row sends, a slow send let a not-yet-sent TAIL row's lease expire
+        while this worker still held it, so a concurrent drain could re-claim
+        and double-send the tail. A group has no tail — its rows are covered by
+        exactly one send, bounded by the same ``DELIVERY_SEND_TIMEOUT_SECONDS``
+        hard timeout, so every row in the group is in flight for the same
+        <= timeout window that a single row used to be, and the module-level
+        ``DELIVERY_SEND_TIMEOUT_SECONDS * 2 <= DELIVERY_LEASE_SECONDS``
+        invariant still covers it. Groups are claimed one at a time (never all
+        of ``limit`` up front), so each group's lease still starts immediately
+        before its own send. Safe under any worker concurrency because the
+        claim uses FOR UPDATE SKIP LOCKED (disjoint claims).
         """
         claimed_total = 0
         sent = 0
         failed = 0
-        for _ in range(limit):
+        remaining = limit
+        while remaining > 0:
             claimed = await self.claim_pending_deliveries(
-                limit=1, lease_seconds=lease_seconds
+                limit=min(DELIVERY_GROUP_LIMIT, remaining),
+                lease_seconds=lease_seconds,
             )
             if not claimed:
                 break
-            claimed_total += 1
-            if await self._send_delivery(claimed[0]):
-                sent += 1
+            claimed_total += len(claimed)
+            remaining -= len(claimed)
+            if await self._send_delivery_group(claimed):
+                sent += len(claimed)
             else:
-                failed += 1
+                failed += len(claimed)
         return {"claimed": claimed_total, "sent": sent, "failed": failed}
 
     async def reap_stranded_deliveries(self) -> int:
@@ -882,20 +924,44 @@ class AlertService:
     async def _send_delivery(self, delivery: AlertDelivery) -> bool:
         """Send one claimed delivery and record the outcome.
 
+        Thin wrapper over ``_send_delivery_group`` for a single row, kept so a
+        caller with exactly one delivery in hand needn't wrap it.
+        """
+        return await self._send_delivery_group([delivery])
+
+    async def _send_delivery_group(self, deliveries: list[AlertDelivery]) -> bool:
+        """Send ONE Discord message covering ``deliveries`` and record outcomes.
+
+        A group of one uses the rich single-alert embed (unchanged shape); two
+        or more collapse into one batched embed with a deep-linked line each
+        (BZ14). Exactly one send is attempted per call, under the same hard
+        total timeout the per-row path used, so the lease invariant documented
+        on ``deliver_pending`` still holds for every member.
+
+        The outcome is ALL-OR-NOTHING across the group — one POST cannot half
+        succeed — and is recorded per row exactly as before:
         On success: ``delivered`` and the linked history row is stamped sent.
         On failure with retries left: the row stays ``pending`` and KEEPS its
         lease as backoff, so it is retried on a later drain (after the lease
-        expires) rather than hot-looped within this one.
+        expires) rather than hot-looped within this one. A retry re-claims the
+        rows independently, so a transient failure does not pin them into the
+        same group next time.
         On failure with retries exhausted: ``failed`` (terminal, not dropped —
         it stays queryable in the health view).
         """
-        payload = delivery.payload or {}
+        if not deliveries:
+            return True
+
+        payloads = [d.payload or {} for d in deliveries]
+        ids = [d.id for d in deliveries]
         try:
             # Hard total timeout: abort the send well before the lease expires
             # (see the DELIVERY_SEND_TIMEOUT_SECONDS invariant) so an in-flight
-            # send can never be re-claimed by another worker mid-flight.
-            success, error = await asyncio.wait_for(
-                discord_service.send_alert_notification(
+            # send can never be re-claimed by another worker mid-flight. It
+            # bounds the WHOLE group because the group is one send.
+            if len(payloads) == 1:
+                payload = payloads[0]
+                send = discord_service.send_alert_notification(
                     alert_name=payload["alert_name"],
                     target_symbol=payload["target_symbol"],
                     target_name=payload["target_name"],
@@ -906,8 +972,11 @@ class AlertService:
                     is_ratio=payload.get("is_ratio", False),
                     notes=payload.get("notes"),
                     condition_override=payload.get("condition_override"),
-                ),
-                timeout=DELIVERY_SEND_TIMEOUT_SECONDS,
+                )
+            else:
+                send = discord_service.send_alert_batch(payloads)
+            success, error = await asyncio.wait_for(
+                send, timeout=DELIVERY_SEND_TIMEOUT_SECONDS
             )
         except asyncio.TimeoutError:
             # Aborted before the lease could expire -> failed/retryable, never
@@ -915,44 +984,43 @@ class AlertService:
             success, error = False, (
                 f"send exceeded {DELIVERY_SEND_TIMEOUT_SECONDS}s hard timeout"
             )
-            logger.error(f"Delivery {delivery.id} send timed out")
+            logger.error(f"Deliveries {ids} send timed out")
         except Exception as e:  # noqa: BLE001 - any send error must not crash the batch
             success, error = False, str(e)
-            logger.error(
-                f"Delivery {delivery.id} send raised: {e}", exc_info=True
-            )
+            logger.error(f"Deliveries {ids} send raised: {e}", exc_info=True)
 
-        history = None
-        if delivery.alert_history_id is not None:
-            history = await self.db.get(AlertHistory, delivery.alert_history_id)
+        for delivery in deliveries:
+            history = None
+            if delivery.alert_history_id is not None:
+                history = await self.db.get(AlertHistory, delivery.alert_history_id)
 
-        if success:
-            delivery.status = AlertDeliveryStatus.DELIVERED.value
-            delivery.delivered_at = datetime.now(timezone.utc)
-            delivery.lease_expires_at = None
-            delivery.last_error = None
-            if history is not None:
-                history.notification_sent = True
-                history.notification_channel = "discord"
-                history.notification_error = None
-        else:
-            delivery.last_error = error
-            if delivery.attempts >= delivery.max_attempts:
-                # Retries exhausted: terminal failure, surfaced in the health
-                # view rather than silently lost.
-                delivery.status = AlertDeliveryStatus.FAILED.value
+            if success:
+                delivery.status = AlertDeliveryStatus.DELIVERED.value
+                delivery.delivered_at = datetime.now(timezone.utc)
                 delivery.lease_expires_at = None
+                delivery.last_error = None
                 if history is not None:
-                    history.notification_sent = False
-                    history.notification_channel = None
-                    history.notification_error = error
+                    history.notification_sent = True
+                    history.notification_channel = "discord"
+                    history.notification_error = None
             else:
-                # Retries remain: keep the row pending and KEEP the lease as
-                # backoff. Because claim-one-send-one would otherwise re-grab a
-                # lease-cleared row within the same drain, holding the lease
-                # makes the row re-claimable only on a later drain (after the
-                # lease expires), pacing retries instead of hot-looping them.
-                pass
+                delivery.last_error = error
+                if delivery.attempts >= delivery.max_attempts:
+                    # Retries exhausted: terminal failure, surfaced in the
+                    # health view rather than silently lost.
+                    delivery.status = AlertDeliveryStatus.FAILED.value
+                    delivery.lease_expires_at = None
+                    if history is not None:
+                        history.notification_sent = False
+                        history.notification_channel = None
+                        history.notification_error = error
+                else:
+                    # Retries remain: keep the row pending and KEEP the lease as
+                    # backoff. Because the drain would otherwise re-grab a
+                    # lease-cleared row within the same pass, holding the lease
+                    # makes the row re-claimable only on a later drain (after the
+                    # lease expires), pacing retries instead of hot-looping them.
+                    pass
 
         await self.db.commit()
         return success

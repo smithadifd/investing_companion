@@ -382,6 +382,122 @@ class TestDeepLink:
         label = description.split("**[", 1)[1].split("](", 1)[0]
         assert not set(label) & set("[]()")
 
+    async def test_backslash_cannot_escape_the_generated_closing_bracket(self):
+        """Second-round finding: stripping `[]()` alone was bypassable.
+
+        `\\]` is an escaped literal under CommonMark (and Discord's flavour),
+        so a symbol ending in a backslash escapes the `]` this code generates:
+        the label never closes, no `]` remains on the line, the link construct
+        fails to form, and the WHOLE run degrades to plain text. In plain text
+        a `<https://evil.co>` span is an autolink Discord renders clickable —
+        so the attacker gets a live link and the real equity URL is demoted to
+        visible text. The backslash is the load-bearing half (it breaks the
+        construct); the angle brackets are what survives in the plain-text
+        fallback.
+        """
+        client = _mock_client()
+        notifier = _notifier(client)
+
+        await notifier.send_alert_batch(
+            [_payload("<https://evil.co>\\", alert_name="pwn")]
+        )
+
+        description = _sent_payload(client)["embeds"][0]["description"]
+        # Hand-authored known-good render. Label: `<`, `>`, `\` removed from
+        # `<https://evil.co>\` leaves `https://evil.co`, inert because the link
+        # construct around it is now guaranteed well-formed. Destination: the
+        # raw symbol percent-encoded, so `<`->%3C, `>`->%3E, `\`->%5C.
+        assert description == (
+            "• **[https://evil.co]"
+            "(https://ic.example.test/equity/%3Chttps%3A%2F%2Fevil.co%3E%5C)**"
+            " — pwn: above $100.00 (now $105.00)"
+        )
+        assert "\\" not in description  # no escape left to break the bracket
+        assert "<" not in description and ">" not in description
+        assert description.count("](") == 1
+
+    @pytest.mark.parametrize(
+        "hostile,expected_label",
+        [
+            ("<", None),          # strips to nothing -> placeholder, no link
+            ("\\", None),         # ditto
+            ("<>", None),
+            ("A\\", "A"),         # trailing backslash adjacent to our `]`
+            ("<b>", "b"),
+            ("A<B", "AB"),
+        ],
+    )
+    async def test_autolink_and_escape_characters_never_reach_the_label(
+        self, hostile, expected_label
+    ):
+        client = _mock_client()
+        notifier = _notifier(client)
+
+        await notifier.send_alert_batch([_payload(hostile, alert_name="x")])
+
+        description = _sent_payload(client)["embeds"][0]["description"]
+        assert "\\" not in description
+        assert "<" not in description and ">" not in description
+        if expected_label is None:
+            assert description.startswith("• **?** —")
+            assert "](" not in description
+        else:
+            label = description.split("**[", 1)[1].split("](", 1)[0]
+            assert label == expected_label
+
+    async def test_no_printable_character_can_produce_a_second_link(self):
+        """Exhaustive backstop over the printable-ASCII alphabet.
+
+        Two rounds of review each found one more link-producing character
+        class (`[]()`, then `\\` and `<>`). Rather than wait for a third, this
+        sweeps every printable character through the label and asserts the
+        invariant directly: the rendered markup contains exactly one link
+        boundary and its label carries none of the characters that can open a
+        link or escape our structure.
+        """
+        import string
+
+        notifier = _notifier(_mock_client())
+        offenders = []
+        for character in string.printable:
+            if character in "\r\n\t\x0b\x0c":
+                continue
+            markup = notifier._symbol_markup(f"A{character}B", False)
+            if markup.count("](") != 1:
+                offenders.append((character, markup))
+                continue
+            label = markup.split("**[", 1)[1].split("](", 1)[0]
+            if set(label) & set("[]()<>\\"):
+                offenders.append((character, markup))
+
+        assert offenders == []
+
+    async def test_unlinked_branch_bare_url_is_a_known_documented_residual(self):
+        """Pins the ONE case stripping deliberately does not cover.
+
+        Discord autolinks a bare `https://…` with no metacharacters at all, so
+        the unlinked branch (`**text**`, used for ratios and when FRONTEND_URL
+        is unset) can still render a clickable attacker link. Suppressing it
+        would mean stripping `:` or `/`, and `/` is required by ratio symbols
+        like `GLD/SLV`. Reachable only via a user-authored ratio symbol
+        (String(20)), never an equity symbol; and it pre-dates this helper —
+        the single-alert description already interpolated target_symbol raw.
+
+        This test documents the accepted behaviour so a future change that
+        closes it (an allowlist) fails here loudly rather than silently.
+        """
+        notifier = _notifier(_mock_client())
+
+        assert notifier._symbol_markup("https://evil.co", True) == (
+            "**https://evil.co**"
+        )
+        # ...while the equity (linked) branch is not exposed to this at all:
+        # the bare URL sits inside a guaranteed well-formed label.
+        assert notifier._symbol_markup("https://evil.co", False) == (
+            "**[https://evil.co]"
+            "(https://ic.example.test/equity/https%3A%2F%2Fevil.co)**"
+        )
+
     async def test_unlinked_symbol_is_also_delimiter_stripped(self, monkeypatch):
         """The no-link branch (ratio / unset FRONTEND_URL) gets the same
         treatment, so the two branches can't drift apart."""

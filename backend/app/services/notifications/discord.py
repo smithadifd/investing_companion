@@ -21,18 +21,39 @@ EMBED_DESCRIPTION_LIMIT = 4096
 # name cannot crowd every other alert out of a batched embed.
 BATCH_LINE_NAME_LIMIT = 60
 
-# Discord markdown-link structural characters, removed from any text
-# interpolated into a link LABEL. `[LABEL](URL)` ends its label at the first
-# unescaped `]`, and a following `(` opens a new destination — so text carrying
-# these characters could close the real link early and retarget the rendered
-# hyperlink at an attacker's URL. The destination half is already hardened by
-# percent-encoding (``quote(symbol, safe="")``); this closes the display half.
+# Every character that can produce a clickable link in Discord markdown,
+# removed from any text interpolated into a link LABEL. The destination half is
+# hardened separately by percent-encoding (``quote(symbol, safe="")``); this
+# closes the display half. Three distinct attacks, three groups:
+#
+#   `[` `]` `(` `)` — `[LABEL](URL)` ends its label at the first unescaped `]`
+#       and a following `(` opens a new destination, so crafted text could
+#       close the real link early and retarget the hyperlink.
+#   `\`             — `\]` is an escaped literal, so a symbol ending in a
+#       backslash escapes the `]` THIS code generates: the label never closes,
+#       no `]` remains on the line, the link fails to form, and the whole run
+#       degrades to plain text. This is the load-bearing one — it is what lets
+#       label content escape into plain context at all.
+#   `<` `>`         — `<url>` is an autolink Discord renders clickable. It is
+#       inert inside a well-formed label, but live in the plain-text fallback
+#       above and in the UNLINKED branch of _symbol_markup (ratios / unset
+#       FRONTEND_URL), which renders `**text**` in plain context.
 #
 # Removal rather than the zero-width-space trick used for mentions in
 # catalysts.py / strategy_brief.py: a ZWSP defangs a MULTI-character token
-# (`@everyone`, `<@&id>`) by breaking the pattern, but a `]` is a single
-# structural delimiter — a ZWSP after it still lets it close the label.
-_LINK_LABEL_DELIMITERS = str.maketrans({character: None for character in "[]()"})
+# (`@everyone`, `<@&id>`) by breaking the pattern, but these are single
+# structural delimiters — a ZWSP after a `]` still lets it close the label.
+#
+# KNOWN RESIDUAL (not fixable by stripping): in the unlinked branch a BARE url
+# needs no metacharacters at all — Discord autolinks `https://evil.co` on
+# sight. Suppressing that would mean stripping `:` or `/`, and `/` is required
+# by ratio symbols like `GLD/SLV`. Reachable only via a user-authored
+# Ratio.numerator_symbol/denominator_symbol (String(20)); an equity symbol is
+# provider-sourced. Pre-dates this helper: the single-alert description already
+# interpolated target_symbol raw. Fixing it needs an allowlist, not a blocklist.
+_LINK_LABEL_DELIMITERS = str.maketrans(
+    {character: None for character in "[]()<>\\"}
+)
 
 
 class DiscordNotificationService:
@@ -192,11 +213,12 @@ class DiscordNotificationService:
 
     @staticmethod
     def _safe_link_text(text: str) -> str:
-        """Strip markdown-link delimiters from text used as a link LABEL.
+        """Strip link-producing characters from text used as a link LABEL.
 
-        See ``_LINK_LABEL_DELIMITERS``. Applied to the display half of the
-        symbol markup; the URL half is hardened separately by percent-encoding
-        in ``_equity_deep_link``.
+        See ``_LINK_LABEL_DELIMITERS`` for the three attack classes this
+        covers and the one known residual it cannot. Applied to the display
+        half of the symbol markup; the URL half is hardened separately by
+        percent-encoding in ``_equity_deep_link``.
         """
         return text.translate(_LINK_LABEL_DELIMITERS)
 

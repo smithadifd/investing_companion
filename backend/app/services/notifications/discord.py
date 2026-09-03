@@ -21,6 +21,19 @@ EMBED_DESCRIPTION_LIMIT = 4096
 # name cannot crowd every other alert out of a batched embed.
 BATCH_LINE_NAME_LIMIT = 60
 
+# Discord markdown-link structural characters, removed from any text
+# interpolated into a link LABEL. `[LABEL](URL)` ends its label at the first
+# unescaped `]`, and a following `(` opens a new destination — so text carrying
+# these characters could close the real link early and retarget the rendered
+# hyperlink at an attacker's URL. The destination half is already hardened by
+# percent-encoding (``quote(symbol, safe="")``); this closes the display half.
+#
+# Removal rather than the zero-width-space trick used for mentions in
+# catalysts.py / strategy_brief.py: a ZWSP defangs a MULTI-character token
+# (`@everyone`, `<@&id>`) by breaking the pattern, but a `]` is a single
+# structural delimiter — a ZWSP after it still lets it close the label.
+_LINK_LABEL_DELIMITERS = str.maketrans({character: None for character in "[]()"})
+
 
 class DiscordNotificationService:
     """Service for sending notifications via Discord webhooks."""
@@ -177,11 +190,34 @@ class DiscordNotificationService:
             return None
         return f"{base}/equity/{quote(symbol, safe='')}"
 
+    @staticmethod
+    def _safe_link_text(text: str) -> str:
+        """Strip markdown-link delimiters from text used as a link LABEL.
+
+        See ``_LINK_LABEL_DELIMITERS``. Applied to the display half of the
+        symbol markup; the URL half is hardened separately by percent-encoding
+        in ``_equity_deep_link``.
+        """
+        return text.translate(_LINK_LABEL_DELIMITERS)
+
     @classmethod
     def _symbol_markup(cls, symbol: str, is_ratio: bool = False) -> str:
-        """Bold symbol, wrapped in a Discord markdown link when one exists."""
+        """Bold symbol, wrapped in a Discord markdown link when one exists.
+
+        The label is delimiter-stripped so a symbol can never break out of the
+        link boundary and retarget the hyperlink. Both branches are stripped,
+        not just the linked one, so the two cannot drift apart. Note the label
+        is sanitized but the URL is built from the RAW symbol — the link must
+        still point at the real equity page.
+        """
+        label = cls._safe_link_text(symbol)
+        if not label:
+            # Nothing survived stripping, so the symbol was only delimiters —
+            # not a real ticker. `[](url)` would render as an empty-label link;
+            # emit an inert placeholder and no link at all.
+            return "**?**"
         url = cls._equity_deep_link(symbol, is_ratio)
-        return f"**[{symbol}]({url})**" if url else f"**{symbol}**"
+        return f"**[{label}]({url})**" if url else f"**{label}**"
 
     def _get_condition_description(
         self,

@@ -336,6 +336,99 @@ class TestDeepLink:
         )
         assert "/equity/" not in description
 
+    async def test_symbol_cannot_break_out_of_the_markdown_link(self):
+        """A symbol carrying markdown-link delimiters must not be able to
+        retarget the rendered hyperlink.
+
+        `[LABEL](URL)` ends its label at the first `]`; a following `(` opens a
+        new destination. So a raw symbol of `A](https://evil.test)` would
+        render as a link reading "A" that points at evil.test, with the real
+        equity URL demoted to trailing text. The URL half was already safe
+        (percent-encoded via quote(symbol, safe="")); this pins the display
+        half. Not reachable from today's data — the only linking path uses
+        Equity.symbol, provider-sourced and String(20) — but this is a live
+        external send path, so the boundary is asserted rather than argued.
+        """
+        client = _mock_client()
+        notifier = _notifier(client)
+
+        await notifier.send_alert_batch(
+            [_payload("A](https://evil.test)", alert_name="pwn")]
+        )
+
+        description = _sent_payload(client)["embeds"][0]["description"]
+        # Hand-authored known-good render. Label: the four delimiters removed
+        # from `A](https://evil.test)` leaves `Ahttps://evil.test` (inert text
+        # -- Discord does not autolink inside a link label). Destination: the
+        # raw symbol percent-encoded with safe="", so `]`->%5D, `(`->%28,
+        # `:`->%3A, `/`->%2F, `)`->%29.
+        assert description == (
+            "• **[Ahttps://evil.test]"
+            "(https://ic.example.test/equity/"
+            "A%5D%28https%3A%2F%2Fevil.test%29)** "
+            "— pwn: above $100.00 (now $105.00)"
+        )
+        assert "evil.test)" not in description  # no second, attacker destination
+        assert description.count("](") == 1  # exactly one link boundary
+
+    @pytest.mark.parametrize("hostile", ["A]B", "A(B", "A)B", "A[B", "A]([)"])
+    async def test_link_label_never_contains_link_delimiters(self, hostile):
+        client = _mock_client()
+        notifier = _notifier(client)
+
+        await notifier.send_alert_batch([_payload(hostile, alert_name="x")])
+
+        description = _sent_payload(client)["embeds"][0]["description"]
+        label = description.split("**[", 1)[1].split("](", 1)[0]
+        assert not set(label) & set("[]()")
+
+    async def test_unlinked_symbol_is_also_delimiter_stripped(self, monkeypatch):
+        """The no-link branch (ratio / unset FRONTEND_URL) gets the same
+        treatment, so the two branches can't drift apart."""
+        monkeypatch.setattr(settings, "FRONTEND_URL", "")
+        client = _mock_client()
+        notifier = _notifier(client)
+
+        await notifier.send_alert_batch(
+            [_payload("A](https://evil.test)", alert_name="x")]
+        )
+
+        description = _sent_payload(client)["embeds"][0]["description"]
+        assert description == (
+            "• **Ahttps://evil.test** — x: above $100.00 (now $105.00)"
+        )
+        assert "](" not in description
+
+    async def test_symbol_of_only_delimiters_renders_no_link(self):
+        """Stripping would leave an empty label, i.e. `[](url)`. Not a real
+        symbol; render a placeholder and emit no link at all."""
+        client = _mock_client()
+        notifier = _notifier(client)
+
+        await notifier.send_alert_batch([_payload("[]()", alert_name="x")])
+
+        description = _sent_payload(client)["embeds"][0]["description"]
+        assert description == "• **?** — x: above $100.00 (now $105.00)"
+
+    async def test_single_alert_embed_label_is_also_hardened(self):
+        """The unbatched path shares _symbol_markup, so it inherits the fix."""
+        client = _mock_client()
+        notifier = _notifier(client)
+
+        await notifier.send_alert_notification(
+            alert_name="pwn",
+            target_symbol="A](https://evil.test)",
+            target_name="Evil Corp",
+            condition_type="above",
+            threshold_value=Decimal("100"),
+            current_value=Decimal("105"),
+        )
+
+        description = _sent_payload(client)["embeds"][0]["description"]
+        label = description.split("**[", 1)[1].split("](", 1)[0]
+        assert not set(label) & set("[]()")
+        assert "evil.test)" not in description
+
     async def test_unset_frontend_url_degrades_to_no_link(self, monkeypatch):
         monkeypatch.setattr(settings, "FRONTEND_URL", "")
         client = _mock_client()

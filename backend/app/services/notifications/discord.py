@@ -2,13 +2,58 @@
 
 import logging
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+from urllib.parse import quote
 
 import httpx
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Discord's hard cap on an embed's ``description``. The batched alert embed is
+# rendered inside this budget; the caller (AlertService.deliver_pending) chunks
+# by DELIVERY_GROUP_LIMIT so the cap is unreachable in practice, and the
+# overflow path below states what it left out rather than dropping it silently.
+EMBED_DESCRIPTION_LIMIT = 4096
+
+# Per-line cap on the (user-authored, unbounded) alert name, so one pathological
+# name cannot crowd every other alert out of a batched embed.
+BATCH_LINE_NAME_LIMIT = 60
+
+# Every character that can produce a clickable link in Discord markdown,
+# removed from any text interpolated into a link LABEL. The destination half is
+# hardened separately by percent-encoding (``quote(symbol, safe="")``); this
+# closes the display half. Three distinct attacks, three groups:
+#
+#   `[` `]` `(` `)` — `[LABEL](URL)` ends its label at the first unescaped `]`
+#       and a following `(` opens a new destination, so crafted text could
+#       close the real link early and retarget the hyperlink.
+#   `\`             — `\]` is an escaped literal, so a symbol ending in a
+#       backslash escapes the `]` THIS code generates: the label never closes,
+#       no `]` remains on the line, the link fails to form, and the whole run
+#       degrades to plain text. This is the load-bearing one — it is what lets
+#       label content escape into plain context at all.
+#   `<` `>`         — `<url>` is an autolink Discord renders clickable. It is
+#       inert inside a well-formed label, but live in the plain-text fallback
+#       above and in the UNLINKED branch of _symbol_markup (ratios / unset
+#       FRONTEND_URL), which renders `**text**` in plain context.
+#
+# Removal rather than the zero-width-space trick used for mentions in
+# catalysts.py / strategy_brief.py: a ZWSP defangs a MULTI-character token
+# (`@everyone`, `<@&id>`) by breaking the pattern, but these are single
+# structural delimiters — a ZWSP after a `]` still lets it close the label.
+#
+# KNOWN RESIDUAL (not fixable by stripping): in the unlinked branch a BARE url
+# needs no metacharacters at all — Discord autolinks `https://evil.co` on
+# sight. Suppressing that would mean stripping `:` or `/`, and `/` is required
+# by ratio symbols like `GLD/SLV`. Reachable only via a user-authored
+# Ratio.numerator_symbol/denominator_symbol (String(20)); an equity symbol is
+# provider-sourced. Pre-dates this helper: the single-alert description already
+# interpolated target_symbol raw. Fixing it needs an allowlist, not a blocklist.
+_LINK_LABEL_DELIMITERS = str.maketrans(
+    {character: None for character in "[]()<>\\"}
+)
 
 
 class DiscordNotificationService:
@@ -139,6 +184,63 @@ class DiscordNotificationService:
         sign = "+" if val > 0 else ""
         return f"{sign}{val:.2f}%"
 
+    @staticmethod
+    def _frontend_base() -> str:
+        """The configured frontend origin, or "" when unset.
+
+        Matches the convention in ``app/tasks/schwab.py`` (`_reconnect_link` /
+        `_import_link`): read ``settings.FRONTEND_URL``, strip a trailing slash,
+        and degrade gracefully rather than emitting a relative URL that would
+        render as a dead link inside Discord.
+        """
+        return (settings.FRONTEND_URL or "").rstrip("/")
+
+    @classmethod
+    def _equity_deep_link(cls, symbol: str, is_ratio: bool = False) -> str | None:
+        """``{FRONTEND_URL}/equity/{symbol}``, or None when there is no page.
+
+        Returns None for a ratio (the frontend has ``/ratios`` but no per-pair
+        route, and a ratio's "symbol" is a ``GLD/SLV`` pair that would forge a
+        bogus two-segment path) and when FRONTEND_URL is unset. Callers render
+        a plain bold symbol in that case.
+        """
+        if is_ratio or not symbol:
+            return None
+        base = cls._frontend_base()
+        if not base:
+            return None
+        return f"{base}/equity/{quote(symbol, safe='')}"
+
+    @staticmethod
+    def _safe_link_text(text: str) -> str:
+        """Strip link-producing characters from text used as a link LABEL.
+
+        See ``_LINK_LABEL_DELIMITERS`` for the three attack classes this
+        covers and the one known residual it cannot. Applied to the display
+        half of the symbol markup; the URL half is hardened separately by
+        percent-encoding in ``_equity_deep_link``.
+        """
+        return text.translate(_LINK_LABEL_DELIMITERS)
+
+    @classmethod
+    def _symbol_markup(cls, symbol: str, is_ratio: bool = False) -> str:
+        """Bold symbol, wrapped in a Discord markdown link when one exists.
+
+        The label is delimiter-stripped so a symbol can never break out of the
+        link boundary and retarget the hyperlink. Both branches are stripped,
+        not just the linked one, so the two cannot drift apart. Note the label
+        is sanitized but the URL is built from the RAW symbol — the link must
+        still point at the real equity page.
+        """
+        label = cls._safe_link_text(symbol)
+        if not label:
+            # Nothing survived stripping, so the symbol was only delimiters —
+            # not a real ticker. `[](url)` would render as an empty-label link;
+            # emit an inert placeholder and no link at all.
+            return "**?**"
+        url = cls._equity_deep_link(symbol, is_ratio)
+        return f"**[{label}]({url})**" if url else f"**{label}**"
+
     def _get_condition_description(
         self,
         condition_type: str,
@@ -221,7 +323,10 @@ class DiscordNotificationService:
 
             embed = {
                 "title": f"{emoji} Alert Triggered: {alert_name}",
-                "description": f"**{target_symbol}** ({target_name}) is {condition_desc}",
+                "description": (
+                    f"{self._symbol_markup(target_symbol, is_ratio)} "
+                    f"({target_name}) is {condition_desc}"
+                ),
                 "color": color,
                 "fields": [
                     {
@@ -277,6 +382,175 @@ class DiscordNotificationService:
             return False, error
         except Exception as e:
             error = f"Failed to send Discord notification: {str(e)}"
+            logger.error(error, exc_info=True)
+            return False, error
+
+    @staticmethod
+    def _as_decimal(value: Decimal | float | str | None) -> Decimal:
+        """Coerce an outbox payload's numeric field to Decimal, never raising.
+
+        Payloads are JSON snapshots taken at enqueue time (Decimals stringified
+        by ``AlertService._build_delivery_payload``), so this accepts str as
+        well as Decimal/float. A missing or unparseable value degrades to 0
+        rather than raising: one malformed row must not poison the whole
+        batched send it happens to share a group with.
+        """
+        if value is None:
+            return Decimal(0)
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, ValueError, TypeError):
+            return Decimal(0)
+
+    def _batch_alert_line(self, alert: dict) -> str:
+        """One bullet line for the batched embed.
+
+        Shape (hand-pinned by tests/test_services/test_alert_batching.py)::
+
+            • **[AAPL](https://host/equity/AAPL)** — <name>: <condition> (now <value>)
+
+        Every field is read with ``.get`` and coerced defensively: a batched
+        send covers N outbox rows at once, so a single malformed payload must
+        degrade its own line, not fail the other N-1 alerts' notification.
+        """
+        symbol = str(alert.get("target_symbol") or "?")
+        is_ratio = bool(alert.get("is_ratio", False))
+        name = str(alert.get("alert_name") or "Alert")
+        if len(name) > BATCH_LINE_NAME_LIMIT:
+            name = name[:BATCH_LINE_NAME_LIMIT] + "…"
+
+        threshold = self._as_decimal(alert.get("threshold_value"))
+        current = self._as_decimal(alert.get("current_value"))
+        condition_desc = alert.get("condition_override") or (
+            self._get_condition_description(
+                str(alert.get("condition_type") or ""),
+                threshold,
+                alert.get("comparison_period"),
+            )
+        )
+        current_str = (
+            f"{float(current):.4f}" if is_ratio else self._format_price(current)
+        )
+        return (
+            f"• {self._symbol_markup(symbol, is_ratio)} — "
+            f"{name}: {condition_desc} (now {current_str})"
+        )
+
+    def _batch_description(self, alerts: list[dict]) -> str:
+        """Join the per-alert lines inside Discord's description budget.
+
+        Normal path: every alert gets a line. Overflow path (only reachable if
+        a caller ignores ``DELIVERY_GROUP_LIMIT``): keep as many whole lines as
+        fit and append a counted "…and N more" line linking the alerts page —
+        the leftovers are *stated*, never silently dropped, and the outbox rows
+        behind them are still marked delivered exactly once.
+        """
+        lines = [self._batch_alert_line(alert) for alert in alerts]
+        joined = "\n".join(lines)
+        if len(joined) <= EMBED_DESCRIPTION_LIMIT:
+            return joined
+
+        base = self._frontend_base()
+        kept: list[str] = []
+        used = 0
+        for index, line in enumerate(lines):
+            remaining = len(lines) - index
+            more_line = f"• …and {remaining} more"
+            if base:
+                more_line = f"• …and {remaining} more — [see all alerts]({base}/alerts)"
+            # +1 for the newline this line would add, + the tail it must leave
+            # room for if it turns out to be the last one kept.
+            if used + len(line) + 1 + len(more_line) + 1 > EMBED_DESCRIPTION_LIMIT:
+                break
+            kept.append(line)
+            used += len(line) + 1
+
+        dropped = len(lines) - len(kept)
+        tail = f"• …and {dropped} more"
+        if base:
+            tail = f"• …and {dropped} more — [see all alerts]({base}/alerts)"
+        logger.warning(
+            "Batched alert embed exceeded Discord's description limit; "
+            "%d of %d alerts summarized as an overflow line",
+            dropped,
+            len(lines),
+        )
+        return "\n".join([*kept, tail])
+
+    async def send_alert_batch(
+        self, alerts: list[dict]
+    ) -> tuple[bool, str | None]:
+        """Send ONE Discord embed covering every alert that tripped in a cycle.
+
+        This is the batched counterpart of ``send_alert_notification``: the
+        outbox drain calls it once per claimed group instead of once per row,
+        so a broad selloff produces one message with N deep-linked lines
+        instead of N webhook posts.
+
+        Args:
+            alerts: Outbox payload dicts as snapshotted by
+                ``AlertService._build_delivery_payload`` — ``alert_name``,
+                ``target_symbol``, ``target_name``, ``condition_type``,
+                ``threshold_value``, ``current_value``, and the optional
+                ``comparison_period`` / ``is_ratio`` / ``condition_override``.
+                Numeric fields may be Decimal, float or str. Line order follows
+                list order (the drain claims in ``created_at`` order, so the
+                embed reads oldest-trigger-first).
+
+        Interface notes callers must know:
+            * ALL-OR-NOTHING. One POST covers the whole list, so the returned
+              outcome applies to every member — the drain records the same
+              success/failure against each row in the group. Per-line rendering
+              is defensive so a single bad payload cannot fail its groupmates.
+            * ``notes`` are deliberately NOT rendered (N x 200 chars would blow
+              the description budget); the per-line deep link is the route to
+              full context. The unbatched single-alert embed still shows them.
+            * An empty list is a no-op success — nothing is posted.
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        if not alerts:
+            return True, None
+
+        webhook_url = await self._get_webhook_url()
+        if not webhook_url:
+            return False, "Discord webhook URL not configured"
+
+        try:
+            count = len(alerts)
+            embed = {
+                "title": f"🔔 {count} Alert{'s' if count != 1 else ''} Triggered",
+                "description": self._batch_description(alerts),
+                # Blurple, the repo's neutral summary color (movers / EOD /
+                # test embeds). A batch mixes bullish and bearish triggers, so
+                # the single-alert green/red coding has no honest answer here.
+                "color": 0x5865F2,
+                "timestamp": datetime.utcnow().isoformat(),
+                "footer": {
+                    "text": "Investing Companion",
+                },
+            }
+
+            payload = {"embeds": [embed]}
+            response = await self._post_webhook(webhook_url, payload)
+
+            if response.status_code == 204:
+                logger.info(f"Discord batched alert notification sent: {count} alerts")
+                return True, None
+            error = (
+                f"Discord API returned status {response.status_code}: "
+                f"{response.text}"
+            )
+            logger.error(error)
+            return False, error
+
+        except httpx.TimeoutException:
+            error = "Discord batched alert notification timed out"
+            logger.error(error)
+            return False, error
+        except Exception as e:  # noqa: BLE001 - a send error must not crash the drain
+            error = f"Failed to send batched alert notification: {str(e)}"
             logger.error(error, exc_info=True)
             return False, error
 

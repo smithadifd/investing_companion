@@ -388,9 +388,14 @@ class TestInFlightLease:
         assert reclaims_during_send == [[]]
 
     @patch("app.services.alert.discord_service")
-    async def test_batch_drains_one_at_a_time(self, mock_discord, db):
-        # Two rows drain fully via claim-one-send-one (no lost tail).
+    async def test_batch_drains_fully_in_one_grouped_send(self, mock_discord, db):
+        # Two rows drain fully, with no lost tail. Since BZ14 they are covered
+        # by ONE grouped send rather than one send each — the send-count half
+        # of this contract now lives in test_alert_batching.py; what stays
+        # pinned here is that every claimed row is delivered (claimed == sent,
+        # both rows terminal), which is the property the outbox owes.
         mock_discord.send_alert_notification = AsyncMock(return_value=(True, None))
+        mock_discord.send_alert_batch = AsyncMock(return_value=(True, None))
         service, alert_a = await _make_triggered_alert(db, "INF2")
         await service.process_alert(alert_a)
         equity_b = await create_test_equity(db, symbol="INF3")
@@ -402,7 +407,10 @@ class TestInFlightLease:
 
         result = await service.deliver_pending()
         assert result == {"claimed": 2, "sent": 2, "failed": 0}
-        assert mock_discord.send_alert_notification.await_count == 2
+        assert mock_discord.send_alert_batch.await_count == 1
+        for alert in (alert_a, alert_b):
+            row = (await _deliveries(db, alert.id))[0]
+            assert row.status == AlertDeliveryStatus.DELIVERED.value
 
 
 class TestStableIdempotencyKey:

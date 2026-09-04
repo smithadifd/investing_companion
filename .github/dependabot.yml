@@ -29,7 +29,7 @@ updates:
       - dependency-name: "zustand"
         versions: [">=5.0.0"]
 
-  # Also covers root compose files (timescaledb, redis) — dev/demo/local/prod
+  # NOTE: root docker-compose image tags (timescaledb, redis) are NOT tracked by this or any entry — the deleted "/" block never found anything to scan (3 failed runs); tracking those needs its own correctly-configured entry (follow-up, not scoped here).
   - package-ecosystem: "docker"
     directory: "/docker"
     schedule:

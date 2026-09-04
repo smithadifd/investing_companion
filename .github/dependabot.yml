@@ -29,6 +29,7 @@ updates:
       - dependency-name: "zustand"
         versions: [">=5.0.0"]
 
+  # NOTE: root docker-compose image tags (timescaledb, redis) are NOT tracked by this or any entry — the deleted "/" block never found anything to scan (3 failed runs); tracking those needs its own correctly-configured entry (follow-up, not scoped here).
   - package-ecosystem: "docker"
     directory: "/docker"
     schedule:
@@ -39,12 +40,3 @@ updates:
         versions: [">=3.13"]
       - dependency-name: "node"
         versions: [">=23"]
-
-  # Root compose files (timescaledb, redis) — dev/demo/local/prod
-  - package-ecosystem: "docker"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    reviewers:
-      - "smithadifd"
-    open-pull-requests-limit: 5

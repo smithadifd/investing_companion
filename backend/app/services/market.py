@@ -11,6 +11,7 @@ from app.schemas.market import (
     MarketOverviewResponse,
     SectorPerformance,
 )
+from app.services.data_providers import MarketDataProvider, get_quote_provider
 from app.services.data_providers.yahoo import YahooFinanceProvider
 
 logger = logging.getLogger(__name__)
@@ -66,13 +67,15 @@ POPULAR_STOCKS = [
 class MarketService:
     """Service for market overview data."""
 
-    def __init__(self) -> None:
+    def __init__(self, provider: MarketDataProvider | None = None) -> None:
+        self.provider = provider if provider is not None else get_quote_provider()
+        # Company names are Yahoo metadata, outside the market-data interface.
         self.yahoo = YahooFinanceProvider()
 
     async def _fetch_quote_data(self, symbol: str) -> dict | None:
         """Fetch quote data for a symbol, returning raw dict."""
         try:
-            quote = await self.yahoo.get_quote(symbol)
+            quote = await self.provider.get_quote(symbol)
             if quote:
                 return {
                     "symbol": symbol,
@@ -164,7 +167,7 @@ class MarketService:
     async def _fetch_with_name(self, symbol: str) -> dict | None:
         """Fetch quote with name info."""
         try:
-            quote = await self.yahoo.get_quote(symbol)
+            quote = await self.provider.get_quote(symbol)
             info = await self.yahoo.get_info(symbol)
             if quote and info:
                 return {

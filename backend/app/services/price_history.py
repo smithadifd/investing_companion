@@ -22,7 +22,7 @@ from app.db.models.price_history import PriceHistory
 from app.db.models.ratio import Ratio
 from app.db.models.trade import Trade
 from app.db.models.watchlist import WatchlistItem
-from app.services.data_providers.yahoo import YahooFinanceProvider
+from app.services.data_providers import MarketDataProvider, get_quote_provider
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +53,10 @@ class PriceHistoryService:
     """Fetches daily OHLCV bars and upserts them into price_history."""
 
     def __init__(
-        self, db: AsyncSession, provider: YahooFinanceProvider | None = None
+        self, db: AsyncSession, provider: MarketDataProvider | None = None
     ) -> None:
         self.db = db
-        self.provider = provider or YahooFinanceProvider()
+        self.provider = provider if provider is not None else get_quote_provider()
 
     async def sync_all(self) -> dict:
         """Sync every tracked equity. Used by the daily Celery task."""

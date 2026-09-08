@@ -31,7 +31,7 @@ async def _delivery_count(db: AsyncSession, alert_id: int) -> int:
 # ---------------------------------------------------------------------------
 
 def _mock_quote(price: float, high: float | None = None, low: float | None = None) -> QuoteResponse:
-    """Build a QuoteResponse for mocking Yahoo get_quote."""
+    """Build a QuoteResponse for mocking the quote provider."""
     return QuoteResponse(
         symbol="TEST",
         price=price,
@@ -682,7 +682,7 @@ class TestCheckCooldown:
 
 
 # ---------------------------------------------------------------------------
-# check_alert — integration of condition + cooldown + Yahoo mock
+# check_alert — integration of condition + cooldown + quote-provider mock
 # ---------------------------------------------------------------------------
 
 class TestCheckAlert:
@@ -699,7 +699,7 @@ class TestCheckAlert:
         mock_yahoo.get_quote = AsyncMock(return_value=_mock_quote(105.0, high=106.0, low=100.0))
 
         service = AlertService(db)
-        service.yahoo = mock_yahoo
+        service.provider = mock_yahoo
 
         result = await service.check_alert(alert)
         assert result.is_triggered is True
@@ -717,7 +717,7 @@ class TestCheckAlert:
         mock_yahoo.get_quote = AsyncMock(return_value=None)
 
         service = AlertService(db)
-        service.yahoo = mock_yahoo
+        service.provider = mock_yahoo
 
         result = await service.check_alert(alert)
         assert result.is_triggered is False
@@ -739,7 +739,7 @@ class TestCheckAlert:
         mock_yahoo.get_quote = AsyncMock(return_value=_mock_quote(105.0))
 
         service = AlertService(db)
-        service.yahoo = mock_yahoo
+        service.provider = mock_yahoo
 
         result = await service.check_alert(alert)
         assert result.is_triggered is True
@@ -768,7 +768,7 @@ class TestProcessAlert:
         mock_discord.send_alert_notification = AsyncMock(return_value=(True, None))
 
         service = AlertService(db)
-        service.yahoo = mock_yahoo
+        service.provider = mock_yahoo
 
         was_triggered, error = await service.process_alert(alert)
         assert was_triggered is True
@@ -795,7 +795,7 @@ class TestProcessAlert:
         mock_yahoo.get_quote = AsyncMock(return_value=_mock_quote(95.0))
 
         service = AlertService(db)
-        service.yahoo = mock_yahoo
+        service.provider = mock_yahoo
 
         was_triggered, error = await service.process_alert(alert)
         assert was_triggered is False
@@ -816,7 +816,7 @@ class TestSustainedConfirmation:
         mock_yahoo.get_quote = AsyncMock(
             return_value=_mock_quote(price, low=low) if price is not None else None
         )
-        service.yahoo = mock_yahoo
+        service.provider = mock_yahoo
         return service
 
     @patch("app.services.alert.discord_service")
@@ -915,7 +915,7 @@ class TestSustainedConfirmation:
         service = AlertService(db)
         mock_yahoo = AsyncMock()
         mock_yahoo.get_quote = AsyncMock(return_value=None)
-        service.yahoo = mock_yahoo
+        service.provider = mock_yahoo
 
         was_triggered, _ = await service.process_alert(alert)
         assert was_triggered is False

@@ -43,7 +43,7 @@ The following was run with no network transport, a fake `yf.Ticker.history` Data
 PYTHONPATH=backend backend/.venv/bin/python /tmp/ck4_history_pin_compat.py
 ```
 
-Expected output:
+Exact stdout (exit 0):
 
 ```text
 split 50 50
@@ -88,6 +88,10 @@ async def main():
     assert (div_y.close, div_m.close) == (Decimal("99"), Decimal("100"))
     assert (_to_utc(edge_y.timestamp), _to_utc(edge_m.timestamp)) == (datetime(2026, 11, 2, 5, tzinfo=timezone.utc), datetime(2026, 11, 2, tzinfo=timezone.utc))
     assert partial.timestamp == final.timestamp and partial.close != final.close
+    print("split", split_y.close, split_m.close)
+    print("dividend", div_y.close, div_m.close)
+    print("boundary", edge_y.timestamp.isoformat(), edge_m.timestamp.isoformat(), _to_utc(edge_y.timestamp).isoformat(), _to_utc(edge_m.timestamp).isoformat())
+    print("incomplete", partial.close, final.close, partial.timestamp.isoformat())
 asyncio.run(main())
 ```
 

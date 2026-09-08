@@ -106,10 +106,13 @@ def _payload(
     notes: str | None = None,
     comparison_period: str | None = None,
     condition_override: str | None = None,
+    source: str | None = None,
+    stale: bool = False,
+    observed_at: str | None = None,
 ) -> dict:
     """One outbox payload, exactly as ``_build_delivery_payload`` snapshots it
     (Decimals already stringified — the batch sender must accept that)."""
-    return {
+    payload = {
         "alert_name": alert_name,
         "target_symbol": symbol,
         "target_name": name or f"{symbol} Inc.",
@@ -120,7 +123,12 @@ def _payload(
         "is_ratio": is_ratio,
         "notes": notes,
         "condition_override": condition_override,
+        "source": source,
+        "stale": stale,
     }
+    if observed_at is not None:
+        payload["observed_at"] = observed_at
+    return payload
 
 
 class TestBatchEmbedShape:
@@ -169,11 +177,11 @@ class TestBatchEmbedShape:
         assert embed["description"] == "\n".join(
             [
                 "• **[AAPL](https://ic.example.test/equity/AAPL)** — "
-                "AAPL breakout: crossed above $200.00 (now $205.00)",
+                "AAPL breakout: crossed above $200.00 (observed $205.00)",
                 "• **[MSFT](https://ic.example.test/equity/MSFT)** — "
-                "MSFT dip: below $400.00 (now $392.50)",
+                "MSFT dip: below $400.00 (observed $392.50)",
                 "• **[NVDA](https://ic.example.test/equity/NVDA)** — "
-                "NVDA stop: down 7% in 1d (now $812.00)",
+                "NVDA stop: down 7% in 1d (observed $812.00)",
             ]
         )
         assert embed["footer"] == {"text": "Investing Companion"}
@@ -264,7 +272,7 @@ class TestBatchEmbedShape:
 
         assert _sent_payload(client)["embeds"][0]["description"] == (
             "• **[AAPL](https://ic.example.test/equity/AAPL)** — "
-            "AAPL zones - T1: in entry zone 'T1' ($175.00-$180.00) (now $179.00)"
+            "AAPL zones - T1: in entry zone 'T1' ($175.00-$180.00) (observed $179.00)"
         )
 
 
@@ -332,7 +340,7 @@ class TestDeepLink:
         # test_single_ratio_notification_is_not_linked). BZ14 deliberately does
         # not change it; the batched line just matches it.
         assert description == (
-            "• **GLD/SLV** — gold-silver: above $80.00 (now 82.1234)"
+            "• **GLD/SLV** — gold-silver: above $80.00 (observed 82.1234)"
         )
         assert "/equity/" not in description
 
@@ -366,7 +374,7 @@ class TestDeepLink:
             "• **[Ahttps://evil.test]"
             "(https://ic.example.test/equity/"
             "A%5D%28https%3A%2F%2Fevil.test%29)** "
-            "— pwn: above $100.00 (now $105.00)"
+            "— pwn: above $100.00 (observed $105.00)"
         )
         assert "evil.test)" not in description  # no second, attacker destination
         assert description.count("](") == 1  # exactly one link boundary
@@ -410,7 +418,7 @@ class TestDeepLink:
         assert description == (
             "• **[https://evil.co]"
             "(https://ic.example.test/equity/%3Chttps%3A%2F%2Fevil.co%3E%5C)**"
-            " — pwn: above $100.00 (now $105.00)"
+            " — pwn: above $100.00 (observed $105.00)"
         )
         assert "\\" not in description  # no escape left to break the bracket
         assert "<" not in description and ">" not in description
@@ -511,7 +519,7 @@ class TestDeepLink:
 
         description = _sent_payload(client)["embeds"][0]["description"]
         assert description == (
-            "• **Ahttps://evil.test** — x: above $100.00 (now $105.00)"
+            "• **Ahttps://evil.test** — x: above $100.00 (observed $105.00)"
         )
         assert "](" not in description
 
@@ -524,7 +532,7 @@ class TestDeepLink:
         await notifier.send_alert_batch([_payload("[]()", alert_name="x")])
 
         description = _sent_payload(client)["embeds"][0]["description"]
-        assert description == "• **?** — x: above $100.00 (now $105.00)"
+        assert description == "• **?** — x: above $100.00 (observed $105.00)"
 
     async def test_single_alert_embed_label_is_also_hardened(self):
         """The unbatched path shares _symbol_markup, so it inherits the fix."""
@@ -553,7 +561,7 @@ class TestDeepLink:
         await notifier.send_alert_batch([_payload("AAPL", alert_name="x")])
 
         description = _sent_payload(client)["embeds"][0]["description"]
-        assert description == "• **AAPL** — x: above $100.00 (now $105.00)"
+        assert description == "• **AAPL** — x: above $100.00 (observed $105.00)"
         assert "](" not in description
 
     async def test_single_alert_notification_also_deep_links(self):
@@ -578,7 +586,7 @@ class TestDeepLink:
         )
         # The rich single-alert fields are untouched by BZ14.
         assert [f["name"] for f in embed["fields"]] == [
-            "Current Value",
+            "Observed Value",
             "Threshold",
             "Type",
         ]
@@ -599,6 +607,82 @@ class TestDeepLink:
 
         description = _sent_payload(client)["embeds"][0]["description"]
         assert description == "**GLD/SLV** (Gold / Silver) is above $80.00"
+
+
+class TestDelayedMassiveProvenance:
+    """A known 15-minute-delayed Massive observation must not read as live."""
+
+    async def test_single_notification_uses_delay_label_not_current(self):
+        client = _mock_client()
+        notifier = _notifier(client)
+        observed = "2026-08-10T14:45:00"
+
+        await notifier.send_alert_notification(
+            alert_name="AAPL breakout",
+            target_symbol="AAPL",
+            target_name="Apple Inc.",
+            condition_type="above",
+            threshold_value=Decimal("200"),
+            current_value=Decimal("205"),
+            source="massive",
+            stale=True,
+            observed_at=observed,
+        )
+
+        embed = _sent_payload(client)["embeds"][0]
+        names = [field["name"] for field in embed["fields"]]
+        blob = str(embed)
+        assert "Current Value" not in names
+        assert "Current Value" not in blob
+        assert "(now " not in blob
+        assert "15-min delayed" in names
+        assert embed["timestamp"] == observed
+
+    async def test_batch_line_uses_observed_delay_not_now(self):
+        client = _mock_client()
+        notifier = _notifier(client)
+
+        await notifier.send_alert_batch(
+            [
+                _payload(
+                    "AAPL",
+                    alert_name="AAPL breakout",
+                    source="massive",
+                    stale=True,
+                    observed_at="2026-08-10T14:45:00",
+                )
+            ]
+        )
+
+        embed = _sent_payload(client)["embeds"][0]
+        description = embed["description"]
+        assert "(now " not in description
+        assert "Current" not in description
+        assert "observed $105.00 · 15-min delayed" in description
+        assert embed["timestamp"] == "2026-08-10T14:45:00"
+
+    async def test_unlabeled_payload_is_still_not_current_or_now(self):
+        """Old outbox rows without source still must not claim live."""
+        client = _mock_client()
+        notifier = _notifier(client)
+
+        await notifier.send_alert_notification(
+            alert_name="x",
+            target_symbol="AAPL",
+            target_name="Apple Inc.",
+            condition_type="above",
+            threshold_value=Decimal("100"),
+            current_value=Decimal("105"),
+        )
+        names = [field["name"] for field in _sent_payload(client)["embeds"][0]["fields"]]
+        assert "Current Value" not in names
+        assert "Observed Value" in names
+
+        client.post.reset_mock()
+        await notifier.send_alert_batch([_payload("AAPL", alert_name="x")])
+        description = _sent_payload(client)["embeds"][0]["description"]
+        assert "(now " not in description
+        assert "(observed $105.00)" in description
 
 
 class TestOversizedBatch:

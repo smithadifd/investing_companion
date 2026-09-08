@@ -99,6 +99,9 @@ class AlertService:
         self.db = db
         self.user_id = user_id
         self._provider = provider
+        self._quote_source: str | None = None
+        self._quote_stale: bool = False
+        self._quote_timestamp: datetime | None = None
         # Daily reference history stays Yahoo-pinned (CK4 KEEP). Quote and
         # crossing evaluation use ``provider`` / the elected chain.
         self.yahoo = YahooFinanceProvider()
@@ -580,6 +583,7 @@ class AlertService:
                     current_value=result.current_value,
                     comparison_period=alert.comparison_period,
                     notes=alert.notes,
+                    **self._quote_provenance_fields(),
                 )
                 if target_info
                 else None
@@ -701,13 +705,19 @@ class AlertService:
         comparison_period: str | None = None,
         notes: str | None = None,
         condition_override: str | None = None,
+        source: str | None = None,
+        stale: bool = False,
+        observed_at: datetime | str | None = None,
     ) -> dict:
         """Snapshot everything the sender needs, JSON-safe (Decimals -> str).
 
         Snapshotting at enqueue time means the claim step never re-reads the
         alert (which may have been edited or deleted by the time it sends).
+        ``source``/``stale``/``observed_at`` are the existing QuoteResponse
+        provenance fields, carried internally so Discord can render the same
+        delay copy the equity UI uses. They are not a public alert schema.
         """
-        return {
+        payload = {
             "alert_name": alert_name,
             "target_symbol": target_info.symbol,
             "target_name": target_info.name,
@@ -718,7 +728,16 @@ class AlertService:
             "is_ratio": target_info.type == AlertTargetType.RATIO,
             "notes": notes,
             "condition_override": condition_override,
+            "source": source,
+            "stale": bool(stale),
         }
+        if observed_at is not None:
+            payload["observed_at"] = (
+                observed_at.isoformat()
+                if isinstance(observed_at, datetime)
+                else str(observed_at)
+            )
+        return payload
 
     @staticmethod
     def _trigger_idempotency_key(alert: Alert, trigger_time: datetime) -> str:
@@ -990,6 +1009,9 @@ class AlertService:
                     is_ratio=payload.get("is_ratio", False),
                     notes=payload.get("notes"),
                     condition_override=payload.get("condition_override"),
+                    source=payload.get("source"),
+                    stale=bool(payload.get("stale", False)),
+                    observed_at=payload.get("observed_at"),
                 )
             else:
                 send = discord_service.send_alert_batch(payloads)
@@ -1141,6 +1163,46 @@ class AlertService:
                 )
         return None
 
+    def _clear_quote_provenance(self) -> None:
+        self._quote_source = None
+        self._quote_stale = False
+        self._quote_timestamp = None
+
+    def _stamp_quote_provenance(self, *quotes) -> None:
+        """Keep QuoteResponse source/stale/timestamp for notification copy.
+
+        Internal only — AlertCheckResult stays numeric. A ratio is as delayed
+        as its delayed leg; Massive on either side wins the existing
+        "15-min delayed" label.
+        """
+        present = [quote for quote in quotes if quote is not None]
+        if not present:
+            self._clear_quote_provenance()
+            return
+        sources = [quote.source for quote in present if getattr(quote, "source", None)]
+        self._quote_stale = any(bool(getattr(quote, "stale", False)) for quote in present)
+        timestamps = [
+            quote.timestamp
+            for quote in present
+            if getattr(quote, "timestamp", None) is not None
+        ]
+        self._quote_timestamp = min(timestamps) if timestamps else None
+        lowered = {(source or "").lower() for source in sources}
+        if "massive" in lowered:
+            self._quote_source = "massive"
+            self._quote_stale = True
+        elif sources:
+            self._quote_source = sources[0]
+        else:
+            self._quote_source = None
+
+    def _quote_provenance_fields(self) -> dict:
+        return {
+            "source": self._quote_source,
+            "stale": self._quote_stale,
+            "observed_at": self._quote_timestamp,
+        }
+
     async def _get_current_value(
         self, alert: Alert
     ) -> tuple[Decimal | None, AlertTargetInfo | None, Decimal | None, Decimal | None]:
@@ -1151,16 +1213,18 @@ class AlertService:
         that may occur between polling intervals.
 
         Quotes come from the elected capability-aware chain. That chain already
-        stamps ``source``/``stale`` on ``QuoteResponse`` (equity/market UI:
-        Massive → "15-min delayed"). ``AlertCheckResult`` and Discord payloads
-        have no provenance fields; this path does not add any. Evaluation uses
-        the delayed price/high/low as-is.
+        stamps ``source``/``stale``/``timestamp`` on ``QuoteResponse``
+        (equity/market UI: Massive → "15-min delayed"). Those fields are kept
+        internally for notification rendering; ``AlertCheckResult`` stays
+        numeric. Evaluation uses the delayed price/high/low as-is.
         """
+        self._clear_quote_provenance()
         target_info = await self._get_target_info(alert)
 
         if alert.equity_id and target_info:
             quote = await self.provider.get_quote(target_info.symbol)
             if quote:
+                self._stamp_quote_provenance(quote)
                 return (
                     Decimal(str(quote.price)),
                     target_info,
@@ -1180,6 +1244,7 @@ class AlertService:
                     self.provider.get_quote(ratio.denominator_symbol),
                 )
                 if num_quote and den_quote and den_quote.price != 0:
+                    self._stamp_quote_provenance(num_quote, den_quote)
                     ratio_value = Decimal(str(num_quote.price)) / Decimal(
                         str(den_quote.price)
                     )
@@ -1211,7 +1276,7 @@ class AlertService:
             effective_high = intraday_high if intraday_high is not None else current_value
             triggered = current_value > threshold or effective_high > threshold
             if triggered and current_value <= threshold:
-                desc = f"Intraday high {effective_high:.4f} > {threshold:.4f} (current: {current_value:.4f})"
+                desc = f"Intraday high {effective_high:.4f} > {threshold:.4f} (observed: {current_value:.4f})"
             else:
                 desc = f"{current_value:.4f} > {threshold:.4f}"
             return triggered, desc
@@ -1221,7 +1286,7 @@ class AlertService:
             effective_low = intraday_low if intraday_low is not None else current_value
             triggered = current_value < threshold or effective_low < threshold
             if triggered and current_value >= threshold:
-                desc = f"Intraday low {effective_low:.4f} < {threshold:.4f} (current: {current_value:.4f})"
+                desc = f"Intraday low {effective_low:.4f} < {threshold:.4f} (observed: {current_value:.4f})"
             else:
                 desc = f"{current_value:.4f} < {threshold:.4f}"
             return triggered, desc
@@ -1245,9 +1310,9 @@ class AlertService:
             triggered = not alert.was_above_threshold and (currently_above or intraday_crossed_above)
             if triggered:
                 if not currently_above and intraday_crossed_above:
-                    desc = f"Intraday high {effective_high:.4f} crossed above {threshold:.4f} (current: {current_value:.4f})"
+                    desc = f"Intraday high {effective_high:.4f} crossed above {threshold:.4f} (observed: {current_value:.4f})"
                 else:
-                    desc = f"Crossed above {threshold:.4f} (now {current_value:.4f})"
+                    desc = f"Crossed above {threshold:.4f} (observed {current_value:.4f})"
             else:
                 state = "above" if alert.was_above_threshold else "below"
                 desc = f"No cross: was {state} threshold, now {'above' if currently_above else 'below'} ({current_value:.4f})"
@@ -1271,9 +1336,9 @@ class AlertService:
             triggered = alert.was_above_threshold and (currently_below or intraday_crossed_below)
             if triggered:
                 if not currently_below and intraday_crossed_below:
-                    desc = f"Intraday low {effective_low:.4f} crossed below {threshold:.4f} (current: {current_value:.4f})"
+                    desc = f"Intraday low {effective_low:.4f} crossed below {threshold:.4f} (observed: {current_value:.4f})"
                 else:
-                    desc = f"Crossed below {threshold:.4f} (now {current_value:.4f})"
+                    desc = f"Crossed below {threshold:.4f} (observed {current_value:.4f})"
             else:
                 state = "above" if alert.was_above_threshold else "below"
                 desc = f"No cross: was {state} threshold, now {'below' if currently_below else 'above'} ({current_value:.4f})"
@@ -1299,8 +1364,8 @@ class AlertService:
             period_high = await self._get_period_high(alert)
             if period_high is None or period_high == 0:
                 return False, f"No price history for {period} high"
-            # The current price may itself be the period high (history is
-            # persisted daily, the quote is live)
+            # The observed quote may itself be the period high (history is
+            # persisted daily; the quote can be delayed)
             effective_high = max(period_high, current_value)
             drawdown = ((effective_high - current_value) / effective_high) * 100
             triggered = drawdown >= threshold
@@ -1451,7 +1516,7 @@ class AlertService:
         if count == needed:
             return True, (
                 f"Sustained {direction} {threshold:.4f} for {needed} "
-                f"consecutive checks (now {current_value:.4f})"
+                f"consecutive checks (observed {current_value:.4f})"
             )
         if count < needed:
             return False, (
@@ -1657,6 +1722,7 @@ class AlertService:
                                 threshold_value=zone_entry_edge(zone),
                                 current_value=current_value,
                                 notes=alert.notes,
+                                **self._quote_provenance_fields(),
                                 condition_override=(
                                     f"in entry zone '{zone.tier}' "
                                     f"({self._zone_range_desc(zone)})"

@@ -81,7 +81,7 @@ function NotificationCard({ notification }: { notification: NotificationItem }) 
             </span>
           </p>
           <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-            Current: ${notification.triggeredValue.toFixed(2)} &middot;{' '}
+            Triggered: ${notification.triggeredValue.toFixed(2)} &middot;{' '}
             {formatTimeAgo(notification.triggeredAt)}
           </p>
         </div>

@@ -282,6 +282,9 @@ async def check_alert(
                 comparison_period=alert.comparison_period,
                 is_ratio=(target_info.type.value == "ratio"),
                 notes=alert.notes,
+                source=service._quote_source,
+                stale=service._quote_stale,
+                observed_at=service._quote_timestamp,
             )
             notification_result = {"sent": success, "error": error}
 

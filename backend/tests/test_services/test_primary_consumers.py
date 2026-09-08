@@ -9,7 +9,10 @@ from unittest.mock import AsyncMock, Mock
 import httpx
 import pytest
 
+from sqlalchemy import select
+
 from app.core.config import settings
+from app.db.models.alert import AlertDelivery
 from app.db.models.ratio import Ratio
 from app.schemas.equity import OHLCVData, QuoteResponse
 from app.services import data_providers, market
@@ -344,6 +347,45 @@ async def test_keyed_alert_after_feed_teardown_does_not_reuse_keyless_chain(
     elected = data_providers.get_quote_provider()
     assert elected is not keyless
     assert elected.quote_primary is not None
+
+
+@pytest.mark.parametrize("feed", ["keyed"], indirect=True)
+async def test_keyed_massive_alert_payload_preserves_quote_provenance(feed, db):
+    """Evaluation must snapshot QuoteResponse source/stale/timestamp internally."""
+    alert = await _alert_for(
+        db, "AAPL", condition_type="above", threshold_value=100.0
+    )
+    was_triggered, error = await AlertService(db).process_alert(alert)
+    assert was_triggered is True and error is None
+    rows = (
+        await db.execute(
+            select(AlertDelivery).where(AlertDelivery.alert_id == alert.id)
+        )
+    ).scalars().all()
+    assert len(rows) == 1
+    payload = rows[0].payload
+    chain_quote = await data_providers.get_quote_provider().get_quote("AAPL")
+    assert chain_quote is not None
+    assert chain_quote.source == "massive"
+    assert chain_quote.stale is True
+    assert payload["source"] == "massive"
+    assert payload["stale"] is True
+    assert payload["observed_at"] == chain_quote.timestamp.isoformat()
+    assert Decimal(payload["current_value"]) == chain_quote.price
+
+
+@pytest.mark.parametrize("feed", ["keyed"], indirect=True)
+async def test_keyed_massive_crossing_is_not_labeled_now(feed, db):
+    alert = await _alert_for(
+        db, "AAPL",
+        condition_type="crosses_above",
+        threshold_value=100.0,
+        was_above_threshold=False,
+    )
+    result = await AlertService(db).check_alert(alert)
+    assert result.is_triggered is True
+    assert "(now " not in result.condition_met
+    assert "current:" not in result.condition_met.lower()
 
 
 def test_explicit_provider_injection_does_not_resolve_default(monkeypatch):

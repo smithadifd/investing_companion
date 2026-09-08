@@ -203,6 +203,31 @@ describe('AlertsPage', () => {
 
     expect(mockToggleMutate).toHaveBeenCalledWith(1);
   });
+
+  it('does not label last-checked or check-result values as current or now', async () => {
+    const user = userEvent.setup();
+    mockCheckMutateAsync.mockResolvedValue({
+      alert_id: 1,
+      is_triggered: true,
+      current_value: 195.5,
+      threshold_value: 200,
+      condition_met: '195.5000 < 200.0000',
+      should_notify: true,
+    });
+
+    render(<AlertsPage />);
+
+    expect(screen.queryByText('Current')).not.toBeInTheDocument();
+    expect(screen.queryByText('Current Value')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Last checked').length).toBeGreaterThan(0);
+
+    await user.click(screen.getAllByTitle('Check alert now')[0]);
+
+    expect(await screen.findByText('Alert Check Result')).toBeInTheDocument();
+    expect(screen.queryByText('Current Value')).not.toBeInTheDocument();
+    expect(screen.queryByText('Current')).not.toBeInTheDocument();
+    expect(screen.getByText('Observed Value')).toBeInTheDocument();
+  });
 });
 
 describe('AlertsPage - empty state', () => {

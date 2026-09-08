@@ -1,5 +1,6 @@
 """Consumer routing through the real factory; provider I/O stays offline."""
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, Mock
@@ -17,6 +18,7 @@ from app.services.data_providers.yahoo import YahooFinanceProvider
 from app.services.market import MarketService
 from app.services.price_history import PriceHistoryService
 from app.services.ratio import RatioService
+from app.tasks import price_history as price_history_task
 
 AS_OF = datetime(2026, 8, 10, 15, 0)
 
@@ -196,3 +198,74 @@ def test_explicit_provider_injection_does_not_resolve_default(monkeypatch):
     assert MarketService(provider=provider).provider is provider
     assert RatioService(AsyncMock(), provider=provider).provider is provider
     assert PriceHistoryService(AsyncMock(), provider=provider).provider is provider
+
+
+def test_daily_history_task_pins_yahoo(feed, monkeypatch):
+    elected_chain = data_providers.get_quote_provider()
+    session = AsyncMock()
+    session.__aenter__.return_value = session
+    monkeypatch.setattr(price_history_task, "AsyncSessionLocal", Mock(return_value=session))
+    monkeypatch.setattr(price_history_task, "run_async", asyncio.run)
+    sync_all = AsyncMock(return_value={"synced": 1})
+    monkeypatch.setattr(PriceHistoryService, "sync_all", sync_all)
+    constructor = Mock(wraps=PriceHistoryService)
+    monkeypatch.setattr(price_history_task, "PriceHistoryService", constructor)
+
+    assert price_history_task.sync_all_price_history.run() == {"synced": 1}
+
+    constructor.assert_called_once()
+    assert constructor.call_args.args == (session,)
+    provider = constructor.call_args.kwargs["provider"]
+    assert type(provider) is YahooFinanceProvider
+    assert provider is not elected_chain
+    sync_all.assert_awaited_once_with()
+    feed[-1].assert_not_awaited()
+
+
+def test_market_default_is_not_resolved_at_construction(monkeypatch):
+    factory = Mock()
+    monkeypatch.setattr(market, "get_quote_provider", factory)
+
+    service = MarketService()
+
+    factory.assert_not_called()
+    assert service.provider is factory.return_value
+    factory.assert_called_once_with()
+
+
+@pytest.mark.parametrize("feed", ["keyed"], indirect=True)
+async def test_market_singleton_uses_new_chain_after_key_change(feed, monkeypatch):
+    monkeypatch.setattr(settings, "POLYGON_API_KEY", "")
+    data_providers.reset_quote_provider()
+    service = market.market_service
+    before = await service._fetch_quote_data("AAPL")
+    old_chain = service.provider
+    assert before["price"] == Decimal("90")
+
+    monkeypatch.setattr(settings, "POLYGON_API_KEY", "test-key")
+    data_providers.reset_quote_provider()
+
+    after = await service._fetch_quote_data("AAPL")
+    assert service.provider is not old_chain
+    assert after["price"] == Decimal("120")
+    mover = await service._fetch_with_name("AAPL")
+    assert mover["price"] == Decimal("120")
+    assert mover["name"] == "Yahoo company name"
+
+
+async def test_market_uses_explicit_provider_after_reset(monkeypatch):
+    factory = Mock(side_effect=AssertionError("injection must bypass the factory"))
+    monkeypatch.setattr(market, "get_quote_provider", factory)
+    monkeypatch.setattr(data_providers, "_quote_provider", None)
+    provider = AsyncMock()
+    provider.__bool__.return_value = False
+    provider.get_quote.return_value = _quote("AAPL", Decimal("77"))
+    service = MarketService(provider=provider)
+    monkeypatch.setattr(service.yahoo, "get_info", AsyncMock(return_value={"shortName": "Apple"}))
+    data_providers.reset_quote_provider()
+
+    assert (await service._fetch_quote_data("AAPL"))["price"] == Decimal("77")
+    assert (await service._fetch_with_name("AAPL"))["price"] == Decimal("77")
+    assert provider.get_quote.await_count == 2
+    assert service.provider is provider
+    factory.assert_not_called()

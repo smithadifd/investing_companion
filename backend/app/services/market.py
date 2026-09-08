@@ -68,9 +68,14 @@ class MarketService:
     """Service for market overview data."""
 
     def __init__(self, provider: MarketDataProvider | None = None) -> None:
-        self.provider = provider if provider is not None else get_quote_provider()
+        self._provider = provider
         # Company names are Yahoo metadata, outside the market-data interface.
         self.yahoo = YahooFinanceProvider()
+
+    @property
+    def provider(self) -> MarketDataProvider:
+        # Resolve defaults on use so the module singleton honors factory resets.
+        return self._provider if self._provider is not None else get_quote_provider()
 
     async def _fetch_quote_data(self, symbol: str) -> dict | None:
         """Fetch quote data for a symbol, returning raw dict."""

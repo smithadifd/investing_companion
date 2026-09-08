@@ -31,6 +31,19 @@ def _quote(symbol, price, timestamp=AS_OF):
     )
 
 
+@pytest.fixture(autouse=True)
+def _unbind_quote_provider():
+    """Drop the factory singleton around every case.
+
+    ``monkeypatch.setattr(_quote_provider, None)`` records the *prior* chain
+    and reinstalls it at teardown — so a keyless cache from EquityService or
+    an earlier test comes back after a keyed case. Wipe rather than restore.
+    """
+    data_providers.reset_quote_provider()
+    yield
+    data_providers.reset_quote_provider()
+
+
 @pytest.fixture(params=["keyed", "keyless", "unavailable", "unentitled", "unsupported"])
 def feed(request, monkeypatch):
     """Keep factory ordering, entitlement checks, parsers, and failover real."""
@@ -38,8 +51,7 @@ def feed(request, monkeypatch):
     monkeypatch.setattr(settings, "POLYGON_API_KEY", "test-key" if mode != "keyless" else "")
     monkeypatch.setattr(settings, "ALPHA_VANTAGE_API_KEY", "")
     monkeypatch.setattr(settings, "MASSIVE_ENTITLEMENTS", ["search"] if mode == "unentitled" else None)
-    # Restore the prior singleton after each case, including its breaker state.
-    monkeypatch.setattr(data_providers, "_quote_provider", None)
+    data_providers.reset_quote_provider()
     symbol = "^VIX" if mode == "unsupported" else "AAPL"
 
     async def yahoo_quote(symbol):
@@ -73,11 +85,28 @@ def feed(request, monkeypatch):
                                   "prevDay": {"c": price - 1}}}
         return httpx.Response(200, json=payload)
 
-    client = AsyncMock()
-    client.__aenter__.return_value = client
-    client.get.side_effect = get
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: client)
-    return mode, symbol, quote, history, info, client.get
+    http_get = AsyncMock(side_effect=get)
+
+    class _Client:
+        """One instance per ``async with httpx.AsyncClient()`` — production's shape."""
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url, **kwargs):
+            return await http_get(url, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    try:
+        yield mode, symbol, quote, history, info, http_get
+    finally:
+        data_providers.reset_quote_provider()
 
 
 def _assert_routing(feed, *, history=False):
@@ -233,6 +262,51 @@ def test_market_default_is_not_resolved_at_construction(monkeypatch):
     factory.assert_called_once_with()
 
 
+@pytest.fixture
+def keyless_factory_cached():
+    """Cache a keyless chain the way EquityService does, then restore the key.
+
+    Other tests construct ``EquityService`` / ``AlertService`` and leave the
+    factory singleton bound. ``feed`` must drop that chain, not monkeypatch-
+    restore it at teardown — restoring it is how a later keyed consumer sees
+    Yahoo prices (current_value=2) as if Massive were never consulted.
+    """
+    data_providers.reset_quote_provider()
+    previous_key = settings.POLYGON_API_KEY
+    settings.POLYGON_API_KEY = ""
+    try:
+        chain = data_providers.get_quote_provider()
+    finally:
+        settings.POLYGON_API_KEY = previous_key
+    assert chain.quote_primary is None
+    yield chain
+    # Runs after ``feed`` teardown (this fixture is set up first). The consumer
+    # fixture must not have put ``chain`` back.
+    assert data_providers._quote_provider is not chain
+    data_providers.reset_quote_provider()
+
+
+@pytest.fixture
+def keyed_feed_after_keyless_cache(keyless_factory_cached, feed):
+    """Force setup order: pollute the singleton, then run a keyed ``feed`` case."""
+    return feed
+
+
+@pytest.mark.parametrize("feed", ["keyed"], indirect=True)
+async def test_keyed_ratio_does_not_reuse_a_cached_keyless_chain(
+    keyed_feed_after_keyless_cache,
+):
+    """Keyed quotes must come from Massive even if a prior caller cached Yahoo.
+
+    Fails on the pre-fix ``feed`` fixture: ``monkeypatch.setattr(_quote_provider,
+    None)`` records the keyless chain and reinstalls it at teardown, so the
+    polluter fixture's assertion (and a subsequent consumer) see Yahoo-only
+    state. Isolation must wipe the singleton, not restore the prior object.
+    """
+    result = await RatioService(_ratio_db()).get_ratio_quote(1)
+    assert result.current_value == Decimal("3")
+
+
 @pytest.mark.parametrize("feed", ["keyed"], indirect=True)
 async def test_market_singleton_uses_new_chain_after_key_change(feed, monkeypatch):
     monkeypatch.setattr(settings, "POLYGON_API_KEY", "")
@@ -256,7 +330,7 @@ async def test_market_singleton_uses_new_chain_after_key_change(feed, monkeypatc
 async def test_market_uses_explicit_provider_after_reset(monkeypatch):
     factory = Mock(side_effect=AssertionError("injection must bypass the factory"))
     monkeypatch.setattr(market, "get_quote_provider", factory)
-    monkeypatch.setattr(data_providers, "_quote_provider", None)
+    data_providers.reset_quote_provider()
     provider = AsyncMock()
     provider.__bool__.return_value = False
     provider.get_quote.return_value = _quote("AAPL", Decimal("77"))

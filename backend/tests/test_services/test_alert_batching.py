@@ -649,7 +649,7 @@ async def _trigger_extra_alert(service, db, symbol: str, price: float = 105.0):
     alert = await create_test_alert(
         db, equity, condition_type="above", threshold_value=100.0
     )
-    service.yahoo = AsyncMock(get_quote=AsyncMock(return_value=_mock_quote(price)))
+    service.provider = AsyncMock(get_quote=AsyncMock(return_value=_mock_quote(price)))
     await service.process_alert(alert)
     return alert
 

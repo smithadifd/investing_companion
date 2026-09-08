@@ -33,6 +33,7 @@ from app.schemas.alert import (
     AlertUpdate,
     AlertWithHistoryResponse,
 )
+from app.services.data_providers import MarketDataProvider, get_quote_provider
 from app.services.data_providers.yahoo import YahooFinanceProvider, normalize_symbol
 from app.services.entry_zones import is_in_zone, parse_zones, zone_entry_edge
 from app.services.equity import EquityService
@@ -89,13 +90,30 @@ class AlertService:
     """Service for alert-related operations."""
 
     def __init__(
-        self, db: AsyncSession, user_id: uuid.UUID | None = None
+        self,
+        db: AsyncSession,
+        user_id: uuid.UUID | None = None,
+        *,
+        provider: MarketDataProvider | None = None,
     ) -> None:
         self.db = db
         self.user_id = user_id
+        self._provider = provider
+        # Daily reference history stays Yahoo-pinned (CK4 KEEP). Quote and
+        # crossing evaluation use ``provider`` / the elected chain.
         self.yahoo = YahooFinanceProvider()
         self.equity_service = EquityService(db)
         self.price_history_service = PriceHistoryService(db, provider=self.yahoo)
+
+    @property
+    def provider(self) -> MarketDataProvider:
+        # Resolve on use so a factory reset is visible to a held instance,
+        # matching MarketService. Explicit injection never consults the factory.
+        return self._provider if self._provider is not None else get_quote_provider()
+
+    @provider.setter
+    def provider(self, value: MarketDataProvider) -> None:
+        self._provider = value
 
     def _scope(self, stmt):
         """Restrict an ``Alert`` query to the caller.
@@ -1131,11 +1149,17 @@ class AlertService:
         Returns (current_value, target_info, intraday_high, intraday_low).
         High/low are used by crossing alerts to detect threshold breaches
         that may occur between polling intervals.
+
+        Quotes come from the elected capability-aware chain. That chain already
+        stamps ``source``/``stale`` on ``QuoteResponse`` (equity/market UI:
+        Massive → "15-min delayed"). ``AlertCheckResult`` and Discord payloads
+        have no provenance fields; this path does not add any. Evaluation uses
+        the delayed price/high/low as-is.
         """
         target_info = await self._get_target_info(alert)
 
         if alert.equity_id and target_info:
-            quote = await self.yahoo.get_quote(target_info.symbol)
+            quote = await self.provider.get_quote(target_info.symbol)
             if quote:
                 return (
                     Decimal(str(quote.price)),
@@ -1152,8 +1176,8 @@ class AlertService:
 
             if ratio:
                 num_quote, den_quote = await asyncio.gather(
-                    self.yahoo.get_quote(ratio.numerator_symbol),
-                    self.yahoo.get_quote(ratio.denominator_symbol),
+                    self.provider.get_quote(ratio.numerator_symbol),
+                    self.provider.get_quote(ratio.denominator_symbol),
                 )
                 if num_quote and den_quote and den_quote.price != 0:
                     ratio_value = Decimal(str(num_quote.price)) / Decimal(

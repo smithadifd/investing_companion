@@ -69,7 +69,7 @@ async def _make_triggered_alert(db: AsyncSession, symbol: str, price: float = 10
     service = AlertService(db)
     mock_yahoo = AsyncMock()
     mock_yahoo.get_quote = AsyncMock(return_value=_mock_quote(price))
-    service.yahoo = mock_yahoo
+    service.provider = mock_yahoo
     return service, alert
 
 
@@ -293,7 +293,7 @@ class TestDeliveryHealth:
                 condition_type="above", threshold_value=100.0,
                 user_id=owner.id,
             )
-            svc.yahoo = AsyncMock(
+            svc.provider = AsyncMock(
                 get_quote=AsyncMock(return_value=_mock_quote(105.0))
             )
             await svc.process_alert(alert)
@@ -402,7 +402,7 @@ class TestInFlightLease:
         alert_b = await create_test_alert(
             db, equity_b, condition_type="above", threshold_value=100.0
         )
-        service.yahoo = AsyncMock(get_quote=AsyncMock(return_value=_mock_quote(105.0)))
+        service.provider = AsyncMock(get_quote=AsyncMock(return_value=_mock_quote(105.0)))
         await service.process_alert(alert_b)
 
         result = await service.deliver_pending()
@@ -470,7 +470,7 @@ class TestStableIdempotencyKey:
             a1_id, a2_id = a1.id, a2.id
             try:
                 service = AlertService(s)
-                service.yahoo = AsyncMock(
+                service.provider = AsyncMock(
                     get_quote=AsyncMock(return_value=_mock_quote(105.0))
                 )
 
@@ -642,11 +642,11 @@ class TestTrueConcurrencyDedup:
                 a1 = await s1.get(Alert, alert_id)
                 a2 = await s2.get(Alert, alert_id)
                 svc1 = AlertService(s1)
-                svc1.yahoo = AsyncMock(
+                svc1.provider = AsyncMock(
                     get_quote=AsyncMock(return_value=_mock_quote(105.0))
                 )
                 svc2 = AlertService(s2)
-                svc2.yahoo = AsyncMock(
+                svc2.provider = AsyncMock(
                     get_quote=AsyncMock(return_value=_mock_quote(105.0))
                 )
                 r1, r2 = await asyncio.gather(
@@ -678,7 +678,7 @@ class TestTrueConcurrencyDedup:
             )
             # Baseline above the zone: arms the tier, no fire.
             svc0 = AlertService(s0)
-            svc0.yahoo = AsyncMock(get_quote=AsyncMock(return_value=_mock_quote(55.0)))
+            svc0.provider = AsyncMock(get_quote=AsyncMock(return_value=_mock_quote(55.0)))
             await svc0.process_alert(alert)
             await s0.commit()
             user_id, equity_id, alert_id = user.id, equity.id, alert.id
@@ -688,11 +688,11 @@ class TestTrueConcurrencyDedup:
                 a1 = await s1.get(Alert, alert_id)
                 a2 = await s2.get(Alert, alert_id)
                 svc1 = AlertService(s1)
-                svc1.yahoo = AsyncMock(
+                svc1.provider = AsyncMock(
                     get_quote=AsyncMock(return_value=_mock_quote(51.0))
                 )
                 svc2 = AlertService(s2)
-                svc2.yahoo = AsyncMock(
+                svc2.provider = AsyncMock(
                     get_quote=AsyncMock(return_value=_mock_quote(51.0))
                 )
                 # Both evaluators see the same committed pre-fire zone_state, so

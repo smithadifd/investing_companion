@@ -3,6 +3,7 @@
 import logging
 
 from app.db.session import AsyncSessionLocal
+from app.services.data_providers.yahoo import YahooFinanceProvider
 from app.services.price_history import PriceHistoryService
 from app.tasks.celery_app import celery_app
 from app.tasks.utils import run_async
@@ -22,7 +23,9 @@ def sync_all_price_history():
 
     async def _sync():
         async with AsyncSessionLocal() as session:
-            service = PriceHistoryService(session)
+            # Alerts read reference values from this table; moving its provider
+            # is row CI3's decision. Keep the persisted series pinned to Yahoo.
+            service = PriceHistoryService(session, provider=YahooFinanceProvider())
             return await service.sync_all()
 
     try:

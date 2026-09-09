@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +16,7 @@ from app.schemas.ratio import (
     RatioResponse,
     RatioUpdate,
 )
-from app.services.data_providers.yahoo import YahooFinanceProvider
+from app.services.data_providers import MarketDataProvider, get_quote_provider
 
 logger = logging.getLogger(__name__)
 
@@ -87,11 +86,12 @@ class RatioService:
     """Service for ratio-related operations."""
 
     def __init__(
-        self, db: AsyncSession, user_id: uuid.UUID | None = None
+        self, db: AsyncSession, user_id: uuid.UUID | None = None,
+        *, provider: MarketDataProvider | None = None
     ) -> None:
         self.db = db
         self.user_id = user_id
-        self.yahoo = YahooFinanceProvider()
+        self.provider = provider if provider is not None else get_quote_provider()
 
     def _owned(self):
         """Ownership predicate: the caller's custom ratios plus global/system
@@ -231,8 +231,8 @@ class RatioService:
             return None
 
         # Fetch history for both symbols
-        num_history = await self.yahoo.get_history(ratio.numerator_symbol, period)
-        den_history = await self.yahoo.get_history(ratio.denominator_symbol, period)
+        num_history = await self.provider.get_history(ratio.numerator_symbol, period)
+        den_history = await self.provider.get_history(ratio.denominator_symbol, period)
 
         if not num_history or not den_history:
             return RatioHistoryResponse(
@@ -296,8 +296,8 @@ class RatioService:
 
         # Fetch current quotes
         num_quote, den_quote = await asyncio.gather(
-            self.yahoo.get_quote(ratio.numerator_symbol),
-            self.yahoo.get_quote(ratio.denominator_symbol),
+            self.provider.get_quote(ratio.numerator_symbol),
+            self.provider.get_quote(ratio.denominator_symbol),
         )
 
         if not num_quote or not den_quote or den_quote.price == 0:
@@ -323,7 +323,8 @@ class RatioService:
             current_value=current_value,
             change_1d=change_1d,
             change_percent_1d=change_percent_1d,
-            timestamp=datetime.utcnow(),
+            # A derived quote is only as fresh as its oldest input.
+            timestamp=min(num_quote.timestamp, den_quote.timestamp),
         )
 
     async def get_all_ratio_quotes(self) -> list[RatioQuoteResponse]:

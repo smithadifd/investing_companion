@@ -21,6 +21,50 @@ EMBED_DESCRIPTION_LIMIT = 4096
 # name cannot crowd every other alert out of a batched embed.
 BATCH_LINE_NAME_LIMIT = 60
 
+# Mirrors frontend QuoteHeader CONTRACTUAL_QUOTE_DELAY_MINUTES. QuoteResponse
+# ``source``/``stale`` is the existing delay convention; this map is display
+# copy only and must not grow a new public alert schema.
+CONTRACTUAL_QUOTE_DELAY_MINUTES = {"massive": 15}
+
+
+def quote_delay_label(source: str | None, *, stale: bool = False) -> str | None:
+    """Existing equity/market delay copy, or None when the quote is unlabeled.
+
+    A known contractually delayed source (Massive) is labelled even if ``stale``
+    went missing on the way here — same rule as QuoteHeader.
+    """
+    minutes = CONTRACTUAL_QUOTE_DELAY_MINUTES.get((source or "").lower())
+    if minutes is not None:
+        return f"{minutes}-min delayed"
+    if stale:
+        return "Delayed data"
+    return None
+
+
+def observed_value_field_name(source: str | None = None, *, stale: bool = False) -> str:
+    """Discord field name for the triggering observation. Never 'Current Value'."""
+    return quote_delay_label(source, stale=stale) or "Observed Value"
+
+
+def observed_value_suffix(
+    current_str: str, source: str | None = None, *, stale: bool = False
+) -> str:
+    """Batched-line value clause. Never '(now <value>)'."""
+    delay = quote_delay_label(source, stale=stale)
+    if delay:
+        return f"(observed {current_str} · {delay})"
+    return f"(observed {current_str})"
+
+
+def embed_timestamp(observed_at: datetime | str | None = None) -> str:
+    """ISO timestamp for the Discord embed: quote 'as of', else send time."""
+    if isinstance(observed_at, datetime):
+        return observed_at.isoformat()
+    if isinstance(observed_at, str) and observed_at:
+        return observed_at
+    return datetime.utcnow().isoformat()
+
+
 # Every character that can produce a clickable link in Discord markdown,
 # removed from any text interpolated into a link LABEL. The destination half is
 # hardened separately by percent-encoding (``quote(symbol, safe="")``); this
@@ -276,6 +320,9 @@ class DiscordNotificationService:
         is_ratio: bool = False,
         notes: str | None = None,
         condition_override: str | None = None,
+        source: str | None = None,
+        stale: bool = False,
+        observed_at: datetime | str | None = None,
     ) -> tuple[bool, str | None]:
         """Send an alert notification to Discord.
 
@@ -285,12 +332,15 @@ class DiscordNotificationService:
             target_name: Display name
             condition_type: Type of condition that triggered
             threshold_value: The threshold that was crossed
-            current_value: Current value that triggered the alert
+            current_value: Observed value that triggered the alert
             comparison_period: Period for percent change conditions
             is_ratio: Whether this is a ratio alert
             notes: Optional notes to include
             condition_override: Pre-built condition description (entry-zone
                 alerts pass the tier name and price band here)
+            source: QuoteResponse.source of the observation, if snapshotted
+            stale: QuoteResponse.stale of the observation
+            observed_at: QuoteResponse.timestamp ('as of'), if snapshotted
 
         Returns:
             Tuple of (success, error_message)
@@ -330,7 +380,7 @@ class DiscordNotificationService:
                 "color": color,
                 "fields": [
                     {
-                        "name": "Current Value",
+                        "name": observed_value_field_name(source, stale=stale),
                         "value": current_str,
                         "inline": True,
                     },
@@ -349,7 +399,7 @@ class DiscordNotificationService:
                         "inline": True,
                     },
                 ],
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": embed_timestamp(observed_at),
                 "footer": {
                     "text": "Investing Companion",
                 },
@@ -407,7 +457,7 @@ class DiscordNotificationService:
 
         Shape (hand-pinned by tests/test_services/test_alert_batching.py)::
 
-            • **[AAPL](https://host/equity/AAPL)** — <name>: <condition> (now <value>)
+            • **[AAPL](https://host/equity/AAPL)** — <name>: <condition> (observed <value>)
 
         Every field is read with ``.get`` and coerced defensively: a batched
         send covers N outbox rows at once, so a single malformed payload must
@@ -431,9 +481,14 @@ class DiscordNotificationService:
         current_str = (
             f"{float(current):.4f}" if is_ratio else self._format_price(current)
         )
+        suffix = observed_value_suffix(
+            current_str,
+            alert.get("source"),
+            stale=bool(alert.get("stale", False)),
+        )
         return (
             f"• {self._symbol_markup(symbol, is_ratio)} — "
-            f"{name}: {condition_desc} (now {current_str})"
+            f"{name}: {condition_desc} {suffix}"
         )
 
     def _batch_description(self, alerts: list[dict]) -> str:
@@ -526,7 +581,12 @@ class DiscordNotificationService:
                 # test embeds). A batch mixes bullish and bearish triggers, so
                 # the single-alert green/red coding has no honest answer here.
                 "color": 0x5865F2,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": embed_timestamp(
+                    min(
+                        (str(a.get("observed_at")) for a in alerts if a.get("observed_at")),
+                        default=None,
+                    )
+                ),
                 "footer": {
                     "text": "Investing Companion",
                 },

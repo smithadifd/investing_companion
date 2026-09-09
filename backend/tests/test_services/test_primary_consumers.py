@@ -9,7 +9,10 @@ from unittest.mock import AsyncMock, Mock
 import httpx
 import pytest
 
+from sqlalchemy import select
+
 from app.core.config import settings
+from app.db.models.alert import AlertDelivery
 from app.db.models.ratio import Ratio
 from app.schemas.equity import OHLCVData, QuoteResponse
 from app.services import data_providers, market
@@ -20,6 +23,7 @@ from app.services.market import MarketService
 from app.services.price_history import PriceHistoryService
 from app.services.ratio import RatioService
 from app.tasks import price_history as price_history_task
+from tests.factories import create_test_alert, create_test_equity
 
 AS_OF = datetime(2026, 8, 10, 15, 0)
 
@@ -79,8 +83,12 @@ def _bind_offline_io(monkeypatch, mode):
             payload = {"results": [{"t": epoch_ms, "o": price, "h": price,
                                     "l": price, "c": price, "v": 100}]}
         else:
-            payload = {"ticker": {"lastTrade": {"p": price, "t": epoch_ms * 1_000_000},
-                                  "prevDay": {"c": price - 1}}}
+            payload = {"ticker": {
+                "lastTrade": {"p": price, "t": epoch_ms * 1_000_000},
+                "prevDay": {"c": price - 1},
+                "day": {"o": price, "h": price + 10, "l": price - 10,
+                        "c": price, "v": 100},
+            }}
         return httpx.Response(200, json=payload)
 
     http_get = AsyncMock(side_effect=get)
@@ -142,6 +150,11 @@ def _ratio_db(numerator="AAPL", denominator="SPY"):
     db = AsyncMock()
     db.execute.return_value = Mock(scalar_one_or_none=Mock(return_value=ratio))
     return db
+
+
+async def _alert_for(db, symbol, **kwargs):
+    equity = await create_test_equity(db, symbol=symbol)
+    return await create_test_alert(db, equity, **kwargs)
 
 
 async def test_market_quotes_and_yahoo_metadata(feed, monkeypatch):
@@ -221,15 +234,158 @@ async def test_ratio_timestamp_is_oldest_input(delayed_leg):
     assert result.timestamp < now
 
 
-def test_alert_provider_and_backfill_remain_yahoo(feed):
-    # Even after the new defaults build the paid chain, alerts inject Yahoo.
-    MarketService()
-    RatioService(AsyncMock())
-    PriceHistoryService(AsyncMock())
-    alert = AlertService(AsyncMock())
-    assert type(alert.yahoo) is YahooFinanceProvider
-    assert alert.price_history_service.provider is alert.yahoo
-    assert alert.yahoo is not data_providers.get_quote_provider()
+async def test_alert_quotes_use_primary_chain(feed, db):
+    mode, symbol, *_ = feed
+    alert = await _alert_for(
+        db, symbol, condition_type="above", threshold_value=100.0
+    )
+    result = await AlertService(db).check_alert(alert)
+    expected = Decimal("120" if mode == "keyed" else "90")
+    assert result.current_value == expected
+    assert result.value_available is True
+    assert result.is_triggered is (mode == "keyed")
+    _assert_routing(feed)
+    if mode == "keyed":
+        chain_quote = await data_providers.get_quote_provider().get_quote(symbol)
+        assert chain_quote is not None
+        assert chain_quote.stale is True
+        assert chain_quote.source == "massive"
+        assert result.current_value == chain_quote.price
+
+
+async def test_alert_crossing_uses_chain_high_low(feed, db):
+    mode, symbol, *_ = feed
+    alert = await _alert_for(
+        db, symbol,
+        condition_type="crosses_above",
+        threshold_value=125.0,
+        was_above_threshold=False,
+    )
+    result = await AlertService(db).check_alert(alert)
+    if mode == "keyed":
+        assert result.current_value == Decimal("120")
+        assert result.intraday_high == Decimal("130")
+        assert result.intraday_low == Decimal("110")
+        assert result.is_triggered is True
+        assert "Intraday high" in result.condition_met
+    else:
+        assert result.current_value == Decimal("90")
+        assert result.is_triggered is False
+
+
+@pytest.mark.parametrize("feed", ["keyed"], indirect=True)
+async def test_alert_crossing_below_uses_massive_low(feed, db):
+    _, symbol, *_ = feed
+    alert = await _alert_for(
+        db, symbol,
+        condition_type="crosses_below",
+        threshold_value=115.0,
+        was_above_threshold=True,
+    )
+    result = await AlertService(db).check_alert(alert)
+    assert result.current_value == Decimal("120")
+    assert result.intraday_low == Decimal("110")
+    assert result.is_triggered is True
+    assert "Intraday low" in result.condition_met
+
+
+@pytest.mark.parametrize("feed", ["keyed"], indirect=True)
+async def test_alert_on_demand_history_backfill_stays_yahoo(feed, db):
+    _, symbol, quote, history, _, http_get = feed
+    alert = await _alert_for(
+        db, symbol,
+        condition_type="percent_up",
+        threshold_value=5.0,
+        comparison_period="1d",
+    )
+    result = await AlertService(db).check_alert(alert)
+    assert result.current_value == Decimal("120")
+    assert quote.await_count == 0
+    assert history.await_count == 1
+    urls = [str(c.args[0]) for c in http_get.await_args_list if c.args]
+    assert any("/snapshot/" in url for url in urls)
+    assert not any("/aggs/" in url for url in urls)
+
+
+async def test_alert_explicit_provider_injection_bypasses_factory(monkeypatch, db):
+    def unexpected_default():
+        raise AssertionError("explicit injection must bypass provider selection")
+
+    monkeypatch.setattr("app.services.alert.get_quote_provider", unexpected_default)
+    provider = AsyncMock()
+    provider.get_quote = AsyncMock(return_value=_quote("AAPL", Decimal("77")))
+    alert = await _alert_for(
+        db, "AAPL", condition_type="above", threshold_value=50.0
+    )
+    result = await AlertService(db, provider=provider).check_alert(alert)
+    assert result.current_value == Decimal("77")
+    assert result.is_triggered is True
+    assert provider.get_quote.await_count == 1
+
+
+async def test_keyed_alert_after_feed_teardown_does_not_reuse_keyless_chain(
+    monkeypatch, db
+):
+    alert = await _alert_for(
+        db, "AAPL", condition_type="above", threshold_value=100.0
+    )
+    keyless = _cache_keyless_chain()
+    inner = pytest.MonkeyPatch()
+    try:
+        with _feed_context("keyed", inner):
+            during = await AlertService(db).check_alert(alert)
+            assert during.current_value == Decimal("120")
+    finally:
+        inner.undo()
+
+    _, _, quote, _, _, http_get = _bind_offline_io(monkeypatch, "keyed")
+    result = await AlertService(db).check_alert(alert)
+    assert result.current_value == Decimal("120")
+    assert result.is_triggered is True
+    assert quote.await_count == 0
+    assert http_get.await_count >= 1
+    elected = data_providers.get_quote_provider()
+    assert elected is not keyless
+    assert elected.quote_primary is not None
+
+
+@pytest.mark.parametrize("feed", ["keyed"], indirect=True)
+async def test_keyed_massive_alert_payload_preserves_quote_provenance(feed, db):
+    """Evaluation must snapshot QuoteResponse source/stale/timestamp internally."""
+    alert = await _alert_for(
+        db, "AAPL", condition_type="above", threshold_value=100.0
+    )
+    was_triggered, error = await AlertService(db).process_alert(alert)
+    assert was_triggered is True and error is None
+    rows = (
+        await db.execute(
+            select(AlertDelivery).where(AlertDelivery.alert_id == alert.id)
+        )
+    ).scalars().all()
+    assert len(rows) == 1
+    payload = rows[0].payload
+    chain_quote = await data_providers.get_quote_provider().get_quote("AAPL")
+    assert chain_quote is not None
+    assert chain_quote.source == "massive"
+    assert chain_quote.stale is True
+    assert payload["source"] == "massive"
+    assert payload["stale"] is True
+    assert payload["observed_at"] == chain_quote.timestamp.isoformat()
+    assert Decimal(payload["current_value"]) == chain_quote.price
+
+
+@pytest.mark.parametrize("feed", ["keyed"], indirect=True)
+async def test_keyed_massive_crossing_is_not_labeled_now(feed, db):
+    alert = await _alert_for(
+        db, "AAPL",
+        condition_type="crosses_above",
+        threshold_value=100.0,
+        was_above_threshold=False,
+    )
+    result = await AlertService(db).check_alert(alert)
+    assert result.is_triggered is True
+    assert "(now " not in result.condition_met
+    assert "current:" not in result.condition_met.lower()
 
 
 def test_explicit_provider_injection_does_not_resolve_default(monkeypatch):

@@ -112,8 +112,8 @@ function AlertCard({
         ? `${toNumber(alert.threshold_value)}%`
         : formatValue(alert.threshold_value, isRatio);
 
-  // Current price from last check
-  const currentPrice = alert.last_checked_value !== null && alert.last_checked_value !== undefined
+  // Last-checked observation — not a live print (Massive is 15-min delayed).
+  const lastCheckedPrice = alert.last_checked_value !== null && alert.last_checked_value !== undefined
     ? formatValue(alert.last_checked_value, isRatio)
     : null;
 
@@ -203,11 +203,11 @@ function AlertCard({
               </span>
             )}
           </div>
-          {currentPrice && (
+          {lastCheckedPrice && (
             <div className="text-right shrink-0">
-              <p className="text-xs text-neutral-500">Current</p>
+              <p className="text-xs text-neutral-500">Last checked</p>
               <p className="text-sm font-bold text-neutral-900 dark:text-neutral-50">
-                {currentPrice}
+                {lastCheckedPrice}
               </p>
             </div>
           )}
@@ -327,7 +327,7 @@ function CheckResultModal({
 
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-neutral-50 dark:bg-neutral-700/50 rounded-lg p-3">
-              <p className="text-xs text-neutral-500 mb-1">Current Value</p>
+              <p className="text-xs text-neutral-500 mb-1">Observed Value</p>
               <p className="text-lg font-bold text-neutral-900 dark:text-neutral-50">
                 {isRatio
                   ? toNumber(result.current_value).toFixed(4)

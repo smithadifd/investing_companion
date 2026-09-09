@@ -139,7 +139,7 @@ class TestDeferredSend:
         mock_yahoo.get_quote = AsyncMock(return_value=_mock_quote(105.0))
 
         service = AlertService(db)
-        service.yahoo = mock_yahoo
+        service.provider = mock_yahoo
 
         was_triggered, error = await service.process_alert(alert)
 
@@ -174,7 +174,7 @@ class TestSustainedCounterLockstep:
         service = AlertService(db)
         mock_yahoo = AsyncMock()
         mock_yahoo.get_quote = AsyncMock(return_value=_mock_quote(95.0))  # below
-        service.yahoo = mock_yahoo
+        service.provider = mock_yahoo
 
         for prev in (0, 1, 2):
             alert.consecutive_met_count = prev
@@ -237,7 +237,7 @@ class TestIntradayWickReFire:
         )
         service = AlertService(db)
         mock_yahoo = AsyncMock()
-        service.yahoo = mock_yahoo
+        service.provider = mock_yahoo
 
         # Price above the threshold, session low wicked through it.
         assert await _drive(service, mock_yahoo, alert, 52.25, 53.10, 51.80) is True
@@ -269,7 +269,7 @@ class TestIntradayWickReFire:
         )
         service = AlertService(db)
         mock_yahoo = AsyncMock()
-        service.yahoo = mock_yahoo
+        service.provider = mock_yahoo
 
         assert await _drive(service, mock_yahoo, alert, 49.50, 50.40, 49.00) is True
         assert alert.was_above_threshold is True, (
@@ -298,7 +298,7 @@ class TestIntradayWickReFire:
         )
         service = AlertService(db)
         mock_yahoo = AsyncMock()
-        service.yahoo = mock_yahoo
+        service.provider = mock_yahoo
 
         # Fire on the wick.
         assert await _drive(service, mock_yahoo, alert, 52.25, 53.10, 51.80) is True
@@ -388,7 +388,7 @@ class TestIntradayWickReFire:
         )
         service = AlertService(db)
         mock_yahoo = AsyncMock()
-        service.yahoo = mock_yahoo
+        service.provider = mock_yahoo
 
         assert await _drive(service, mock_yahoo, alert, 52.50, 53.00, 49.00) is False, (
             "the baseline check must not fire"
@@ -418,7 +418,7 @@ class TestIntradayWickReFire:
         )
         service = AlertService(db)
         mock_yahoo = AsyncMock()
-        service.yahoo = mock_yahoo
+        service.provider = mock_yahoo
 
         assert await _drive(service, mock_yahoo, alert, 49.50, 55.00, 49.00) is False
         assert alert.was_above_threshold is False, (
@@ -457,7 +457,7 @@ class TestLatchInvalidatedOnConfigChange:
         service = AlertService(db)
         mock_yahoo = AsyncMock()
         mock_yahoo.get_quote = AsyncMock(return_value=_mock_quote(49.80, high=50.0, low=49.5))
-        service.yahoo = mock_yahoo
+        service.provider = mock_yahoo
 
         # Baseline, then a check that latches "above 41".
         await service.process_alert(alert)
@@ -507,7 +507,7 @@ class TestLatchInvalidatedOnConfigChange:
         # The sustained evaluator ignores that; the latch does not, so it
         # accrues "below" while price is in fact above.
         mock_yahoo.get_quote = AsyncMock(return_value=_mock_quote(52.50, high=53.0, low=51.0))
-        service.yahoo = mock_yahoo
+        service.provider = mock_yahoo
 
         await service.process_alert(alert)
         await service.process_alert(alert)
@@ -557,7 +557,7 @@ class TestLatchInvalidatedOnConfigChange:
         service = AlertService(db)
         mock_yahoo = AsyncMock()
         mock_yahoo.get_quote = AsyncMock(return_value=_mock_quote(54.0, high=54.5, low=53.5))
-        service.yahoo = mock_yahoo
+        service.provider = mock_yahoo
 
         await service.process_alert(alert)
         await service.process_alert(alert)

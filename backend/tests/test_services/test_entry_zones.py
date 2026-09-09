@@ -87,7 +87,7 @@ def _zone_service(db, price: float | None) -> AlertService:
     mock_yahoo.get_quote = AsyncMock(
         return_value=_quote(price) if price is not None else None
     )
-    service.yahoo = mock_yahoo
+    service.provider = mock_yahoo
     return service
 
 

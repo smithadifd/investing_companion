@@ -1,4 +1,7 @@
 #!/bin/bash
+# RETIRED: Synology is no longer prod. Prod deploys go through
+# scripts/deploy-recomputer.sh (host: recomputer). Kept as historical
+# reference; do not run this against a live host.
 # Deploy to Synology NAS
 # Runs build tests, pushes to GitHub, then pulls and rebuilds on Synology
 

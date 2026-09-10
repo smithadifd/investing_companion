@@ -64,7 +64,7 @@ anthropic>=0.116.0
 # Utilities
 # ===========================================
 tenacity>=9.1.4  # Retry logic
-pytz>=2024.1
+pytz>=2026.3.post1
 
 # ===========================================
 # Development & Testing

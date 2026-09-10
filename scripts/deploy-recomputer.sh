@@ -43,7 +43,41 @@ for arg in "$@"; do
     esac
 done
 
+# F2 hardening: branch names are attacker-controlled input that crosses the
+# ssh boundary as part of a string the remote shell parses (remote() /
+# remote_compose() below). `git check-ref-format --branch` accepts branch
+# names containing shell metacharacters (e.g. `main;touch${IFS}/tmp/pwn` is a
+# valid ref), so this is defense against real command injection, not style:
+#
+#   1. Allowlist (validate_branch): refuse anything outside a conservative
+#      safe-branch-name shape before it is used anywhere.
+#   2. Quote-on-cross (q): shell-quote (printf %q) every value this script
+#      interpolates into a string handed to a remote shell — CURRENT_BRANCH,
+#      PREV, DEPLOY_PATH, COMPOSE_FILE, COMPOSE_OVERRIDE, ENV_FILE, HEALTH_URL,
+#      and each remote_compose argument — even the ones that are script
+#      constants today, so this isn't a trap for the next editor who makes
+#      one of those a variable.
+BRANCH_ALLOWLIST_RE='^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?(/[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?)*$'
+
+validate_branch() {
+    local branch="$1"
+    if [[ ! "$branch" =~ $BRANCH_ALLOWLIST_RE ]]; then
+        echo "✗ Refusing to deploy: branch name fails the safety allowlist." >&2
+        echo "  Got: $branch" >&2
+        echo "  Allowed: letters, digits, '.', '_', '-', and '/' as a path separator (no leading/trailing separator, no shell metacharacters)." >&2
+        exit 1
+    fi
+}
+
+q() {
+    # Shell-quote $1 (printf %q) so it can be embedded literally in a command
+    # string that crosses the ssh boundary: injected `;`, `$`, backticks, etc.
+    # become inert literal text instead of being parsed by the remote shell.
+    printf '%q' "$1"
+}
+
 CURRENT_BRANCH=$(git branch --show-current)
+validate_branch "$CURRENT_BRANCH"
 
 compose_cmd() {
     echo "docker compose -f $COMPOSE_FILE -f $COMPOSE_OVERRIDE --env-file $ENV_FILE $*"
@@ -57,16 +91,16 @@ print_plan() {
     echo "Branch:        $CURRENT_BRANCH"
     echo "Compose:       $(compose_cmd '<subcommand>')"
     echo "Health poll:   $HEALTH_URL"
-    echo "Rollback:      last-known-good commit = remote HEAD captured before pull"
+    echo "Rollback:      last-known-good commit = remote HEAD captured before pull; rollback rebuilds (--build) from that SHA"
     echo ""
     echo "Plan:"
     echo "  1. Capture rollback target (git rev-parse HEAD on $REMOTE_HOST:$DEPLOY_PATH)"
-    echo "  2. git pull origin $CURRENT_BRANCH in $DEPLOY_PATH"
+    echo "  2. git pull origin $CURRENT_BRANCH in $DEPLOY_PATH (branch allowlisted + shell-quoted before crossing ssh)"
     echo "  3. $(compose_cmd pull)"
-    echo "  4. $(compose_cmd up -d)"
+    echo "  4. $(compose_cmd up -d --build)  (rebuilds the four build-only services: api, celery_worker, celery_beat, frontend)"
     echo "  5. alembic upgrade head + current-vs-heads check ($API_SERVICE)"
     echo "  6. Poll /health until healthy ($HEALTH_ATTEMPTS attempts, ${HEALTH_SLEEP}s apart)"
-    echo "  7. On failure: git reset --hard <last-known-good> && $(compose_cmd up -d)"
+    echo "  7. On failure: git reset --hard <last-known-good> && $(compose_cmd up -d --build)  (rebuild, not just restart old images; does NOT reverse Alembic DDL — inspect schema by hand)"
     echo ""
     echo "Dry-run complete. No ssh invoked, no host reached."
 }
@@ -96,11 +130,15 @@ if ! git diff-index --quiet HEAD --; then
 fi
 
 remote() {
-    ssh "$REMOTE_HOST" "cd $DEPLOY_PATH && $*"
+    ssh "$REMOTE_HOST" "cd $(q "$DEPLOY_PATH") && $1"
 }
 
 remote_compose() {
-    ssh "$REMOTE_HOST" "cd $DEPLOY_PATH && docker compose -f $COMPOSE_FILE -f $COMPOSE_OVERRIDE --env-file $ENV_FILE $*"
+    local quoted="" arg
+    for arg in "$@"; do
+        quoted="$quoted $(q "$arg")"
+    done
+    ssh "$REMOTE_HOST" "cd $(q "$DEPLOY_PATH") && docker compose -f $(q "$COMPOSE_FILE") -f $(q "$COMPOSE_OVERRIDE") --env-file $(q "$ENV_FILE")$quoted"
 }
 
 rollback() {
@@ -110,22 +148,24 @@ rollback() {
     echo "✗ DEPLOY FAILED: $reason"
     echo "  Rolling back to last-known-good $PREV"
     echo "=========================================="
-    if ! remote "git reset --hard $PREV"; then
+    if ! remote "git reset --hard $(q "$PREV")"; then
         echo "✗ Rollback git reset failed. Box may be in a mixed state — inspect by hand."
         exit 1
     fi
-    if ! remote_compose up -d; then
-        echo "✗ Rollback compose up failed. Box may be in a mixed state — inspect by hand."
+    if ! remote_compose up -d --build; then
+        echo "✗ Rollback compose up --build failed. Box may be in a mixed state — inspect by hand."
         exit 1
     fi
-    echo "  ✓ Rolled back to $PREV"
-    echo "  Code rollback does not reverse Alembic DDL. If step 5 ran, inspect schema by hand."
+    echo "  ✓ Rolled back to $PREV (rebuilt images from that SHA)"
+    echo "  Rollback restores CODE and IMAGES ONLY — it does NOT reverse Alembic DDL."
+    echo "  If step 5 ran, the schema may still be at the new head. Inspect it by hand:"
+    echo "    ssh $REMOTE_HOST 'cd $DEPLOY_PATH && $(compose_cmd exec -T "$API_SERVICE" python -m alembic current)'"
     exit 1
 }
 
 # 1. Capture last-known-good commit BEFORE changing the box.
 echo "Step 1/6: Capturing last-known-good commit on $REMOTE_HOST..."
-PREV=$(ssh "$REMOTE_HOST" "cd $DEPLOY_PATH && git rev-parse HEAD")
+PREV=$(remote "git rev-parse HEAD")
 if [ -z "$PREV" ]; then
     echo "✗ Could not read remote HEAD — refusing to deploy (cannot roll back what we cannot pin)."
     exit 1
@@ -135,7 +175,7 @@ echo ""
 
 # 2. Pull on reComputer
 echo "Step 2/6: Pulling on reComputer..."
-if ! remote "git pull origin $CURRENT_BRANCH"; then
+if ! remote "git pull origin $(q "$CURRENT_BRANCH")"; then
     rollback "git pull origin $CURRENT_BRANCH failed on $REMOTE_HOST"
 fi
 echo "  ✓ Pulled latest code"
@@ -149,12 +189,14 @@ fi
 echo "  ✓ Images pulled"
 echo ""
 
-# 4. compose up
-echo "Step 4/6: docker compose up -d..."
-if ! remote_compose up -d; then
-    rollback "docker compose up -d failed on $REMOTE_HOST"
+# 4. compose up --build (rebuilds the four build-only services: api,
+#    celery_worker, celery_beat, frontend — see F1: without --build the old
+#    images kept running and a "successful" deploy shipped nothing new).
+echo "Step 4/6: docker compose up -d --build..."
+if ! remote_compose up -d --build; then
+    rollback "docker compose up -d --build failed on $REMOTE_HOST"
 fi
-echo "  ✓ Containers up"
+echo "  ✓ Containers rebuilt and up"
 echo ""
 
 # 5. Run Alembic migrations, then verify the schema actually landed at head.
@@ -186,7 +228,7 @@ echo ""
 echo "Step 6/6: Polling /health at $HEALTH_URL..."
 HEALTHY=0
 for i in $(seq 1 "$HEALTH_ATTEMPTS"); do
-    if ssh "$REMOTE_HOST" "curl -sf --max-time 5 $HEALTH_URL" >/dev/null; then
+    if ssh "$REMOTE_HOST" "curl -sf --max-time 5 $(q "$HEALTH_URL")" >/dev/null; then
         HEALTHY=1
         echo "  ✓ /health passed on attempt $i"
         break

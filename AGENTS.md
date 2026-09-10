@@ -11,7 +11,7 @@ watchlists, fundamental/ratio analysis, market overviews, AI-powered insights, p
 trade tracking, and an earnings/macro calendar. Data is pulled by scheduled Celery tasks and stored in
 TimescaleDB; the frontend reads only from the API, never from external sources directly.
 
-- **Deployment posture**: single-user, self-hosted via Docker Compose. Andrew's prod is a Synology NAS
+- **Deployment posture**: single-user, self-hosted via Docker Compose. Andrew's prod is reComputer
   behind Caddy; a separate public **demo** runs on EC2 at `invest.smithadifd.com`.
 - **Non-goals**: multi-tenant SaaS; a brokerage/order-execution system (the Schwab integration is
   read-only — it ingests transactions/positions and places no orders); storing anyone else's
@@ -87,7 +87,7 @@ frontend/src/
 docker/               Dockerfile.{backend,frontend}[.prod]
 docs/                 architecture, api contracts, advisor-starter-kit, ROADMAP, issues/ (sessions/ & plans/ gitignored)
 docs-site/            standalone docs site (own CI, path-ignored by main CI)
-scripts/              deploy-synology.sh, deploy-demo.sh, backup.sh, restore.sh, test-build.sh
+scripts/              deploy-recomputer.sh (prod), deploy-synology.sh (retired), deploy-demo.sh, backup.sh, restore.sh, test-build.sh
 ```
 
 ## Architecture in brief

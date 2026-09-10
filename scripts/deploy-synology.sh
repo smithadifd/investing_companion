@@ -7,6 +7,21 @@
 
 set -e
 
+# F4: refuse to run. Synology is no longer prod (reComputer is; see
+# scripts/deploy-recomputer.sh) and its IC containers have been Exited since
+# ~2026-08-25. A stale instruction or a tab-completion slip running this
+# script would deploy to a dead host and migrate its live database. This
+# guard fires before anything else — before the build tests, before the git
+# push, before any ssh — so a bare invocation cannot reach the network.
+if [ "${ALLOW_SYNOLOGY_DEPLOY:-0}" != "1" ]; then
+    echo "✗ RETIRED: deploy-synology.sh is retired. Synology is no longer prod." >&2
+    echo "  Prod deploys go through scripts/deploy-recomputer.sh (host: recomputer)." >&2
+    echo "  Synology's IC containers have been Exited since ~2026-08-25 — this would" >&2
+    echo "  deploy to a dead host and migrate its live database." >&2
+    echo "  To run this anyway (rare, deliberate), set ALLOW_SYNOLOGY_DEPLOY=1." >&2
+    exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 

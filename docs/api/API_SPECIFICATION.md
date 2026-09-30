@@ -214,6 +214,30 @@ Response:
 |--------|----------|-------------|
 | POST | `/import/watchlist` | Import watchlist from file |
 | GET | `/export/watchlist/{id}` | Export watchlist |
+| GET | `/export/contract-docs` | The advisor contract docs (`handoff-schema.md`, `advisor-actions.md`) as deployed |
+
+**GET /export/contract-docs**
+
+Returns both advisor contract docs from the running app, so a client always
+gets the docs that match the deployed context pack (`GET /export/context-pack`).
+Same auth as the pack: a login session, or an API token with `pack:read`.
+```json
+{
+  "schema_version": "1.7",
+  "advisor_actions_version": "1.4",
+  "handoff_schema": {
+    "filename": "handoff-schema.md",
+    "stamp": "1.7",
+    "expected_stamp": "1.7",
+    "stamp_matches": true,
+    "content": "# Handoff Loop Schema (v1.7) ..."
+  },
+  "advisor_actions": { "filename": "advisor-actions.md", "...": "..." }
+}
+```
+`stamp` is parsed from the doc itself; `stamp_matches` is false (and the doc is
+still served) if it differs from the pack's version constant. Answers 503 if a
+doc is not available on the deployment.
 
 **POST /import/watchlist**
 ```

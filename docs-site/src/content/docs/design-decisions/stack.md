@@ -70,4 +70,4 @@ Docker Compose was picked because:
 
 Kubernetes would be overkill for one machine in a home rack. Bare-metal systemd units would work but would mean hand-managing process supervision, log rotation, and dependency ordering that Compose already handles.
 
-The host was chosen because it's already running, already on a UPS, and already backed up. The tradeoff is limited horizontal scaling — but that's not a real constraint for a single-user app.
+The tradeoff is limited horizontal scaling — but that's not a real constraint for a single-user app.

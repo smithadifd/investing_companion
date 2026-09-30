@@ -312,7 +312,7 @@ cd /volume3/docker/investing_companion
 
 #### Maintainer Deploy Script
 
-The maintainer's production deploy is `scripts/deploy-recomputer.sh`. It pulls and rebuilds over SSH on a small Linux Docker host, runs migrations, polls `/health`, and prints a rollback target. Run it with `--dry-run` to see the plan without touching any host. It is host-specific; copy and adapt it for your own environment.
+The maintainer's production deploy is `scripts/deploy-recomputer.sh`. It pulls and rebuilds over SSH on a small Linux Docker host, runs migrations, polls `/health`. If a step fails it rolls back automatically by resetting the checkout to the previous commit and rebuilding; it does not reverse Alembic migrations, so check the schema by hand after a rollback. Run it with `--dry-run` to see the plan without touching any host. It is host-specific; copy and adapt it for your own environment.
 
 `scripts/deploy-synology.sh` is the retired equivalent for a Synology NAS and is kept only for reference.
 

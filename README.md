@@ -105,7 +105,7 @@ Data flows through Celery background tasks that pull from Yahoo Finance on a sch
 
 Beyond the in-app AI analysis, you can stand up an external **investing advisor** -- a Claude
 project tuned to your portfolio that reads a live context pack from this app and proposes
-changes back through a handoff loop. The [**Advisor Starter Kit**](docs/advisor-starter-kit/)
+changes back through a handoff loop. The [**Advisor Starter Kit**](https://github.com/smithadifd/investing-hub/tree/main/docs/onboarding)
 is a fill-in-the-blanks scaffold for exactly that.
 
 > **In plain English:** the app exports a snapshot of your holdings, watchlists, and ratios;
@@ -114,7 +114,7 @@ is a fill-in-the-blanks scaffold for exactly that.
 > alerts; you review it and the app applies the changes. The exact shape of that exchange is
 > the [handoff schema](docs/api/handoff-schema.md).
 
-Open the kit in Claude Code and say *"Walk me through `docs/advisor-starter-kit/ONBOARDING.md`"* --
+Clone [investing-hub](https://github.com/smithadifd/investing-hub), open the kit in Claude Code, and say *"Walk me through [`docs/onboarding/ONBOARDING.md`](https://github.com/smithadifd/investing-hub/blob/main/docs/onboarding/ONBOARDING.md)"* --
 it interviews you and fills the templates. The optional app-integration layer wires the advisor
 to this app's read/write contract ([`docs/api/handoff-schema.md`](docs/api/handoff-schema.md) and
 [`docs/api/advisor-actions.md`](docs/api/advisor-actions.md)).

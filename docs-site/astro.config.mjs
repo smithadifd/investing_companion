@@ -49,7 +49,7 @@ export default defineConfig({
 					items: [
 						{ label: 'Quick start (Docker)', slug: 'running/quick-start' },
 						{ label: 'Configuration reference', slug: 'running/configuration' },
-						{ label: 'Synology NAS deployment', slug: 'running/synology' },
+						{ label: 'Synology NAS (optional)', slug: 'running/synology' },
 						{ label: 'Backup & restore', slug: 'running/backup' },
 						{ label: 'Security hardening', slug: 'running/security' },
 					],

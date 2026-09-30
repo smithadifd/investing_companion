@@ -75,7 +75,7 @@ DOMAIN=yourapp.example.com
 
 HTTP traffic on port 80 redirects to HTTPS. The API and frontend containers have no public ports of their own — all traffic enters through Traefik.
 
-**LAN/NAS deployment (`docker-compose.local.yml`)** — this file expects an external reverse proxy (Caddy on the [Synology setup](/running/synology/)) to handle TLS. The compose file does not include Traefik, so you are responsible for terminating TLS before traffic reaches the app. The application itself sets `Strict-Transport-Security: max-age=31536000; includeSubDomains` on all responses when `ENVIRONMENT=production`, so your proxy must be terminating HTTPS for that header to be meaningful.
+**External-proxy deployment (`docker-compose.local.yml`)** — this file expects an external reverse proxy (for example Caddy; see the optional [Synology guide](/running/synology/) for a worked setup) to handle TLS. The compose file does not include Traefik, so you are responsible for terminating TLS before traffic reaches the app. The application itself sets `Strict-Transport-Security: max-age=31536000; includeSubDomains` on all responses when `ENVIRONMENT=production`, so your proxy must be terminating HTTPS for that header to be meaningful.
 
 In both cases, the `/api/v1/docs` and `/api/v1/redoc` endpoints are disabled when `ENVIRONMENT=production`. The API docs are only available in development.
 

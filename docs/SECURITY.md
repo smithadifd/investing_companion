@@ -134,7 +134,7 @@ All responses include:
 
 ### Firewall Configuration
 
-For Synology (Security Advisor):
+For a home server or NAS firewall (on Synology: Security Advisor):
 ```
 Allow: TCP 80 from any (Let's Encrypt + redirect)
 Allow: TCP 443 from any (HTTPS)

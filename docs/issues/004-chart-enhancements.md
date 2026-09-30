@@ -1,6 +1,6 @@
 # Issue 004: Chart Timeframe and Type Enhancements
 
-**Status:** Open
+**Status:** Resolved
 **Created:** 2026-02-04
 **Priority:** Medium
 **Affects:** Equity detail page charts

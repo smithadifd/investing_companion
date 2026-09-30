@@ -14,6 +14,7 @@ This document covers security considerations and best practices for deploying In
 - **JWT Access Tokens**: 30-minute expiry, HS256 signing
 - **Refresh Tokens**: 30-day expiry, SHA-256 hashed storage
 - **Session Tracking**: IP address and user agent logged
+- **Read-only API Tokens**: long-lived, scoped, SHA-256 hashed storage, revocable; limited to the context-pack reads (see [Read-only API Tokens](#read-only-api-tokens))
 
 ### Rate Limiting
 
@@ -193,6 +194,55 @@ class UserCreate(BaseModel):
 - Sessions tracked by IP and user agent
 - Users can view and revoke sessions in settings
 - "Logout all" option available
+
+### Read-only API Tokens
+
+A script or external tool that only needs to *read* the context pack can use a
+long-lived API token instead of a login session.
+
+**What a token can reach.** Exactly two endpoints, and only with the
+`pack:read` scope:
+
+- `GET /api/v1/export/context-pack` (JSON, or `?format=markdown`)
+- `GET /api/v1/export/outbox-status`
+
+Every other endpoint - every write, every other read, `/health`, `/docs`, the
+auth endpoints, and any endpoint added later - answers **403** to an API token.
+The allow-list lives in one place, `backend/app/core/api_token_access.py`
+(`API_TOKEN_ROUTE_ALLOWLIST`); opening another read to tokens is one line
+there. Unknown, revoked or expired tokens answer **401**. Normal login (JWT)
+sessions are unaffected.
+
+**Mint a token** (from `backend/`; scope defaults to `pack:read`):
+
+```bash
+python -m scripts.mint_api_token mint --user you@example.com --name "advisor pull"
+# optional: --expires-days 90
+```
+
+The token (`ict_<prefix>_<secret>`) is printed **once**, alone, on stdout; the
+token's id and prefix go to stderr. Store it immediately - only a SHA-256 hash
+is kept, so it cannot be shown again. Tokens are not derived from
+`SECRET_KEY`: rotating that key neither invalidates nor forges them.
+
+**Use it:**
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  https://<your-host>/api/v1/export/context-pack?format=markdown
+```
+
+**List and revoke:**
+
+```bash
+python -m scripts.mint_api_token list --user you@example.com   # id, prefix, state, last used
+python -m scripts.mint_api_token revoke <id-or-prefix>
+```
+
+Each token records `created_at`, `last_used_at` and `revoked_at`, and
+authentication, refusals and revocations are logged by token id and prefix
+(never the token itself). If a token may have leaked, revoke it and mint a new
+one.
 
 ### Rate Limiting Details
 

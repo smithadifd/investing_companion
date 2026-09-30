@@ -5,6 +5,7 @@ Main FastAPI application entry point
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.core.api_token_access import ApiTokenRouteGuardMiddleware
 from app.core.config import settings as app_settings
 from app.core.dependencies import require_auth_for_detailed_health
 from app.core.middleware import SecurityHeadersMiddleware
@@ -16,6 +17,11 @@ app = FastAPI(
     docs_url="/docs" if app_settings.ENVIRONMENT != "production" else None,
     redoc_url="/redoc" if app_settings.ENVIRONMENT != "production" else None,
 )
+
+# API-token route guard (innermost): an API token reaches only the allow-listed
+# routes in app/core/api_token_access.py; everything else is 403. Added first
+# so its refusals still pass through the security-headers and CORS layers.
+app.add_middleware(ApiTokenRouteGuardMiddleware)
 
 # Security headers middleware (outermost - runs first on response)
 app.add_middleware(SecurityHeadersMiddleware)

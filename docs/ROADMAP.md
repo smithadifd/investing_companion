@@ -345,6 +345,7 @@ alert_history
 - [x] JWT-based auth with refresh tokens
 - [x] Password hashing (argon2)
 - [x] User settings encryption
+- [x] Read-only API tokens for context-pack reads (hashed, scoped `pack:read`, revocable; see `docs/SECURITY.md`)
 - [ ] API key rotation for external services (future)
 - [ ] Rate limiting per user (future)
 - [ ] Audit logging (future)

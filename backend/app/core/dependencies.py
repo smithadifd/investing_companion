@@ -2,14 +2,22 @@
 
 import ipaddress
 import logging
+from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.api_token_access import (
+    API_TOKEN_ROUTE_DENIED_DETAIL,
+    is_api_token,
+    required_scope,
+)
 from app.core.config import settings
+from app.db.models.api_token import ApiToken
 from app.db.models.user import User
 from app.db.session import get_db
+from app.services.api_token import ApiTokenService
 from app.services.auth import AuthService
 
 logger = logging.getLogger(__name__)
@@ -18,13 +26,86 @@ logger = logging.getLogger(__name__)
 security = HTTPBearer(auto_error=False)
 
 
-async def get_current_user(
+@dataclass(frozen=True)
+class Principal:
+    """Who is making the request: a user, optionally acting via an API token."""
+
+    user: User
+    api_token: ApiToken | None = None
+
+    @property
+    def is_api_token(self) -> bool:
+        return self.api_token is not None
+
+
+def _reject_api_token_route(request: Request) -> str:
+    """403 unless (method, path) is allow-listed for API tokens; return its scope."""
+    scope = required_scope(request.method, request.scope["path"])
+    if scope is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=API_TOKEN_ROUTE_DENIED_DETAIL,
+        )
+    return scope
+
+
+async def _principal_from_api_token(
+    request: Request, token: str, db: AsyncSession
+) -> Principal:
+    needed_scope = _reject_api_token_route(request)
+
+    api_token = await ApiTokenService(db).authenticate(token)
+    if api_token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = await AuthService(db).get_user_by_id(api_token.user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is disabled",
+        )
+
+    if needed_scope not in (api_token.scopes or []):
+        logger.warning(
+            "API token id=%s prefix=%s lacks scope %s for %s %s",
+            api_token.id, api_token.token_prefix, needed_scope,
+            request.method, request.scope["path"],
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="API token lacks the required scope",
+        )
+
+    logger.info(
+        "API token authenticated id=%s prefix=%s user_id=%s route=%s %s",
+        api_token.id, api_token.token_prefix, user.id,
+        request.method, request.scope["path"],
+    )
+    return Principal(user=user, api_token=api_token)
+
+
+async def get_current_principal(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
-) -> User:
-    """Get the current authenticated user from JWT token.
+) -> Principal:
+    """Authenticate the request by JWT access token OR API token.
 
-    Raises HTTPException 401 if not authenticated.
+    A JWT (the normal login session) behaves exactly as before. An API token
+    (``ict_...``) is honoured only on routes in
+    ``app.core.api_token_access.API_TOKEN_ROUTE_ALLOWLIST`` and only with the
+    scope that entry requires; anything else is 403. Unknown, revoked or
+    expired API tokens are 401.
     """
     if not credentials:
         raise HTTPException(
@@ -32,6 +113,9 @@ async def get_current_user(
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    if is_api_token(credentials.credentials):
+        return await _principal_from_api_token(request, credentials.credentials, db)
 
     auth_service = AuthService(db)
     user_id = auth_service.decode_access_token(credentials.credentials)
@@ -58,7 +142,17 @@ async def get_current_user(
             detail="User account is disabled",
         )
 
-    return user
+    return Principal(user=user)
+
+
+async def get_current_user(
+    principal: Principal = Depends(get_current_principal),
+) -> User:
+    """Get the current authenticated user (JWT, or an allow-listed API token).
+
+    Raises HTTPException 401 if not authenticated.
+    """
+    return principal.user
 
 
 async def get_current_user_optional(

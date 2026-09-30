@@ -1,6 +1,6 @@
-# Backup & Restore Procedures
+# Backup & Restore Procedures (Synology NAS, optional)
 
-This document covers backup and disaster recovery for Investing Companion.
+This document covers backup and disaster recovery for a Synology NAS self-host. The commands assume the NAS layout from [SYNOLOGY.md](./SYNOLOGY.md) and an SSH alias for the NAS. On any other Docker host, use the generic [backup guide](../BACKUP.md): `scripts/backup.sh` plus your OS scheduler.
 
 ---
 
@@ -265,5 +265,5 @@ If using Synology Cloud Sync:
 
 ## Related Documentation
 
-- [Synology Deployment Guide](./SYNOLOGY.md)
+- [Self-hosting on a Synology NAS (optional)](./SYNOLOGY.md)
 - [Architecture Overview](../architecture/OVERVIEW.md)

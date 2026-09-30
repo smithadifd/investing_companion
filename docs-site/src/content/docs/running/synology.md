@@ -1,7 +1,9 @@
 ---
-title: Synology NAS deployment
-description: Deploy Investing Companion on a Synology NAS behind an external reverse proxy using docker-compose.local.yml.
+title: Self-hosting on a Synology NAS (optional)
+description: Optional guide to deploying Investing Companion on a Synology NAS behind an external reverse proxy using docker-compose.local.yml.
 ---
+
+This is an optional guide. Investing Companion runs on any Docker host behind a reverse proxy, and the generic path is in [Quick start](/running/quick-start/). The maintainer's own production deploy uses `scripts/deploy-recomputer.sh` on a small Linux Docker host; `scripts/deploy-synology.sh` is retired and kept for reference.
 
 This page covers the NAS-specific path: using `docker-compose.local.yml` to run Investing Companion on a Synology NAS behind an external reverse proxy (Caddy, Nginx, or similar running on a separate machine). If you want the self-contained stack with Traefik and Let's Encrypt built in, see [Quick start](/running/quick-start/) instead.
 
@@ -110,13 +112,7 @@ docker-compose -f docker-compose.local.yml --env-file .env.production up -d api
 
 ## Upgrading
 
-From your local machine, run the deploy script if you have it set up:
-
-```bash
-./scripts/deploy-synology.sh
-```
-
-That script runs a local build test, pushes to GitHub, pulls on the NAS, and rebuilds. For a manual upgrade:
+The retired `scripts/deploy-synology.sh` automated this flow (local build test, push, pull on the NAS, rebuild); it is kept for reference only. For a manual upgrade:
 
 ```bash
 # On the NAS

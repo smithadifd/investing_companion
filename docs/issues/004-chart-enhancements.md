@@ -1,9 +1,11 @@
 # Issue 004: Chart Timeframe and Type Enhancements
 
-**Status:** Open
+**Status:** Partially Resolved
 **Created:** 2026-02-04
 **Priority:** Medium
 **Affects:** Equity detail page charts
+
+**Resolution note:** The candlestick/line toggle and the 1m/5m/15m/30m/1h/1d interval selector shipped in `ChartControls.tsx`; the 4h, 1W and 1M intervals remain unimplemented.
 
 ## Summary
 

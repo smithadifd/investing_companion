@@ -57,9 +57,9 @@ An in-process scheduler would have been simpler but would tie background work to
 
 Lighter task runners (RQ, Dramatiq, Arq) aren't mentioned in the source docs, so they aren't compared here.
 
-## Docker Compose on a NAS
+## Docker Compose on a single host
 
-This is a single-developer, single-household deployment. Target: a Synology NAS. The requirement is "runs, restarts, backs up," not "survives a regional outage."
+This is a single-developer, single-household deployment. Target: one small Docker host (the original deployment was a home NAS; production now runs on a small Linux Docker host). The requirement is "runs, restarts, backs up," not "survives a regional outage."
 
 Docker Compose was picked because:
 
@@ -70,4 +70,4 @@ Docker Compose was picked because:
 
 Kubernetes would be overkill for one machine in a home rack. Bare-metal systemd units would work but would mean hand-managing process supervision, log rotation, and dependency ordering that Compose already handles.
 
-The NAS itself was chosen because it's already running, already on a UPS, and already backed up. The tradeoff is limited horizontal scaling — but that's not a real constraint for a single-user app.
+The tradeoff is limited horizontal scaling — but that's not a real constraint for a single-user app.

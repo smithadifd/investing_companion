@@ -5,7 +5,7 @@ description: How to back up the Investing Companion Postgres database, verify th
 
 Investing Companion stores everything that matters in Postgres: user accounts, watchlists, trades, alerts, custom ratios, and economic events. Redis holds only ephemeral cache data — price lookups, AI response cache — and is not worth backing up. If Redis is empty after a restart, it refills itself.
 
-There is no automated backup task in the app itself. Celery Beat handles alert checks and event refresh, but backup is left to the OS scheduler. Run `scripts/backup.sh` on a cron or via Synology Task Scheduler.
+There is no automated backup task in the app itself. Celery Beat handles alert checks and event refresh, but backup is left to the OS scheduler. Run `scripts/backup.sh` from cron (or your host's scheduler; Synology Task Scheduler is covered below as an optional path).
 
 ## What the backup contains
 
@@ -35,7 +35,7 @@ Output files are named `investing_companion_YYYYMMDD_HHMMSS.sql.gz`.
 
 ## Schedule automated backups
 
-### Synology Task Scheduler
+### Synology Task Scheduler (optional)
 
 1. Open **Control Panel → Task Scheduler**.
 2. Create → Scheduled Task → User-defined script.
@@ -47,7 +47,7 @@ cd /volume1/docker/investing_companion && ./scripts/backup.sh /volume1/backups/i
 
 4. Schedule daily, 2 AM is a reasonable default.
 
-See [Synology deployment](/running/synology/) for notes on the Docker path and `PATH` export requirements on the NAS.
+See [Self-hosting on a Synology NAS](/running/synology/) for notes on the Docker path and `PATH` export requirements on the NAS.
 
 ### Cron (SSH)
 
@@ -163,4 +163,4 @@ docker logs -f investing_db
 
 ## Off-site copies
 
-Local backups on the NAS do not protect against NAS failure. Use Synology Hyper Backup to replicate `/volume1/backups/investing` to a cloud destination or remote NAS after each local backup completes. Alternatively, `rsync` or `rclone` work fine over SSH or S3-compatible targets.
+Local backups on the host do not protect against host failure. Copy them off-machine after each run. On a Synology NAS, Hyper Backup can replicate `/volume1/backups/investing` to a cloud destination or remote NAS. On any host, `rsync` or `rclone` work fine over SSH or S3-compatible targets.

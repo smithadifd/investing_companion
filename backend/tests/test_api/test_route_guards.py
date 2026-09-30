@@ -110,3 +110,348 @@ def test_event_refresh_routes_are_guarded():
     }
     assert "POST /api/v1/events/refresh/{symbol}" in guarded
     assert "POST /api/v1/events/refresh/watchlist" in guarded
+
+
+# ---------------------------------------------------------------------------
+# API-token route guard: deny by default, two allow-listed reads.
+# ---------------------------------------------------------------------------
+
+import logging  # noqa: E402
+import re  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+from fastapi import Depends, FastAPI  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy import select  # noqa: E402
+from starlette.routing import Route  # noqa: E402
+from starlette.testclient import TestClient  # noqa: E402
+from starlette.websockets import WebSocket, WebSocketDisconnect  # noqa: E402
+
+from app.core.api_token_access import (  # noqa: E402
+    API_TOKEN_ROUTE_ALLOWLIST,
+    API_TOKEN_ROUTE_DENIED_DETAIL,
+    SCOPE_PACK_READ,
+    ApiTokenRouteGuardMiddleware,
+)
+from app.core.dependencies import get_current_principal, get_current_user  # noqa: E402
+from app.db.models.api_token import ApiToken  # noqa: E402
+from app.db.session import get_db  # noqa: E402
+from app.services.api_token import (  # noqa: E402
+    ApiTokenService,
+    generate_api_token,
+    hash_api_token,
+    parse_api_token_prefix,
+)
+from tests.factories import create_test_user  # noqa: E402
+
+ALLOWED = {
+    ("GET", "/api/v1/export/context-pack"),
+    ("GET", "/api/v1/export/outbox-status"),
+}
+
+
+def _iter_all_routes(app_):
+    """Yield (method, path) for every HTTP route the app serves.
+
+    Unlike ``_iter_api_routes`` this includes plain Starlette routes too
+    (``/docs``, ``/openapi.json``, ...): an API token must be refused there as
+    well, not just on the API proper.
+    """
+
+    def walk(router, prefix=""):
+        for r in getattr(router, "routes", []):
+            if isinstance(r, (APIRoute, Route)):
+                for m in sorted(r.methods or []):
+                    yield m, prefix + r.path
+            else:
+                orig = getattr(r, "original_router", None)
+                if orig is not None:
+                    ctx = getattr(r, "include_context", None)
+                    sub = prefix + (getattr(ctx, "prefix", "") or "")
+                    yield from walk(orig, sub)
+                elif hasattr(r, "routes"):
+                    yield from walk(r, prefix)
+
+    yield from walk(app_)
+
+
+def _concrete(path: str) -> str:
+    """Fill path parameters with a placeholder so the path can be requested."""
+    return re.sub(r"\{[^}]+\}", "1", path)
+
+
+async def _mint(db, user, scopes=(SCOPE_PACK_READ,), **kw) -> tuple[ApiToken, str]:
+    return await ApiTokenService(db).create(user.id, "test token", list(scopes), **kw)
+
+
+async def _raw_token(db, user, scopes, **fields) -> str:
+    """Insert a token row directly (bypasses create()'s scope validation)."""
+    plaintext, prefix = generate_api_token()
+    db.add(ApiToken(
+        user_id=user.id, name="raw", token_prefix=prefix,
+        token_hash=hash_api_token(plaintext), scopes=list(scopes), **fields,
+    ))
+    await db.flush()
+    return plaintext
+
+
+def _bearer(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_allowlist_is_exactly_the_two_pack_reads():
+    assert set(API_TOKEN_ROUTE_ALLOWLIST) == ALLOWED
+    assert set(API_TOKEN_ROUTE_ALLOWLIST.values()) == {SCOPE_PACK_READ}
+
+
+def test_allowlisted_routes_exist():
+    live = set(_iter_all_routes(app))
+    assert ALLOWED <= live, f"allow-listed routes missing from the app: {ALLOWED - live}"
+
+
+def test_sweep_traversal_is_not_vacuous():
+    routes = set(_iter_all_routes(app))
+    assert len(routes) >= 100, f"only {len(routes)} routes found; traversal broken?"
+    assert ("GET", "/health") in routes
+    assert ("GET", "/openapi.json") in routes
+
+
+async def test_api_token_sweep_every_route_denied_except_allowlist(client, db, test_user):
+    """Every registered route answers 403 to a pack:read token, except the two
+    allow-listed GETs, which answer 200. A route added later is covered
+    automatically because this enumerates the live route table."""
+    _, token = await _mint(db, test_user)
+    wrong = []
+    for method, path in sorted(set(_iter_all_routes(app))):
+        resp = await client.request(method, _concrete(path), headers=_bearer(token))
+        if (method, path) in ALLOWED:
+            if resp.status_code != 200:
+                wrong.append(f"{method} {path}: expected 200, got {resp.status_code}")
+        elif resp.status_code != 403 or (
+            method != "HEAD" and resp.json().get("detail") != API_TOKEN_ROUTE_DENIED_DETAIL
+        ):
+            wrong.append(f"{method} {path}: expected 403, got {resp.status_code}")
+    assert not wrong, "API-token route policy violated:\n  " + "\n  ".join(wrong)
+
+
+async def test_api_token_pack_read_returns_pack(client, db, test_user):
+    row, token = await _mint(db, test_user)
+    assert row.last_used_at is None
+
+    resp = await client.get("/api/v1/export/context-pack", headers=_bearer(token))
+    assert resp.status_code == 200
+    assert "schema_version" in resp.json()
+
+    md = await client.get(
+        "/api/v1/export/context-pack?format=markdown", headers=_bearer(token)
+    )
+    assert md.status_code == 200
+
+    resp = await client.get("/api/v1/export/outbox-status", headers=_bearer(token))
+    assert resp.status_code == 200
+
+    await db.refresh(row)
+    assert row.last_used_at is not None
+
+
+async def test_api_token_head_on_allowlisted_path_is_denied(client, db, test_user):
+    _, token = await _mint(db, test_user)
+    resp = await client.head("/api/v1/export/context-pack", headers=_bearer(token))
+    assert resp.status_code == 403
+
+
+async def test_revoked_api_token_is_401(client, db, test_user):
+    row, token = await _mint(db, test_user)
+    await ApiTokenService(db).revoke(row)
+    for path in ("/api/v1/export/context-pack", "/api/v1/export/outbox-status"):
+        resp = await client.get(path, headers=_bearer(token))
+        assert resp.status_code == 401, path
+
+
+async def test_expired_api_token_is_401(client, db, test_user):
+    token = await _raw_token(
+        db, test_user, [SCOPE_PACK_READ],
+        expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+    )
+    resp = await client.get("/api/v1/export/context-pack", headers=_bearer(token))
+    assert resp.status_code == 401
+
+
+async def test_unexpired_api_token_with_expiry_is_accepted(client, db, test_user):
+    token = await _raw_token(
+        db, test_user, [SCOPE_PACK_READ],
+        expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+    )
+    resp = await client.get("/api/v1/export/context-pack", headers=_bearer(token))
+    assert resp.status_code == 200
+
+
+async def test_unknown_and_tampered_api_tokens_are_401(client, db, test_user):
+    _, token = await _mint(db, test_user)
+    unknown, _ = generate_api_token()  # well-formed, never stored
+    tampered = token[:-2] + ("AA" if not token.endswith("AA") else "BB")  # right prefix, wrong secret
+    for case, bad in enumerate((unknown, tampered, "ict_", "ict_nothex00_x", "ict_0123abcd")):
+        resp = await client.get("/api/v1/export/context-pack", headers=_bearer(bad))
+        assert resp.status_code == 401, f"bad-token case {case}"
+
+
+def test_token_prefix_parser_rejects_malformed_tokens():
+    token, prefix = generate_api_token()
+    assert parse_api_token_prefix(token) == prefix
+    for bad in (
+        "ict_",
+        "ict_0123abcd",           # no secret part
+        "ict_0123abcd_",          # empty secret
+        "ict_0123abc_secret",     # prefix too short
+        "ict_NOTHEX00_secret",    # prefix not lowercase hex
+        "eyJhbGciOi.jwt.shape",   # not an API token at all
+    ):
+        assert parse_api_token_prefix(bad) is None, bad
+
+
+async def test_api_token_without_pack_read_is_403_on_allowlisted_routes(
+    client, db, test_user
+):
+    token = await _raw_token(db, test_user, ["other:read"])
+    for method, path in sorted(ALLOWED):
+        resp = await client.request(method, path, headers=_bearer(token))
+        assert resp.status_code == 403, path
+        assert resp.json()["detail"] == "API token lacks the required scope"
+
+
+async def test_api_token_of_inactive_user_is_refused(client, db):
+    user = await create_test_user(db, email="inactive-token@example.com", is_active=False)
+    _, token = await _mint(db, user)
+    resp = await client.get("/api/v1/export/context-pack", headers=_bearer(token))
+    assert resp.status_code == 403
+
+
+async def test_api_token_is_scoped_to_its_owner(client, db, test_user):
+    other = await create_test_user(db, email="token-owner-2@example.com")
+    _, token = await _mint(db, other)
+    principal_user_ids = []
+
+    async def capture(principal=Depends(get_current_principal)):
+        principal_user_ids.append(principal.user.id)
+        return {}
+
+    probe = FastAPI()
+    probe.get("/api/v1/export/context-pack")(capture)
+    probe.dependency_overrides[get_db] = lambda: db
+    async with AsyncClient(transport=ASGITransport(app=probe), base_url="http://t") as c:
+        resp = await c.get("/api/v1/export/context-pack", headers=_bearer(token))
+    assert resp.status_code == 200
+    assert principal_user_ids == [other.id]
+
+
+async def test_jwt_user_unaffected(authed_client):
+    """A normal login session still reaches writes, other reads and the pack."""
+    created = await authed_client.post(
+        "/api/v1/watchlists", json={"name": "JWT still writes"}
+    )
+    assert created.status_code == 201, created.text
+    assert (await authed_client.get("/api/v1/watchlists")).status_code == 200
+    assert (await authed_client.get("/api/v1/export/context-pack")).status_code == 200
+    assert (await authed_client.get("/api/v1/export/outbox-status")).status_code == 200
+
+
+def _probe_app(db, *, with_middleware: bool) -> FastAPI:
+    """A throwaway app standing in for 'a route added later'."""
+    probe = FastAPI()
+    if with_middleware:
+        probe.add_middleware(ApiTokenRouteGuardMiddleware)
+
+    @probe.get("/api/v1/brand-new-read")
+    async def new_read(user=Depends(get_current_user)):
+        return {"ok": True}
+
+    @probe.get("/api/v1/brand-new-public")
+    async def new_public():
+        return {"ok": True}
+
+    async def _db():
+        yield db
+
+    probe.dependency_overrides[get_db] = _db
+    return probe
+
+
+async def test_new_authed_route_denied_by_dependency_alone(db, test_user):
+    """Without the middleware, get_current_user itself refuses an API token on a
+    route that is not allow-listed - a new endpoint cannot forget to opt out."""
+    _, token = await _mint(db, test_user)
+    probe = _probe_app(db, with_middleware=False)
+    async with AsyncClient(transport=ASGITransport(app=probe), base_url="http://t") as c:
+        resp = await c.get("/api/v1/brand-new-read", headers=_bearer(token))
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == API_TOKEN_ROUTE_DENIED_DETAIL
+
+
+async def test_new_public_route_denied_by_middleware(db, test_user):
+    """The middleware refuses an API token even on a route with no auth at all."""
+    _, token = await _mint(db, test_user)
+    probe = _probe_app(db, with_middleware=True)
+    async with AsyncClient(transport=ASGITransport(app=probe), base_url="http://t") as c:
+        denied = await c.get("/api/v1/brand-new-public", headers=_bearer(token))
+        anonymous = await c.get("/api/v1/brand-new-public")
+    assert denied.status_code == 403
+    assert denied.json()["detail"] == API_TOKEN_ROUTE_DENIED_DETAIL
+    assert anonymous.status_code == 200
+
+
+async def test_api_token_bearer_scheme_is_case_insensitive_in_middleware(db, test_user):
+    _, token = await _mint(db, test_user)
+    probe = _probe_app(db, with_middleware=True)
+    async with AsyncClient(transport=ASGITransport(app=probe), base_url="http://t") as c:
+        resp = await c.get(
+            "/api/v1/brand-new-public", headers={"Authorization": f"bearer {token}"}
+        )
+    assert resp.status_code == 403
+
+
+def test_middleware_refuses_api_token_websocket():
+    probe = FastAPI()
+    probe.add_middleware(ApiTokenRouteGuardMiddleware)
+
+    @probe.websocket("/ws/brand-new")
+    async def new_ws(ws: WebSocket):
+        await ws.accept()
+        await ws.send_text("hi")
+        await ws.close()
+
+    token, _ = generate_api_token()
+    with TestClient(probe) as tc:
+        with tc.websocket_connect("/ws/brand-new") as ws:
+            assert ws.receive_text() == "hi"
+        try:
+            with tc.websocket_connect("/ws/brand-new", headers=_bearer(token)) as ws:
+                ws.receive_text()
+            refused = False
+        except WebSocketDisconnect as exc:
+            refused = exc.code == 1008
+    assert refused
+
+
+async def test_plaintext_token_never_logged_during_auth(client, db, test_user, caplog):
+    caplog.set_level(logging.DEBUG)
+    row, token = await _mint(db, test_user)
+    await client.get("/api/v1/export/context-pack", headers=_bearer(token))
+    await client.get("/api/v1/watchlists", headers=_bearer(token))
+    await client.get("/api/v1/export/context-pack", headers=_bearer(token[:-1] + "x"))
+    await ApiTokenService(db).revoke(row)
+    await client.get("/api/v1/export/context-pack", headers=_bearer(token))
+
+    secret = token.split("_", 2)[2]
+    assert caplog.records, "expected auth logging to be captured"
+    assert row.token_prefix in caplog.text  # the non-secret id IS logged (audit)
+    assert token not in caplog.text
+    assert secret not in caplog.text
+
+
+async def test_only_the_hash_is_stored(db, test_user):
+    row, token = await _mint(db, test_user)
+    stored = (await db.execute(select(ApiToken).where(ApiToken.id == row.id))).scalar_one()
+    values = [str(getattr(stored, c.key)) for c in ApiToken.__table__.columns]
+    assert stored.token_hash == hash_api_token(token)
+    assert not any(token in v for v in values)
+    assert not any(token.split("_", 2)[2] in v for v in values)

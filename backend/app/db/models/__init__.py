@@ -1,6 +1,7 @@
 """Database models package."""
 
 from app.db.models.account import Account
+from app.db.models.api_token import ApiToken
 from app.db.models.account_link import AccountLink, AccountLinkStatus
 from app.db.models.alert import (
     Alert,
@@ -48,6 +49,7 @@ __all__ = [
     "AlertDelivery",
     "AlertDeliveryStatus",
     "AlertHistory",
+    "ApiToken",
     "BrokerImportRun",
     "CashLedgerCoverage",
     "CashTransaction",

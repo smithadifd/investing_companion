@@ -96,8 +96,14 @@ async def _cmd_list(db: AsyncSession, args: argparse.Namespace) -> int:
     if user is None:
         _err(f"No user matches {args.user!r}")
         return 1
+    now = datetime.now(timezone.utc)
     for row in await ApiTokenService(db).list_for_user(user.id):
-        state = "revoked" if row.revoked_at else "active"
+        if row.revoked_at:
+            state = "revoked"
+        elif row.expires_at is not None and row.expires_at <= now:
+            state = "expired"
+        else:
+            state = "active"
         print(
             f"{row.id}  {row.token_prefix}  {state:7}  {','.join(row.scopes):12}  "
             f"created={row.created_at:%Y-%m-%d}  "

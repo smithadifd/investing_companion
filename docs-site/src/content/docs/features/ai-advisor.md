@@ -58,7 +58,7 @@ Both hold the protocol only — no hosts, credentials, or internal IDs. The exec
 
 ## Recreating the advisor for your own portfolio
 
-The [advisor starter kit](https://github.com/smithadifd/investing_companion/tree/main/docs/advisor-starter-kit) is a fill-in-the-blanks scaffold for standing up your own advisor: an operating-system instructions file, blank portfolio-state templates, and the optional app-integration layer that wires in this loop. Open it in Claude Code and walk through [`ONBOARDING.md`](https://github.com/smithadifd/investing_companion/blob/main/docs/advisor-starter-kit/ONBOARDING.md) — it interviews you and fills the templates. The portfolio templates ship blank and contain no personal data.
+The [advisor starter kit](https://github.com/smithadifd/investing-hub/tree/main/docs/onboarding) is a fill-in-the-blanks scaffold for standing up your own advisor: an operating-system instructions file, blank portfolio-state templates, and the optional app-integration layer that wires in this loop. Open it in Claude Code and walk through [`ONBOARDING.md`](https://github.com/smithadifd/investing-hub/blob/main/docs/onboarding/ONBOARDING.md) — it interviews you and fills the templates. The portfolio templates ship blank and contain no personal data.
 
 ## Delivery
 

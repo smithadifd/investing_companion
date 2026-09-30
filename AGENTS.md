@@ -85,7 +85,7 @@ frontend/src/
   lib/                api/ (client), hooks/, contexts/, utils/
   types/              TypeScript types
 docker/               Dockerfile.{backend,frontend}[.prod]
-docs/                 architecture, api contracts, advisor-starter-kit, ROADMAP, issues/ (sessions/ & plans/ gitignored)
+docs/                 architecture, api contracts, ROADMAP, issues/ (sessions/ & plans/ gitignored)
 docs-site/            standalone docs site (own CI, path-ignored by main CI)
 scripts/              deploy-recomputer.sh (prod), deploy-synology.sh (retired), deploy-demo.sh, backup.sh, restore.sh, test-build.sh
 ```
@@ -164,8 +164,8 @@ work on a feature branch → PR → CI green → squash-merge.
 | New/changed/removed action, field, or enum | `docs/api/advisor-actions.md` + `ADVISOR_ACTIONS_VERSION` | Bump (MINOR=additive, MAJOR=rename/removal); write-side version, independent of the pack's `schema_version` |
 | A feature removes a limitation | `UNSUPPORTED_FEATURES` in `services/context_pack.py` | Shrink the live list; never hardcode bug lists in the contract docs |
 
-The `docs/advisor-starter-kit/` points at the two `docs/api/*` contracts, so ordinary feature work needs
-no kit edits — only touch the kit when the loop's mechanics or the kit's own structure change.
+The [hub's onboarding kit](https://github.com/smithadifd/investing-hub/tree/main/docs/onboarding) points at the two `docs/api/*` contracts, so ordinary feature work needs
+no kit edits.
 
 ## Testing strategy
 

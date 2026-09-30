@@ -74,13 +74,13 @@ cd frontend && npm test
 - **TypeScript**: Strict mode, functional components, TanStack Query for server state
 - **Commits**: Conventional commits (`feat:`, `fix:`, `docs:`, etc.)
 
-## Deploying to Your Own NAS
+## Deploying to Your Own Host
 
-See [docs/deployment/SYNOLOGY.md](./deployment/SYNOLOGY.md) for a full Synology NAS deployment guide. The general steps:
+See [docs/DEPLOYMENT.md](./DEPLOYMENT.md) for the generic self-hosting guide (any Docker host behind a reverse proxy). A Synology-specific walkthrough is available as an [optional guide](./deployment/SYNOLOGY.md). The general steps:
 
-1. Configure SSH access to your NAS
-2. Copy `.env.production.example` to `.env.production` on the NAS and fill in your values
-3. Use `scripts/deploy-synology.sh` or deploy manually with `docker-compose`
+1. Configure SSH access to your host
+2. Copy `.env.production.example` to `.env.production` on the host and fill in your values
+3. Deploy manually with `docker compose`, or adapt `scripts/deploy-recomputer.sh` (the maintainer's own production deploy script)
 
 ## Claude Code Agents
 

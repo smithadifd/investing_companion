@@ -57,7 +57,9 @@ Backup completed successfully at Sat Feb  1 14:30:05 PST 2026
 ========================================
 ```
 
-### Automated Backups (Synology)
+### Automated Backups (any host: cron; Synology Task Scheduler is optional)
+
+On a generic Linux Docker host, schedule `scripts/backup.sh` with cron, for example `0 2 * * * cd /path/to/investing_companion && ./scripts/backup.sh ./backups`. The maintainer's production host uses the same script. The Synology steps below are optional.
 
 #### Using Task Scheduler
 
@@ -222,7 +224,7 @@ If only some data is corrupted:
 
 ## Off-Site Backups
 
-### Synology Hyper Backup
+### Synology Hyper Backup (optional)
 
 1. Open **Hyper Backup**
 2. Create backup task

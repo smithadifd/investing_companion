@@ -126,4 +126,4 @@ The full style notes are in `docs/CONTRIBUTING.md` in the repo root.
 
 ## Deploying your changes
 
-Before a risky schema change, back up the database first — see [Backup and restore](/running/backup/). For deploying to a Synology NAS, see [Synology deployment](/running/synology/).
+Before a risky schema change, back up the database first — see [Backup and restore](/running/backup/). For self-hosting, see [Quick start](/running/quick-start/); a Synology walkthrough is available as an [optional guide](/running/synology/).

@@ -1,6 +1,6 @@
 # Issue 010: Mobile Responsive Design Fixes
 
-**Status:** Open
+**Status:** Resolved
 **Created:** 2026-02-04
 **Priority:** Medium
 **Affects:** Equity page (mobile), various components

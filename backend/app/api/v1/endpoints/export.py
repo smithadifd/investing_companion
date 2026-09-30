@@ -11,11 +11,17 @@ from app.core.dependencies import get_current_user, require_not_demo
 from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.common import DataResponse
-from app.schemas.context_pack import ContextPack
+from app.schemas.context_pack import (
+    ADVISOR_ACTIONS_VERSION,
+    SCHEMA_VERSION,
+    ContextPack,
+)
+from app.schemas.contract_docs import ContractDocResponse, ContractDocsResponse
 from app.schemas.handoff import HandoffReceiptCreate, HandoffReceiptResponse
 from app.schemas.outbox import OutboxPublishResult, OutboxStatusResponse
 from app.services.context_pack import ContextPackService, render_markdown
 from app.services.context_pack_outbox import ContextPackOutboxService
+from app.services.contract_docs import ContractDoc, ContractDocsUnavailable, load_contract_docs
 from app.services.handoff import HandoffService
 
 logger = logging.getLogger(__name__)
@@ -50,6 +56,40 @@ async def get_context_pack(
             render_markdown(pack), media_type="text/markdown; charset=utf-8"
         )
     return pack
+
+
+def _doc_response(doc: ContractDoc) -> ContractDocResponse:
+    return ContractDocResponse(
+        filename=doc.filename,
+        stamp=doc.stamp,
+        expected_stamp=doc.expected_stamp,
+        stamp_matches=doc.stamp_matches,
+        content=doc.content,
+    )
+
+
+@router.get("/contract-docs", response_model=ContractDocsResponse)
+async def get_contract_docs(
+    current_user: User = Depends(get_current_user),
+) -> ContractDocsResponse:
+    """Both advisor contract docs, exactly as deployed with this version.
+
+    A doc whose stamp differs from the pack's version constant is still served;
+    ``stamp_matches`` is false so the drift is visible. 503 if a doc is missing.
+    """
+    try:
+        handoff, actions = load_contract_docs()
+    except ContractDocsUnavailable as e:
+        logger.error("Contract docs unavailable: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)
+        )
+    return ContractDocsResponse(
+        schema_version=SCHEMA_VERSION,
+        advisor_actions_version=ADVISOR_ACTIONS_VERSION,
+        handoff_schema=_doc_response(handoff),
+        advisor_actions=_doc_response(actions),
+    )
 
 
 def get_outbox_service(

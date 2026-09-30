@@ -1,4 +1,4 @@
-# Handoff Loop Schema (v1.6)
+# Handoff Loop Schema (v1.7)
 
 The handoff loop connects an external AI advisor (e.g. a Claude project) to the app in both
 directions. This document is the contract; give it to the advisor verbatim.

@@ -6,7 +6,6 @@ from app.core.api_token_access import SCOPE_PACK_READ
 from app.core.config import settings
 from app.schemas.context_pack import ADVISOR_ACTIONS_VERSION, SCHEMA_VERSION
 from app.services.contract_docs import (
-    contract_docs_dir,
     parse_advisor_actions_stamp,
     parse_handoff_schema_stamp,
 )
@@ -56,7 +55,9 @@ async def test_default_dir_serves_the_repo_docs_verbatim(authed_client):
     resp = await authed_client.get(URL)
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    docs = contract_docs_dir()
+    # Resolved from this file, not via the production helper, so a wrong
+    # default path cannot pass by agreement: backend/tests/test_api -> repo root.
+    docs = Path(__file__).resolve().parents[3] / "docs" / "api"
     for key, name, parse, expected in (
         ("handoff_schema", "handoff-schema.md", parse_handoff_schema_stamp, SCHEMA_VERSION),
         ("advisor_actions", "advisor-actions.md", parse_advisor_actions_stamp,
@@ -64,7 +65,9 @@ async def test_default_dir_serves_the_repo_docs_verbatim(authed_client):
     ):
         text = (docs / name).read_text(encoding="utf-8")
         assert body[key]["content"] == text
-        assert body[key]["stamp"] == parse(text) is not None
+        assert body[key]["stamp"] is not None
+        assert body[key]["stamp"] == parse(text)
+        assert body[key]["stamp"] == expected
         assert body[key]["expected_stamp"] == expected
         assert body[key]["stamp_matches"] == (body[key]["stamp"] == expected)
     # Outcome: the repo docs served by the default dir carry exactly the
@@ -126,3 +129,15 @@ async def test_missing_doc_is_503_with_message(authed_client, tmp_path, monkeypa
     resp = await authed_client.get(URL)
     assert resp.status_code == 503
     assert "advisor-actions.md" in resp.json()["detail"]
+
+
+async def test_undecodable_doc_is_503_without_leaking_path(authed_client, tmp_path, monkeypatch):
+    _write_docs(tmp_path, SCHEMA_VERSION, ADVISOR_ACTIONS_VERSION)
+    (tmp_path / "advisor-actions.md").write_bytes(b"\xff\xfe\x80 not utf-8\n")
+    monkeypatch.setattr(settings, "CONTRACT_DOCS_DIR", str(tmp_path))
+
+    resp = await authed_client.get(URL)
+    assert resp.status_code == 503, resp.text
+    detail = resp.json()["detail"]
+    assert "advisor-actions.md" in detail
+    assert str(tmp_path) not in detail

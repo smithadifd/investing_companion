@@ -6,12 +6,15 @@ matching constant the context pack emits; serving them from the deployed
 process means a client always gets the docs for the version it is talking to.
 """
 
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.config import settings
 from app.schemas.context_pack import ADVISOR_ACTIONS_VERSION, SCHEMA_VERSION
+
+logger = logging.getLogger(__name__)
 
 HANDOFF_SCHEMA_DOC = "handoff-schema.md"
 ADVISOR_ACTIONS_DOC = "advisor-actions.md"
@@ -59,7 +62,13 @@ def contract_docs_dir() -> Path:
 def _read(directory: Path, filename: str, expected: str, parse) -> ContractDoc:
     try:
         content = (directory / filename).read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
+        # UnicodeDecodeError is a ValueError, not an OSError: a present but
+        # undecodable file must take the same 503 path. Log the cause (type and
+        # message only, never the directory contents).
+        logger.error(
+            "Contract doc %s unreadable: %s: %s", filename, type(exc).__name__, exc, exc_info=True
+        )
         raise ContractDocsUnavailable(
             f"Contract doc {filename} is not available on this deployment"
         ) from exc

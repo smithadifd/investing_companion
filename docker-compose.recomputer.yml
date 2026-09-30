@@ -9,13 +9,3 @@ services:
   frontend:
     ports: !override
       - "3010:3000"
-
-  # The API serves the advisor contract docs (GET /api/v1/export/contract-docs)
-  # from a read-only mount of docs/api/; the image build context is ./backend so
-  # the docs are not baked in. docker-compose.local.yml already carries this;
-  # it is restated here so this host cannot lose it if the base file changes.
-  api:
-    environment:
-      - CONTRACT_DOCS_DIR=/contract-docs
-    volumes:
-      - ./docs/api:/contract-docs:ro

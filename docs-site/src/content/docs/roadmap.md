@@ -17,7 +17,7 @@ Investing Companion has completed all planned development phases through Phase 6
 | 5 | Polish | Complete | Authentication, user settings with encrypted API keys, session management |
 | 6 | Trade tracker | Complete | Trade entry, FIFO P&L matching, performance analytics, position sizer |
 | 6.5 | Calendar & events | Complete | Earnings calendar, macro economic events, watchlist calendar integration |
-| 6.6 | Deployment readiness | Complete | Security hardening, production Docker Compose, Synology deploy |
+| 6.6 | Deployment readiness | Complete | Security hardening, production Docker Compose, self-hosted deploy |
 | 7 | Advanced AI | Future | See below |
 
 ## What's shipped
@@ -57,4 +57,4 @@ The blocker is access model, not engineering. Anthropic's API does not currently
 
 ## Deployment
 
-The application runs in production on a Synology NAS via Docker Compose, and is also available at the public demo site [invest.smithadifd.com](https://invest.smithadifd.com). Two compose files cover the deployment options: `docker-compose.prod.yml` ships Traefik and Let's Encrypt as a self-contained stack, while `docker-compose.local.yml` omits the built-in proxy for anyone already fronting the app with Caddy, Nginx, or similar. The demo resets weekly and blocks write operations. For self-hosting instructions, see [running on Synology](/running/synology/).
+The application runs in production on a small Linux Docker host via Docker Compose (deployed with `scripts/deploy-recomputer.sh`), and is also available at the public demo site [invest.smithadifd.com](https://invest.smithadifd.com). Two compose files cover the deployment options: `docker-compose.prod.yml` ships Traefik and Let's Encrypt as a self-contained stack, while `docker-compose.local.yml` omits the built-in proxy for anyone already fronting the app with Caddy, Nginx, or similar. The demo resets weekly and blocks write operations. For self-hosting instructions, see [Quick start](/running/quick-start/); a Synology walkthrough is available as an [optional guide](/running/synology/).

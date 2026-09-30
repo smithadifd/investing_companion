@@ -1,12 +1,12 @@
 # Investing Companion - Deployment Guide
 
-This guide covers deploying Investing Companion on a Synology NAS or similar Docker-capable home server.
+This guide covers self-hosting Investing Companion on any Docker-capable host behind a reverse proxy. The maintainer's own production deploy is `scripts/deploy-recomputer.sh`; a Synology NAS walkthrough is kept as an optional section below and in [deployment/SYNOLOGY.md](./deployment/SYNOLOGY.md).
 
 ## Table of Contents
 
 1. [Prerequisites](#prerequisites)
 2. [Quick Start](#quick-start)
-3. [Synology-Specific Setup](#synology-specific-setup)
+3. [Synology Setup (Optional)](#synology-setup-optional)
 4. [Configuration](#configuration)
 5. [SSL/HTTPS Setup](#sslhttps-setup)
 6. [Database Seeding](#database-seeding)
@@ -103,7 +103,9 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d api
 
 ---
 
-## Synology-Specific Setup
+## Synology Setup (Optional)
+
+Skip this section unless you are hosting on a Synology NAS.
 
 ### Using Synology Container Manager
 
@@ -290,7 +292,7 @@ docker compose -f docker-compose.prod.yml logs --tail 100 api
 ./scripts/backup.sh ./backups
 ```
 
-**Automated Backups (Synology Task Scheduler):**
+**Automated Backups (cron on any host; Synology Task Scheduler shown, optional):**
 
 1. Control Panel → Task Scheduler
 2. Create → Scheduled Task → User-defined script
@@ -308,20 +310,13 @@ cd /volume3/docker/investing_companion
 
 ### Updates
 
-#### One-Command Deploy (Recommended)
+#### Maintainer Deploy Script
 
-From your Mac, run:
-```bash
-./scripts/deploy-synology.sh
-```
+The maintainer's production deploy is `scripts/deploy-recomputer.sh`. It pulls and rebuilds over SSH on a small Linux Docker host, runs migrations, polls `/health`, and prints a rollback target. Run it with `--dry-run` to see the plan without touching any host. It is host-specific; copy and adapt it for your own environment.
 
-This script:
-1. Runs local build tests (TypeScript, ESLint, Docker build)
-2. Pushes to GitHub
-3. Pulls on Synology via SSH
-4. Rebuilds and restarts containers
+`scripts/deploy-synology.sh` is the retired equivalent for a Synology NAS and is kept only for reference.
 
-#### Manual Deploy
+#### Manual Deploy (any Docker host)
 
 1. **Test build locally first:**
 ```bash
@@ -333,15 +328,17 @@ This script:
 git push origin main
 ```
 
-3. **SSH to Synology and pull:**
+3. **On the host, pull the latest code:**
 ```bash
-ssh synology "cd /volume3/docker/investing_companion && /usr/local/bin/git pull origin main"
+cd /path/to/investing_companion && git pull origin main
 ```
 
 4. **Rebuild and restart:**
 ```bash
-ssh synology "cd /volume3/docker/investing_companion && docker-compose -f docker-compose.local.yml up -d --build"
+docker compose -f docker-compose.local.yml --env-file .env.production up -d --build
 ```
+
+Use `docker-compose.prod.yml` instead if you want the built-in Traefik and Let's Encrypt stack.
 
 #### Pre-Deploy Checklist
 
@@ -410,7 +407,7 @@ docker logs investing_redis
 docker exec investing_redis redis-cli ping
 ```
 
-### Memory Issues on Synology
+### Memory Issues on Small Hosts (e.g. NAS)
 
 Reduce resource limits in docker-compose.prod.yml:
 

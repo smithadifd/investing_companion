@@ -1,6 +1,8 @@
-# Synology NAS Deployment Guide
+# Self-hosting on a Synology NAS (optional)
 
-This guide documents the deployment of Investing Companion to a Synology NAS.
+> **Optional guide.** This page is for readers self-hosting on a Synology NAS. Investing Companion runs on any Docker host behind a reverse proxy; see [DEPLOYMENT.md](../DEPLOYMENT.md) for the generic guide. The maintainer's own production deploy uses `scripts/deploy-recomputer.sh`; `scripts/deploy-synology.sh` is retired and kept only for reference.
+
+This guide documents deploying Investing Companion to a Synology NAS.
 
 ---
 

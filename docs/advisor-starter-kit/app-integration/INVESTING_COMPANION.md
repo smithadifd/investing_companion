@@ -118,8 +118,8 @@ capability notes, mark them **advisory only** and date them:
 
 - **Watchlists in use:** `{{WATCHLISTS}}`
 - **Trigger playbook:** `{{TRIGGERS}}` *(your standing "if X then Y" orders)*
-- **Executor:** `{{EXECUTOR_SETUP}}` *(e.g., "Claude Code against the app API over an SSH
-  tunnel; handoff blocks are suggestions the user reviews, not commands")*
+- **Executor:** `{{EXECUTOR_SETUP}}` *(e.g., "Claude Code against the app API at its base URL
+  (e.g. `https://invest.example.com/api/v1`); handoff blocks are suggestions the user reviews, not commands")*
 - **Notifications:** `{{NOTIFICATIONS}}` *(e.g., "Discord morning pulse + EOD wrap")*
 
 ---

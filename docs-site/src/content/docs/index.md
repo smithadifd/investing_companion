@@ -28,7 +28,7 @@ These docs cover architecture, features, deployment, and the reasoning behind th
 
 - [Live demo](https://invest.smithadifd.com) — read-only-ish. Seed data, weekly reset, write operations disabled.
 - [Quick start (Docker)](/running/quick-start/) — clone, copy `.env.example`, `docker compose up -d`, run migrations.
-- [Synology NAS deployment](/running/synology/) — the setup this project was built for.
+- [Self-hosting on a Synology NAS (optional)](/running/synology/) — an optional guide for NAS owners.
 
 ## Read deeper
 

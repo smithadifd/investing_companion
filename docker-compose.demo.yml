@@ -69,6 +69,11 @@ services:
       - CORS_ORIGINS=https://invest.smithadifd.com
       - REGISTRATION_ENABLED=false
       - DEMO_MODE=true
+      # Contract docs served at /api/v1/export/contract-docs: the image build
+      # context is ./backend, so docs/api/ is mounted read-only from the checkout.
+      - CONTRACT_DOCS_DIR=/contract-docs
+    volumes:
+      - ./docs/api:/contract-docs:ro
     ports:
       - "8003:8000"
     depends_on:

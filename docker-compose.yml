@@ -61,8 +61,12 @@ services:
       - FINNHUB_API_KEY=${FINNHUB_API_KEY:-}
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      # Contract docs served at /api/v1/export/contract-docs: the image build
+      # context is ./backend, so docs/api/ is mounted read-only from the checkout.
+      - CONTRACT_DOCS_DIR=/contract-docs
     volumes:
       - ./backend:/app
+      - ./docs/api:/contract-docs:ro
     ports:
       - "8000:8000"
     depends_on:

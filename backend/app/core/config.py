@@ -296,6 +296,11 @@ class Settings(BaseSettings):
     # publish so the Drive folder carries the contract beside latest.md.
     CONTEXT_PACK_REFERENCE_DIR: str = ""
 
+    # Directory holding the advisor contract docs (handoff-schema.md,
+    # advisor-actions.md) served by GET /api/v1/export/contract-docs. Empty = use
+    # the repo's docs/api/ (source checkout); container deployments mount it.
+    CONTRACT_DOCS_DIR: str = ""
+
     # Cache TTLs (seconds)
     QUOTE_CACHE_TTL: int = 900  # 15 minutes
     FUNDAMENTALS_CACHE_TTL: int = 86400  # 24 hours

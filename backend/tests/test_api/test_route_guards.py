@@ -147,6 +147,7 @@ from tests.factories import create_test_user  # noqa: E402
 ALLOWED = {
     ("GET", "/api/v1/export/context-pack"),
     ("GET", "/api/v1/export/outbox-status"),
+    ("GET", "/api/v1/export/contract-docs"),
 }
 
 

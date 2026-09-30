@@ -92,9 +92,13 @@ services:
       # rclone job then syncs CONTEXT_PACK_OUTBOX_HOST_DIR up to Google Drive.
       - CONTEXT_PACK_OUTBOX_DIR=${CONTEXT_PACK_OUTBOX_DIR:-}
       - CONTEXT_PACK_REFERENCE_DIR=${CONTEXT_PACK_REFERENCE_DIR:-}
+      # Contract docs served at /api/v1/export/contract-docs: the image build
+      # context is ./backend, so docs/api/ is mounted read-only from the checkout.
+      - CONTRACT_DOCS_DIR=/contract-docs
     ports:
       - "8000:8000"
     volumes:
+      - ./docs/api:/contract-docs:ro
       - ${CONTEXT_PACK_OUTBOX_HOST_DIR:-./data/claude-outbox}:/app/outbox
     depends_on:
       db:

@@ -153,8 +153,12 @@ services:
       # CONTEXT_PACK_OUTBOX_HOST_DIR up to the private advisor Google Drive folder.
       - CONTEXT_PACK_OUTBOX_DIR=${CONTEXT_PACK_OUTBOX_DIR:-}
       - CONTEXT_PACK_REFERENCE_DIR=${CONTEXT_PACK_REFERENCE_DIR:-}
+      # Contract docs served at /api/v1/export/contract-docs: the image build
+      # context is ./backend, so docs/api/ is mounted read-only from the checkout.
+      - CONTRACT_DOCS_DIR=/contract-docs
     volumes:
       - ${CONTEXT_PACK_OUTBOX_HOST_DIR:-./data/claude-outbox}:/app/outbox
+      - ./docs/api:/contract-docs:ro
     depends_on:
       db:
         condition: service_healthy

@@ -200,11 +200,12 @@ class UserCreate(BaseModel):
 A script or external tool that only needs to *read* the context pack can use a
 long-lived API token instead of a login session.
 
-**What a token can reach.** Exactly two endpoints, and only with the
+**What a token can reach.** Exactly three endpoints, and only with the
 `pack:read` scope:
 
 - `GET /api/v1/export/context-pack` (JSON, or `?format=markdown`)
 - `GET /api/v1/export/outbox-status`
+- `GET /api/v1/export/contract-docs` (both advisor contract docs and their version stamps, as deployed)
 
 Every other endpoint - every write, every other read, `/health`, `/docs`, the
 auth endpoints, and any endpoint added later - answers **403** to an API token.

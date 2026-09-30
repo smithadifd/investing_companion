@@ -18,6 +18,7 @@ To open a new read to API tokens, add ONE line to the table below.
 """
 
 import logging
+import re
 
 from fastapi.security.utils import get_authorization_scheme_param
 from starlette.datastructures import Headers
@@ -39,6 +40,34 @@ API_TOKEN_ROUTE_ALLOWLIST: dict[tuple[str, str], str] = {
 }
 
 API_TOKEN_ROUTE_DENIED_DETAIL = "API tokens cannot access this endpoint"
+
+# Anything token-shaped: the prefix followed by the URL-safe characters a token
+# is made of. Used to scrub client-controlled text before it is logged.
+_TOKEN_SHAPED = re.compile(re.escape(API_TOKEN_PREFIX) + r"[A-Za-z0-9_\-]*")
+_REDACTED = API_TOKEN_PREFIX + "[redacted]"
+
+
+def redact_tokens(text: str) -> str:
+    """Replace every token-shaped substring of ``text`` so it is safe to log."""
+    return _TOKEN_SHAPED.sub(_REDACTED, text)
+
+
+def route_path(scope: Scope) -> str:
+    """The request path relative to the app, as Starlette routing matches it.
+
+    ``root_path`` (a deployment prefix such as ``/invest``) is stripped only
+    when ``path`` actually starts with it at a segment boundary; otherwise the
+    path is used unchanged. Mirrors ``starlette._utils.get_route_path``.
+    """
+    path: str = scope["path"]
+    root_path: str = scope.get("root_path", "")
+    if not root_path or not path.startswith(root_path):
+        return path
+    if path == root_path:
+        return ""
+    if path[len(root_path)] == "/":
+        return path[len(root_path):]
+    return path
 
 
 def is_api_token(credential: str | None) -> bool:
@@ -76,10 +105,11 @@ class ApiTokenRouteGuardMiddleware:
             credential = bearer_credential(Headers(scope=scope))
             if is_api_token(credential):
                 method = scope.get("method", "GET") if scope["type"] == "http" else "WEBSOCKET"
-                path = scope["path"]
+                path = route_path(scope)
                 if required_scope(method, path) is None:
                     logger.warning(
-                        "API token refused for non-allow-listed route %s %s", method, path
+                        "API token refused for non-allow-listed route %s %s",
+                        method, redact_tokens(path),
                     )
                     if scope["type"] == "websocket":
                         await send({"type": "websocket.close", "code": 1008})

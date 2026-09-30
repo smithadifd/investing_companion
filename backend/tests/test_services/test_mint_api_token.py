@@ -101,3 +101,26 @@ async def test_list_shows_no_secret(db, test_user, capsys):
     out, _ = capsys.readouterr()
     assert row.token_prefix in out
     assert token not in out
+
+
+async def test_list_shows_expired_and_revoked_state(db, test_user, capsys):
+    from datetime import datetime, timedelta, timezone
+
+    service = ApiTokenService(db)
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    future = datetime.now(timezone.utc) + timedelta(days=1)
+    expired, _ = await service.create(test_user.id, "old", ["pack:read"])
+    expired.expires_at = past  # create() takes any expiry; set it in the past here
+    await db.commit()
+    live, _ = await service.create(test_user.id, "live", ["pack:read"], expires_at=future)
+    revoked, _ = await service.create(test_user.id, "gone", ["pack:read"])
+    await service.revoke(revoked)
+
+    assert await mint_api_token.run(db, ["list", "--user", test_user.email]) == 0
+    out, _ = capsys.readouterr()
+    states = {line.split()[1]: line.split()[2] for line in out.splitlines()}
+    assert states == {
+        expired.token_prefix: "expired",
+        live.token_prefix: "active",
+        revoked.token_prefix: "revoked",
+    }

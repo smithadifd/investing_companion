@@ -33,8 +33,15 @@ _PREFIX_HEX_CHARS = 8
 _SECRET_BYTES = 32
 
 
+_MAX_PREFIX_ATTEMPTS = 5
+
+
 class InvalidScopeError(ValueError):
     """Raised when a token is requested with a scope that does not exist."""
+
+
+class TokenPrefixCollisionError(RuntimeError):
+    """Raised when no unused token prefix could be generated."""
 
 
 def hash_api_token(token: str) -> str:
@@ -85,7 +92,15 @@ class ApiTokenService:
         if not scopes:
             raise InvalidScopeError("At least one scope is required")
 
-        plaintext, prefix = generate_api_token()
+        for _ in range(_MAX_PREFIX_ATTEMPTS):
+            plaintext, prefix = generate_api_token()
+            if await self.get_by_prefix(prefix) is None:
+                break
+        else:
+            raise TokenPrefixCollisionError(
+                f"Could not generate an unused token prefix after "
+                f"{_MAX_PREFIX_ATTEMPTS} attempts; try again"
+            )
         row = ApiToken(
             user_id=user_id,
             name=name,
@@ -107,8 +122,9 @@ class ApiTokenService:
         """Return the live token row for a plaintext token, else None.
 
         None covers unknown, malformed, wrong-secret, revoked and expired tokens
-        alike. The hash comparison is constant-time. On success
-        ``last_used_at`` is stamped and committed.
+        alike. The hash comparison is constant-time. This does not stamp
+        ``last_used_at``: the caller does that with ``mark_used`` once the
+        request is fully authorized.
         """
         prefix = parse_api_token_prefix(token)
         if prefix is None:
@@ -129,9 +145,12 @@ class ApiTokenService:
             logger.warning("API token rejected: expired id=%s prefix=%s", row.id, prefix)
             return None
 
-        row.last_used_at = now
-        await self.db.commit()
         return row
+
+    async def mark_used(self, row: ApiToken) -> None:
+        """Stamp ``last_used_at`` on a token that has just been authorized."""
+        row.last_used_at = datetime.now(timezone.utc)
+        await self.db.commit()
 
     async def get_by_prefix(self, prefix: str) -> ApiToken | None:
         result = await self.db.execute(

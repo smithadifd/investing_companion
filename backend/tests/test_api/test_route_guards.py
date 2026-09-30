@@ -455,3 +455,162 @@ async def test_only_the_hash_is_stored(db, test_user):
     assert stored.token_hash == hash_api_token(token)
     assert not any(token in v for v in values)
     assert not any(token.split("_", 2)[2] in v for v in values)
+
+
+async def test_token_embedded_in_path_never_logged(client, db, test_user, caplog):
+    """A client-controlled path that embeds the token is scrubbed from the
+    guard's refusal log. (The test HTTP client logs its own request URLs, so
+    only records from the application's loggers are inspected.)"""
+    caplog.set_level(logging.DEBUG)
+    _, token = await _mint(db, test_user)
+    secret = token.split("_", 2)[2]
+
+    resp = await client.get(f"/api/v1/watchlists/{token}", headers=_bearer(token))
+    assert resp.status_code == 403
+
+    app_lines = [r.getMessage() for r in caplog.records if r.name.startswith("app.")]
+    assert any("API token refused for non-allow-listed route" in m for m in app_lines)
+    assert any("/api/v1/watchlists/ict_" in m for m in app_lines)  # path still logged
+    for message in app_lines:
+        assert token not in message
+        assert secret not in message
+
+
+def test_redact_tokens_scrubs_every_token_shaped_substring():
+    from app.core.api_token_access import redact_tokens
+
+    token, _ = generate_api_token()
+    scrubbed = redact_tokens(f"/a/{token}/b/{token}x-y")
+    assert token.split("_", 2)[2] not in scrubbed
+    assert scrubbed.startswith("/a/ict_") and "/b/ict_" in scrubbed
+    assert redact_tokens("/api/v1/watchlists/7") == "/api/v1/watchlists/7"
+
+
+def _prefixed_client(root_path: str) -> AsyncClient:
+    """A client for the real app deployed under ``root_path``."""
+    return AsyncClient(
+        transport=ASGITransport(app=app, root_path=root_path), base_url="http://test"
+    )
+
+
+async def test_api_token_under_root_path_reaches_allowlisted_read(client, db, test_user):
+    """Behind a path prefix the allow-listed GET still answers 200 (the guard
+    and the dependency both match the path with root_path stripped)."""
+    row, token = await _mint(db, test_user)
+    async with _prefixed_client("/invest") as c:
+        resp = await c.get("/invest/api/v1/export/context-pack", headers=_bearer(token))
+    assert resp.status_code == 200, resp.text
+    assert "schema_version" in resp.json()
+
+
+async def test_api_token_under_root_path_still_denied_elsewhere(client, db, test_user):
+    _, token = await _mint(db, test_user)
+    async with _prefixed_client("/invest") as c:
+        resp = await c.get("/invest/api/v1/watchlists", headers=_bearer(token))
+        head = await c.head("/invest/api/v1/export/context-pack", headers=_bearer(token))
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == API_TOKEN_ROUTE_DENIED_DETAIL
+    assert head.status_code == 403
+
+
+def test_route_path_strips_root_path_only_when_it_is_a_prefix():
+    from app.core.api_token_access import route_path
+
+    pack = "/api/v1/export/context-pack"
+    assert route_path({"path": "/invest" + pack, "root_path": "/invest"}) == pack
+    assert route_path({"path": pack, "root_path": ""}) == pack
+    # root_path that is not a prefix of path: no stripping (len('/invest') lands
+    # on a '/' in pack, so only the prefix check keeps this unchanged).
+    assert route_path({"path": pack, "root_path": "/invest"}) == pack
+    # A prefix that does not end on a segment boundary is not stripped either.
+    assert route_path({"path": "/investx" + pack, "root_path": "/invest"}) == "/investx" + pack
+
+
+async def test_middleware_does_not_strip_a_root_path_that_is_not_a_prefix(db, test_user):
+    """With root_path='/invest' and a path that does not start with it, the
+    guard matches the path as-is: exact matching, deny by default."""
+    _, token = await _mint(db, test_user)
+    probe = FastAPI()
+    probe.add_middleware(ApiTokenRouteGuardMiddleware)
+
+    @probe.get("/api/v1/export/context-pack")
+    async def pack():
+        return {"ok": True}
+
+    transport = ASGITransport(app=probe, root_path="/invest")
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        allowed = await c.get("/api/v1/export/context-pack", headers=_bearer(token))
+        denied = await c.get("/api/v1/watchlists", headers=_bearer(token))
+    assert allowed.status_code == 200
+    assert denied.status_code == 403
+
+
+async def _row_for(db, token: str) -> ApiToken:
+    prefix = parse_api_token_prefix(token)
+    return (
+        await db.execute(select(ApiToken).where(ApiToken.token_prefix == prefix))
+    ).scalar_one()
+
+
+async def test_refused_api_token_requests_do_not_stamp_last_used(client, db, test_user):
+    no_scope = await _raw_token(db, test_user, ["other:read"])
+    inactive = await create_test_user(db, email="inactive-stamp@example.com", is_active=False)
+    _, inactive_token = await _mint(db, inactive)
+
+    for token in (no_scope, inactive_token):
+        resp = await client.get("/api/v1/export/context-pack", headers=_bearer(token))
+        assert resp.status_code == 403
+        row = await _row_for(db, token)
+        await db.refresh(row)
+        assert row.last_used_at is None, resp.json()
+
+
+async def test_authorized_api_token_request_stamps_last_used(client, db, test_user):
+    row, token = await _mint(db, test_user)
+    assert row.last_used_at is None
+    resp = await client.get("/api/v1/export/context-pack", headers=_bearer(token))
+    assert resp.status_code == 200
+    await db.refresh(row)
+    assert row.last_used_at is not None
+
+
+async def test_create_retries_on_prefix_collision(db, test_user, monkeypatch):
+    from app.services import api_token as api_token_service
+
+    existing, _ = await _mint(db, test_user)
+    real = api_token_service.generate_api_token
+    calls = []
+
+    def colliding_first():
+        calls.append(1)
+        if len(calls) == 1:
+            return f"ict_{existing.token_prefix}_collidingsecret", existing.token_prefix
+        return real()
+
+    monkeypatch.setattr(api_token_service, "generate_api_token", colliding_first)
+    row, token = await _mint(db, test_user)
+    assert len(calls) == 2
+    assert row.token_prefix != existing.token_prefix
+    assert parse_api_token_prefix(token) == row.token_prefix
+
+
+async def test_create_gives_up_with_clear_error_after_repeated_collisions(
+    db, test_user, monkeypatch
+):
+    import pytest
+
+    from app.services import api_token as api_token_service
+
+    existing, _ = await _mint(db, test_user)
+    calls = []
+
+    def always_colliding():
+        calls.append(1)
+        return f"ict_{existing.token_prefix}_collidingsecret", existing.token_prefix
+
+    monkeypatch.setattr(api_token_service, "generate_api_token", always_colliding)
+    with pytest.raises(api_token_service.TokenPrefixCollisionError, match="unused token prefix"):
+        await _mint(db, test_user)
+    assert len(calls) == api_token_service._MAX_PREFIX_ATTEMPTS
+    rows = (await db.execute(select(ApiToken).where(ApiToken.user_id == test_user.id)))
+    assert [r.id for r in rows.scalars().all()] == [existing.id]

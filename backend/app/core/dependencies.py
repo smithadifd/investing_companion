@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.api_token_access import (
     API_TOKEN_ROUTE_DENIED_DETAIL,
     is_api_token,
+    redact_tokens,
     required_scope,
+    route_path,
 )
 from app.core.config import settings
 from app.db.models.api_token import ApiToken
@@ -40,7 +42,7 @@ class Principal:
 
 def _reject_api_token_route(request: Request) -> str:
     """403 unless (method, path) is allow-listed for API tokens; return its scope."""
-    scope = required_scope(request.method, request.scope["path"])
+    scope = required_scope(request.method, route_path(request.scope))
     if scope is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -79,17 +81,21 @@ async def _principal_from_api_token(
         logger.warning(
             "API token id=%s prefix=%s lacks scope %s for %s %s",
             api_token.id, api_token.token_prefix, needed_scope,
-            request.method, request.scope["path"],
+            request.method, redact_tokens(route_path(request.scope)),
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="API token lacks the required scope",
         )
 
+    # Stamp last use only once the request is fully authorized (owner active,
+    # scope held, route allow-listed), so refused requests leave no trace.
+    await ApiTokenService(db).mark_used(api_token)
+
     logger.info(
         "API token authenticated id=%s prefix=%s user_id=%s route=%s %s",
         api_token.id, api_token.token_prefix, user.id,
-        request.method, request.scope["path"],
+        request.method, redact_tokens(route_path(request.scope)),
     )
     return Principal(user=user, api_token=api_token)
 

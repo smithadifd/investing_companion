@@ -113,7 +113,7 @@ def test_event_refresh_routes_are_guarded():
 
 
 # ---------------------------------------------------------------------------
-# API-token route guard: deny by default, two allow-listed reads.
+# API-token route guard: deny by default, a short allow-list of pack reads.
 # ---------------------------------------------------------------------------
 
 import logging  # noqa: E402
@@ -133,7 +133,7 @@ from app.core.api_token_access import (  # noqa: E402
     SCOPE_PACK_READ,
     ApiTokenRouteGuardMiddleware,
 )
-from app.core.dependencies import get_current_principal, get_current_user  # noqa: E402
+from app.core.dependencies import get_current_user  # noqa: E402
 from app.db.models.api_token import ApiToken  # noqa: E402
 from app.db.session import get_db  # noqa: E402
 from app.services.api_token import (  # noqa: E402
@@ -144,11 +144,9 @@ from app.services.api_token import (  # noqa: E402
 )
 from tests.factories import create_test_user  # noqa: E402
 
-ALLOWED = {
-    ("GET", "/api/v1/export/context-pack"),
-    ("GET", "/api/v1/export/outbox-status"),
-    ("GET", "/api/v1/export/contract-docs"),
-}
+# Fewer routes than this means the sweep's route traversal is broken and
+# would pass vacuously.
+MIN_SWEEP_ROUTES = 100
 
 
 def _iter_all_routes(app_):
@@ -200,34 +198,46 @@ def _bearer(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_allowlist_is_exactly_the_two_pack_reads():
-    assert set(API_TOKEN_ROUTE_ALLOWLIST) == ALLOWED
+def test_allowlist_grants_only_the_pack_read_scope():
+    assert API_TOKEN_ROUTE_ALLOWLIST, "the allow-list must not be empty"
     assert set(API_TOKEN_ROUTE_ALLOWLIST.values()) == {SCOPE_PACK_READ}
 
 
 def test_allowlisted_routes_exist():
     live = set(_iter_all_routes(app))
-    assert ALLOWED <= live, f"allow-listed routes missing from the app: {ALLOWED - live}"
-
-
-def test_sweep_traversal_is_not_vacuous():
-    routes = set(_iter_all_routes(app))
-    assert len(routes) >= 100, f"only {len(routes)} routes found; traversal broken?"
-    assert ("GET", "/health") in routes
-    assert ("GET", "/openapi.json") in routes
+    allowed = set(API_TOKEN_ROUTE_ALLOWLIST)
+    assert allowed <= live, f"allow-listed routes missing from the app: {allowed - live}"
 
 
 async def test_api_token_sweep_every_route_denied_except_allowlist(client, db, test_user):
-    """Every registered route answers 403 to a pack:read token, except the two
-    allow-listed GETs, which answer 200. A route added later is covered
-    automatically because this enumerates the live route table."""
+    """Every registered route NOT in API_TOKEN_ROUTE_ALLOWLIST answers 403 to a
+    pack:read token. Each allow-listed route answers 200 to that token and 403
+    (missing scope) to a token without it, so an entry added to the allow-list
+    for a route that does not enforce the scope is caught too. A route added
+    later is covered automatically because this enumerates the live route
+    table."""
     _, token = await _mint(db, test_user)
+    no_scope = await _raw_token(db, test_user, ["other:read"])
+    routes = sorted(set(_iter_all_routes(app)))
+    assert len(routes) >= MIN_SWEEP_ROUTES, (
+        f"only {len(routes)} routes found; the route traversal is likely broken"
+    )
+    assert ("GET", "/health") in routes
+    assert ("GET", "/openapi.json") in routes
+
     wrong = []
-    for method, path in sorted(set(_iter_all_routes(app))):
-        resp = await client.request(method, _concrete(path), headers=_bearer(token))
-        if (method, path) in ALLOWED:
+    for method, path in routes:
+        concrete = _concrete(path)
+        resp = await client.request(method, concrete, headers=_bearer(token))
+        if (method, path) in API_TOKEN_ROUTE_ALLOWLIST:
             if resp.status_code != 200:
                 wrong.append(f"{method} {path}: expected 200, got {resp.status_code}")
+            scoped = await client.request(method, concrete, headers=_bearer(no_scope))
+            if scoped.status_code != 403:
+                wrong.append(
+                    f"{method} {path}: expected 403 without {SCOPE_PACK_READ}, "
+                    f"got {scoped.status_code}"
+                )
         elif resp.status_code != 403 or (
             method != "HEAD" and resp.json().get("detail") != API_TOKEN_ROUTE_DENIED_DETAIL
         ):
@@ -314,7 +324,7 @@ async def test_api_token_without_pack_read_is_403_on_allowlisted_routes(
     client, db, test_user
 ):
     token = await _raw_token(db, test_user, ["other:read"])
-    for method, path in sorted(ALLOWED):
+    for method, path in sorted(API_TOKEN_ROUTE_ALLOWLIST):
         resp = await client.request(method, path, headers=_bearer(token))
         assert resp.status_code == 403, path
         assert resp.json()["detail"] == "API token lacks the required scope"
@@ -327,22 +337,48 @@ async def test_api_token_of_inactive_user_is_refused(client, db):
     assert resp.status_code == 403
 
 
-async def test_api_token_is_scoped_to_its_owner(client, db, test_user):
+async def test_api_token_is_scoped_to_its_owner(client, db, test_user, monkeypatch):
+    """On the real app, a token minted for one user builds the pack for that
+    user and nobody else (test_user exists and is not the owner)."""
+    from app.services.context_pack import ContextPackService
+
     other = await create_test_user(db, email="token-owner-2@example.com")
+    assert other.id != test_user.id
     _, token = await _mint(db, other)
-    principal_user_ids = []
+    built_for = []
+    real_build = ContextPackService.build
 
-    async def capture(principal=Depends(get_current_principal)):
-        principal_user_ids.append(principal.user.id)
-        return {}
+    async def recording_build(self, user_id):
+        built_for.append(user_id)
+        return await real_build(self, user_id)
 
-    probe = FastAPI()
-    probe.get("/api/v1/export/context-pack")(capture)
-    probe.dependency_overrides[get_db] = lambda: db
-    async with AsyncClient(transport=ASGITransport(app=probe), base_url="http://t") as c:
-        resp = await c.get("/api/v1/export/context-pack", headers=_bearer(token))
+    monkeypatch.setattr(ContextPackService, "build", recording_build)
+    resp = await client.get("/api/v1/export/context-pack", headers=_bearer(token))
     assert resp.status_code == 200
-    assert principal_user_ids == [other.id]
+    assert built_for == [other.id]
+
+
+async def test_cors_preflight_with_token_has_no_body_and_later_get_needs_scope(
+    client, db, test_user
+):
+    """Documents the middleware order in app/main.py: the CORS layer answers a
+    preflight OPTIONS before the route guard sees it (no token check, no JSON
+    error body), so the preflight says nothing about access. The real GET that
+    follows is still judged by the guard/dependency: without pack:read it is 403."""
+    no_scope = await _raw_token(db, test_user, ["other:read"])
+    headers = {
+        **_bearer(no_scope),
+        "Origin": "http://localhost:3000",
+        "Access-Control-Request-Method": "GET",
+    }
+    preflight = await client.options("/api/v1/export/context-pack", headers=headers)
+    assert preflight.status_code == 200
+    assert preflight.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert preflight.text == "OK"  # CORS layer's plain reply, not the guard's JSON 403
+
+    follow_up = await client.get("/api/v1/export/context-pack", headers=_bearer(no_scope))
+    assert follow_up.status_code == 403
+    assert follow_up.json()["detail"] == "API token lacks the required scope"
 
 
 async def test_jwt_user_unaffected(authed_client):
@@ -520,6 +556,8 @@ def test_route_path_strips_root_path_only_when_it_is_a_prefix():
     pack = "/api/v1/export/context-pack"
     assert route_path({"path": "/invest" + pack, "root_path": "/invest"}) == pack
     assert route_path({"path": pack, "root_path": ""}) == pack
+    # path exactly equal to root_path: stripped down to the empty route path.
+    assert route_path({"path": "/invest", "root_path": "/invest"}) == ""
     # root_path that is not a prefix of path: no stripping (len('/invest') lands
     # on a '/' in pack, so only the prefix check keeps this unchanged).
     assert route_path({"path": pack, "root_path": "/invest"}) == pack

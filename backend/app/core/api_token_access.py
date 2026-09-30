@@ -37,6 +37,7 @@ KNOWN_SCOPES = frozenset({SCOPE_PACK_READ})
 API_TOKEN_ROUTE_ALLOWLIST: dict[tuple[str, str], str] = {
     ("GET", "/api/v1/export/context-pack"): SCOPE_PACK_READ,
     ("GET", "/api/v1/export/outbox-status"): SCOPE_PACK_READ,
+    ("GET", "/api/v1/export/contract-docs"): SCOPE_PACK_READ,
 }
 
 API_TOKEN_ROUTE_DENIED_DETAIL = "API tokens cannot access this endpoint"

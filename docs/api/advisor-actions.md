@@ -1,6 +1,6 @@
 # Advisor Action Vocabulary
 
-**`advisor_actions_version`: 1.4** — MAJOR.MINOR (MINOR = additive action/field/enum; MAJOR =
+**`advisor_actions_version`: 1.5** — MAJOR.MINOR (MINOR = additive action/field/enum; MAJOR =
 rename/removal). The context pack emits this same value as `advisor_actions_version`, so an
 advisor can detect when *this* uploaded copy is behind: if the pack's version is higher than the
 one stamped here, ask for a re-upload before relying on the vocabulary (tolerate minor gaps).
@@ -51,6 +51,8 @@ Summary: Carry-trade tier adjustments + new defense watchlist entries
    trade_type: buy
    quantity: 100
    price: 49.20
+   account: Roth
+   executed_at: 2026-05-12
    ⚠️ approval required
 
 5. LOG_TRADE — CCJ
@@ -147,7 +149,7 @@ Notes:
 
 | Action | Fields |
 |--------|--------|
-| `LOG_TRADE` | **`equity_symbol`**, **`trade_type`** (`buy` / `sell` / `short` / `cover` / `dividend` / `split`), **`quantity`**, **`price`**, `fees`, `account` (account **name**), `notes` — **always `⚠️ approval required`** |
+| `LOG_TRADE` | **`equity_symbol`**, **`trade_type`** (`buy` / `sell` / `short` / `cover` / `dividend` / `split`), **`quantity`**, **`price`**, `fees`, `account` (account **name**), `executed_at` (ISO date or datetime), `notes` — **always `⚠️ approval required`** |
 
 Two of those six are not fills, and their fields mean different things:
 
@@ -164,8 +166,18 @@ Two of those six are not fills, and their fields mean different things:
   account holding it, so one row is the whole entry. Splits are manual entry too; nothing in the
   app ingests them.
 
-`account` is ignored for the four fills, which keep their existing unassigned-by-default
-behaviour.
+For the four fills, `account` is **optional but recommended**: the trade is filed under that
+account, and a sell is only matched against buys **in the same account** (an unassigned trade is
+its own bucket). So a sell must carry the same `account` as the buys it closes, or it opens a
+negative position in the unassigned bucket instead of closing the real one. Omitting it keeps the
+unassigned-by-default behaviour. The account must already exist (accounts are created in the app,
+not by a handoff action); an unknown name comes back `flagged`.
+
+`executed_at` is the trade date, optional on every `LOG_TRADE`. Omit it for a trade made today.
+Set it to backfill a past trade or to seed an opening position (one `buy` per account and symbol,
+quantity and average cost from the broker's positions, dated the day the positions were read).
+Lot matching and realized P&L follow `executed_at`, so a backdated row lands in its right place.
+A date in the future comes back `flagged`.
 
 `deposit` and `withdrawal` are **not** `LOG_TRADE` values. They have no equity leg and live in the
 cash ledger, which has no handoff verb — if the user wants a deposit recorded, say so in prose and
@@ -253,3 +265,4 @@ write-vocabulary change (a new action that adds no pack field) bumps **this** ve
 | 1.2 | 2026-06-16 | Added `UPDATE_CALENDAR_EVENT` — correct a calendar event in place (`title` / `event_date` / `event_type` / `description` / `importance`; `PUT /events/{id}`) — and `REMOVE_CALENDAR_EVENT` — delete one (`DELETE /events/{id}`). Both target by event title (+ `event_date` to disambiguate), are benign (no approval), and operate on user-created custom events only — auto-fetched system events come back `flagged`. Pure write-vocab (no read-side pack field added), so pack `schema_version` stayed 1.6 |
 | 1.3 | 2026-07-18 | Documented the `percent_up` / `percent_down` alert `condition_type` values (percent change over `comparison_period` vs a percent `threshold_value`) and added the `comparison_period` field to `ADD_ALERT`. The create endpoint, `AlertCreate` schema (enum + `comparison_period` validation), and evaluator have accepted these since #48/#51 was fixed; this catches the written contract up so an advisor can construct a valid percent alert. Additive (enum values + a field), so MINOR; pack `schema_version` unchanged (no read-side pack field added) |
 | 1.4 | 2026-08-30 | Widened `LOG_TRADE`'s `trade_type` enum with `dividend` and `split` (the total-return build, foundry `plans/investing_companion/total-return-design.md`). Both are manual-entry only and both repurpose `quantity`/`price` — documented above. Added the `account` field (account **name**; the executor resolves it), **required for `dividend`** because dividend cash is folded per account and an unassigned one disappears from that account's balance and NAV; forbidden for `split`, ignored for fills. `split` also requires `fees: 0`. Deliberately NOT added: a cash-ledger verb. `deposit`/`withdrawal` now exist as API endpoints (`/api/v1/cash`), but adding a write verb for money movement is a separate decision from adding a trade type, so the write vocabulary stays silent on it and such a `LOG_TRADE` comes back `flagged`. Additive (enum values + one field), so MINOR; pack `schema_version` unchanged — NAV is a new endpoint, not a new context-pack field |
+| 1.5 | 2026-10-01 | `LOG_TRADE` gains an optional `executed_at` (trade date) and honours `account` on the four fills (`buy` / `sell` / `short` / `cover`), which 1.4 ignored. Sells match buys only within one account, so a fill logged without its account could not close a position opened in that account. Both fields already existed on `POST /trades`; this exposes them to the advisor. An unknown account or a future `executed_at` comes back `flagged`. Additive (fields), so MINOR; pack `schema_version` unchanged |

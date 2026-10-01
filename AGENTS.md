@@ -164,8 +164,8 @@ work on a feature branch → PR → CI green → squash-merge.
 | New/changed/removed action, field, or enum | `docs/api/advisor-actions.md` + `ADVISOR_ACTIONS_VERSION` | Bump (MINOR=additive, MAJOR=rename/removal); write-side version, independent of the pack's `schema_version` |
 | A feature removes a limitation | `UNSUPPORTED_FEATURES` in `services/context_pack.py` | Shrink the live list; never hardcode bug lists in the contract docs |
 
-The [hub's onboarding kit](https://github.com/smithadifd/investing-hub/tree/main/docs/onboarding) points at the two `docs/api/*` contracts, so ordinary feature work needs
-no kit edits.
+The [hub's onboarding kit](https://github.com/smithadifd/investing-hub/tree/main/docs/onboarding) reads the two `docs/api/*` contracts through
+`GET /api/v1/export/contract-docs` (`backend/app/api/v1/endpoints/export.py`), so ordinary feature work needs no kit edits.
 
 ## Testing strategy
 

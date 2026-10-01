@@ -114,7 +114,7 @@ is a fill-in-the-blanks scaffold for exactly that.
 > alerts; you review it and the app applies the changes. The exact shape of that exchange is
 > the [handoff schema](docs/api/handoff-schema.md).
 
-Clone [investing-hub](https://github.com/smithadifd/investing-hub), open the kit in Claude Code, and say *"Walk me through [`docs/onboarding/ONBOARDING.md`](https://github.com/smithadifd/investing-hub/blob/main/docs/onboarding/ONBOARDING.md)"* --
+Clone [investing-hub](https://github.com/smithadifd/investing-hub), open that checkout in Claude Code, and say *"Walk me through [`docs/onboarding/ONBOARDING.md`](https://github.com/smithadifd/investing-hub/blob/main/docs/onboarding/ONBOARDING.md)"* --
 it interviews you and fills the templates. The optional app-integration layer wires the advisor
 to this app's read/write contract ([`docs/api/handoff-schema.md`](docs/api/handoff-schema.md) and
 [`docs/api/advisor-actions.md`](docs/api/advisor-actions.md)).

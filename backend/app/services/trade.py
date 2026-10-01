@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -442,6 +442,17 @@ class TradeService:
 
         equity_id = trade.equity_id
 
+        # Drop the trade's pairs first. The FKs cascade in the database, but the
+        # ORM relationships would otherwise null the NOT NULL pair columns before
+        # the DELETE reaches it, so a paired trade could never be deleted.
+        await self.db.execute(
+            delete(TradePair).where(
+                or_(
+                    TradePair.open_trade_id == trade.id,
+                    TradePair.close_trade_id == trade.id,
+                )
+            )
+        )
         await self.db.delete(trade)
         await self.db.commit()
 

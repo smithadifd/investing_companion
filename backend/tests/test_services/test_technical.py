@@ -85,6 +85,16 @@ class TestTechnicalIndicators:
             "histogram": [None, None, None, 0, 0, 0],
         }
 
+    def test_macd_histogram_tracks_changing_line(self):
+        # Fast EMA(2) ends at 29/6; slow EMA(3) ends at 4.
+        # MACD moves from 1/2 to 5/6, so signal = 2/3 and histogram = 1/6.
+        result = TechnicalIndicators.macd(
+            [1, 2, 3, 6], fast_period=2, slow_period=3, signal_period=2
+        )
+        assert result["macd"] == pytest.approx([None, None, 1 / 2, 5 / 6])
+        assert result["signal"] == pytest.approx([None, None, None, 2 / 3])
+        assert result["histogram"] == pytest.approx([None, None, None, 1 / 6])
+
     def test_macd_short_series(self):
         assert TechnicalIndicators.macd([1, 2], 2, 3, 2) == {
             "macd": [None, None],

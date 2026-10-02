@@ -153,7 +153,7 @@ npm install
 npm run dev
 ```
 
-Requires Python 3.11+, Node.js 20+, PostgreSQL 15+ with TimescaleDB, and Redis.
+Requires Python 3.11+, Node.js 22 LTS, PostgreSQL 15+ with TimescaleDB, and Redis.
 
 ## Testing
 

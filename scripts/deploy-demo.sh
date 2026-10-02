@@ -78,10 +78,13 @@ restore_stopped() {
     done
     return "$failed"
 }
+restored=0
 on_exit() {
     local status=$?
     trap - EXIT
-    restore_stopped || status=1
+    if [ "$restored" -eq 0 ]; then
+        restore_stopped || status=1
+    fi
     exit "$status"
 }
 trap on_exit EXIT
@@ -99,13 +102,34 @@ echo "--- Starting Investing Companion ---"
 compose up -d
 
 # Restore every project recorded before the build, including this one if it ran.
-trap - EXIT
+restored=1
 restore_stopped
 
-# These commands are intentionally best effort for an already initialized demo.
-docker exec investing_demo_api python -m alembic upgrade head || echo "WARN: Alembic migration failed" >&2
-docker exec investing_demo_api python -m scripts.seed_demo_data --all || echo "WARN: Demo data seed failed" >&2
-docker exec investing_demo_api python -m scripts.seed_demo_users || echo "WARN: Demo user seed failed" >&2
+echo "--- Waiting for demo database ---"
+for attempt in 1 2 3 4 5; do
+    if docker exec investing_demo_db pg_isready -U investing_demo -d investing_demo >/dev/null 2>&1; then
+        break
+    fi
+    if [ "$attempt" -eq 5 ]; then
+        echo "ERROR: database not ready after five attempts" >&2
+        echo "Inspect logs: cd $REMOTE_PATH && docker compose -f docker-compose.demo.yml --env-file .env.demo logs --tail=100 db" >&2
+        exit 1
+    fi
+    sleep "$((2 ** (attempt - 1)))"
+done
+
+if ! docker exec investing_demo_api python -m alembic upgrade head; then
+    echo "ERROR: Alembic migration failed" >&2
+    exit 1
+fi
+if ! docker exec investing_demo_api python -m scripts.seed_demo_data --all; then
+    echo "ERROR: Demo data seed failed" >&2
+    exit 1
+fi
+if ! docker exec investing_demo_api python -m scripts.seed_demo_users; then
+    echo "ERROR: Demo user seed failed" >&2
+    exit 1
+fi
 
 check_health() {
     local url="$1" log_service="$2" attempt delay

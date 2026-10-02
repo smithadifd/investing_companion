@@ -74,6 +74,16 @@ const INDICATOR_COLORS = {
   macdHistogramNegative: '#ef4444',
 };
 
+function getColors(resolvedTheme: string | undefined): ChartColors {
+  const isDark = resolvedTheme === 'dark';
+  return {
+    background: isDark ? '#1f2937' : '#ffffff',
+    text: isDark ? '#9ca3af' : '#333333',
+    grid: isDark ? '#374151' : '#f0f0f0',
+    border: isDark ? '#374151' : '#e0e0e0',
+  };
+}
+
 export function AdvancedChart({
   data,
   technicals,
@@ -95,21 +105,11 @@ export function AdvancedChart({
 
   const { resolvedTheme } = useTheme();
 
-  const getColors = (): ChartColors => {
-    const isDark = resolvedTheme === 'dark';
-    return {
-      background: isDark ? '#1f2937' : '#ffffff',
-      text: isDark ? '#9ca3af' : '#333333',
-      grid: isDark ? '#374151' : '#f0f0f0',
-      border: isDark ? '#374151' : '#e0e0e0',
-    };
-  };
-
   // Main price chart
   useEffect(() => {
     if (!mainContainerRef.current || data.length === 0) return;
 
-    const colors = getColors();
+    const colors = getColors(resolvedTheme);
     const chart = createChart(mainContainerRef.current, {
       width: mainContainerRef.current.clientWidth,
       height,
@@ -248,7 +248,7 @@ export function AdvancedChart({
   useEffect(() => {
     if (!rsiContainerRef.current || !technicals || !showRSI) return;
 
-    const colors = getColors();
+    const colors = getColors(resolvedTheme);
     const chart = createChart(rsiContainerRef.current, {
       width: rsiContainerRef.current.clientWidth,
       height: 120,
@@ -331,7 +331,7 @@ export function AdvancedChart({
   useEffect(() => {
     if (!macdContainerRef.current || !technicals || !showMACD) return;
 
-    const colors = getColors();
+    const colors = getColors(resolvedTheme);
     const chart = createChart(macdContainerRef.current, {
       width: macdContainerRef.current.clientWidth,
       height: 120,

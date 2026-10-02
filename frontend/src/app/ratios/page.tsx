@@ -291,14 +291,14 @@ export default function RatiosPage() {
   const toggleFavorite = useToggleRatioFavorite();
   const deleteRatio = useDeleteRatio();
   const createRatio = useCreateRatio();
-  const initializeRatios = useInitializeRatios();
+  const { mutate: initializeRatios } = useInitializeRatios();
 
   // Initialize system ratios on first load if no ratios exist
   useEffect(() => {
     if (ratios && ratios.length === 0) {
-      initializeRatios.mutate();
+      initializeRatios();
     }
-  }, [ratios]);
+  }, [ratios, initializeRatios]);
 
   // Auto-select first ratio
   useEffect(() => {
@@ -439,7 +439,7 @@ export default function RatiosPage() {
               <div className="text-center py-8">
                 <p className="text-neutral-500 mb-4">No ratios found</p>
                 <button
-                  onClick={() => initializeRatios.mutate()}
+                  onClick={() => initializeRatios()}
                   className="text-blue-600 hover:text-blue-700 text-sm font-medium"
                 >
                   Initialize system ratios

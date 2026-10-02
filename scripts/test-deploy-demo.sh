@@ -3,9 +3,10 @@ set -euo pipefail
 
 SCRIPT="${1:-$(cd "$(dirname "$0")" && pwd)/deploy-demo.sh}"
 SCRATCH=$(mktemp -d)
-export DEMO_ROOT="$SCRATCH/demos" STUB_LOG="$SCRATCH/commands" HEALTH_FAIL=""
+export DEMO_ROOT="$SCRATCH/demos" STUB_LOG="$SCRATCH/commands" HEALTH_FAIL="" BUILD_FAIL="" RESTORE_FAIL=""
 export DEMO_INFRA_DIR="$SCRATCH/infra"
 mkdir -p "$SCRATCH/bin" "$DEMO_ROOT" "$DEMO_INFRA_DIR"
+printf 'admin_ip = "127.0.0.1"\n' > "$DEMO_INFRA_DIR/terraform.tfvars"
 : > "$STUB_LOG"
 for project in investing_companion running_demo dormant_demo; do
     mkdir -p "$DEMO_ROOT/$project/.git"
@@ -34,7 +35,11 @@ elif [ "$1" = compose ]; then
     case "$1" in
         ps) [ -f .running ] && echo "$(basename "$PWD")-container" || true ;;
         stop) rm -f .running ;;
-        up) : > .running ;;
+        up)
+            if [ "${RESTORE_FAIL:-}" = "$(basename "$PWD")" ]; then exit 1; fi
+            : > .running
+            ;;
+        build) [ -z "${BUILD_FAIL:-}" ] ;;
     esac
 fi
 STUB
@@ -46,6 +51,7 @@ STUB
 cat > "$SCRATCH/bin/curl" <<'STUB'
 #!/usr/bin/env bash
 printf 'curl %s\n' "$*" >> "$STUB_LOG"
+if [ "${1:-}" = -s ] && [ "${4:-}" = ifconfig.me ]; then echo 127.0.0.1; exit 0; fi
 case "$*" in *"$HEALTH_FAIL"*) [ -z "$HEALTH_FAIL" ] ;; *) exit 0 ;; esac
 STUB
 cat > "$SCRATCH/bin/sleep" <<'STUB'
@@ -75,6 +81,32 @@ assert_no_global_stop
 [ ! -f "$DEMO_ROOT/dormant_demo/.running" ] || fail 'dormant demo was started'
 grep -q 'both health checks passed' "$SCRATCH/success.out" || fail 'success health result missing'
 printf 'PASS: only recorded demo projects are stopped and restored\n'
+fi
+
+if [ "$test_case" = all ] || [ "$test_case" = restore ]; then
+: > "$STUB_LOG"
+export RESTORE_FAIL=running_demo
+if "$SCRIPT" > "$SCRATCH/restore-fail.out" 2>&1; then fail 'failed demo restart exited zero'; fi
+grep -q "failed to restore demo project: $DEMO_ROOT/running_demo/" "$SCRATCH/restore-fail.out" || fail 'failed demo restart was not reported'
+grep -q 'logs --tail=100' "$SCRATCH/restore-fail.out" || fail 'failed demo restart log command missing'
+if grep -q 'Deploy complete' "$SCRATCH/restore-fail.out"; then fail 'failed demo restart reported complete'; fi
+[ -f "$DEMO_ROOT/investing_companion/.running" ] || fail 'other recorded demo was not restored'
+[ ! -f "$DEMO_ROOT/dormant_demo/.running" ] || fail 'dormant demo was started after restart failure'
+export RESTORE_FAIL=""
+printf 'PASS: failed demo restart exits nonzero and reports logs\n'
+fi
+
+if [ "$test_case" = all ] || [ "$test_case" = build ]; then
+: > "$STUB_LOG"
+: > "$DEMO_ROOT/running_demo/.running"
+export BUILD_FAIL=1
+if "$SCRIPT" > "$SCRATCH/build-fail.out" 2>&1; then fail 'failed build exited zero'; fi
+[ -f "$DEMO_ROOT/running_demo/.running" ] || fail 'failed build did not restore running demo'
+[ -f "$DEMO_ROOT/investing_companion/.running" ] || fail 'failed build did not restore Investing Companion'
+[ ! -f "$DEMO_ROOT/dormant_demo/.running" ] || fail 'failed build started dormant demo'
+if grep -q 'Deploy complete' "$SCRATCH/build-fail.out"; then fail 'failed build reported complete'; fi
+export BUILD_FAIL=""
+printf 'PASS: failed build restores recorded demos and exits nonzero\n'
 fi
 
 if [ "$test_case" = all ] || [ "$test_case" = api ]; then

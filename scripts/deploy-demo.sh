@@ -67,13 +67,24 @@ for dir in "$DEMO_ROOT"/*/; do
 done
 
 restore_stopped() {
-    local dir
+    local dir failed=0
     for dir in "${running_projects[@]}"; do
         echo "Restoring demo project: $dir"
-        (cd "$dir" && compose up -d) || true
+        if ! (cd "$dir" && compose up -d); then
+            echo "ERROR: failed to restore demo project: $dir" >&2
+            echo "Inspect logs: cd $dir && docker compose -f docker-compose.demo.yml --env-file .env.demo logs --tail=100" >&2
+            failed=1
+        fi
     done
+    return "$failed"
 }
-trap restore_stopped EXIT
+on_exit() {
+    local status=$?
+    trap - EXIT
+    restore_stopped || status=1
+    exit "$status"
+}
+trap on_exit EXIT
 
 echo "--- Stopping running demo projects to free memory for build ---"
 for dir in "${running_projects[@]}"; do
@@ -88,8 +99,8 @@ echo "--- Starting Investing Companion ---"
 compose up -d
 
 # Restore every project recorded before the build, including this one if it ran.
-restore_stopped
 trap - EXIT
+restore_stopped
 
 # These commands are intentionally best effort for an already initialized demo.
 docker exec investing_demo_api python -m alembic upgrade head || echo "WARN: Alembic migration failed" >&2

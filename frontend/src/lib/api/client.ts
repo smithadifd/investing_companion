@@ -122,9 +122,9 @@ class ApiClient {
 
   constructor() {
     // Load tokens from localStorage if available (client-side only)
-    if (typeof window !== 'undefined') {
-      this.accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
-      this.refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      this.accessToken = window.localStorage.getItem(ACCESS_TOKEN_KEY);
+      this.refreshToken = window.localStorage.getItem(REFRESH_TOKEN_KEY);
     }
   }
 
@@ -134,9 +134,9 @@ class ApiClient {
   private storeTokens(tokens: TokenResponse): void {
     this.accessToken = tokens.access_token;
     this.refreshToken = tokens.refresh_token;
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
-      localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      window.localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
+      window.localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
     }
   }
 
@@ -146,9 +146,9 @@ class ApiClient {
   private clearTokens(): void {
     this.accessToken = null;
     this.refreshToken = null;
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(ACCESS_TOKEN_KEY);
-      localStorage.removeItem(REFRESH_TOKEN_KEY);
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+      window.localStorage.removeItem(REFRESH_TOKEN_KEY);
     }
   }
 

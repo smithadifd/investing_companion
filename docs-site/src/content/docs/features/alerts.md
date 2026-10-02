@@ -27,7 +27,7 @@ Content-Type: application/json
 
 Use `equity_symbol` for equities or `ratio_id` (integer FK) for ratios — not both. The service calls `EquityService.get_or_create_equity` so you do not need to pre-register the symbol.
 
-`comparison_period` is required when `condition_type` is `percent_up` or `percent_down`. Valid values are `"1d"`, `"1w"`, and `"1m"`.
+`comparison_period` is required when `condition_type` is `percent_up` or `percent_down`. Valid values are `"1d"`, `"1w"`, `"1m"`, `"3m"`, `"6m"`, and `"1y"` (see [`VALID_COMPARISON_PERIODS`](https://github.com/smithadifd/investing_companion/blob/main/backend/app/schemas/alert.py#L23)).
 
 ## Condition types
 
@@ -42,11 +42,11 @@ Use `equity_symbol` for equities or `ratio_id` (integer FK) for ratios — not b
 
 `above` and `below` use the intraday high/low from the Yahoo Finance quote so a price spike or dip that recovers before the 5-minute poll still fires. `crosses_above` and `crosses_below` store state in the `was_above_threshold` column — the first check after creation only establishes a baseline and does not trigger.
 
-### Percent-change conditions and the price_history gap
+### Percent-change conditions and price history
 
-`percent_up` and `percent_down` compute change relative to a historical close price. `AlertService._get_historical_reference_value` maps the `comparison_period` to a lookback duration (`1d` → 1 day, `1w` → 7 days, `1m` → 30 days), then calls `_get_closest_close` to find the nearest row in the `price_history` hypertable within a ±3-day window.
+`percent_up` and `percent_down` compute change relative to a historical close price. `AlertService._get_historical_reference_value` maps the `comparison_period` to a lookback duration (`1d` → 1 day, `1w` → 7 days, `1m` → 30 days, `3m` → 90 days, `6m` → 180 days, `1y` → 365 days), then calls `_get_closest_close` to find the nearest row in the `price_history` hypertable within a ±3-day window.
 
-**There is currently no scheduled task or API endpoint that writes to `price_history`.** If the table is empty, percent-change alerts will not fire even when the price condition is met — `_evaluate_condition` returns `False` with the message "No price history for {period} lookback". This is a known gap. See the [data flow page](/architecture/data-flow/) for the full alert loop description.
+If no stored close is available, the service attempts an on-demand history backfill and retries once. If it still finds no close, the alert does not fire and `_evaluate_condition` returns `False` with the message "No price history for {period} lookback". See the [data flow page](/architecture/data-flow/) for the full alert loop description.
 
 ## Cooldown
 
@@ -103,7 +103,7 @@ Both tasks are dispatched by `alerts.check_notification_schedule`, which runs ev
 
 ## Known limitations
 
-- Percent-change conditions (`percent_up`, `percent_down`) are non-functional until `price_history` is populated. No write path exists today.
+- Percent-change conditions (`percent_up`, `percent_down`) need historical prices. If on-demand backfill cannot provide them, the condition does not fire.
 - The 5-minute poll interval means a price can briefly cross a threshold and recover without being caught, unless the Yahoo Finance quote's intraday high/low captures the breach. For ratio alerts there is no intraday high/low, so brief crosses between polls will be missed.
 - The `check_all_alerts` task processes alerts sequentially; a large number of active alerts will extend the wall-clock time of each run.
 - In demo mode (`DEMO_MODE=true`), the entire beat schedule is replaced and `alerts.check_all_alerts` does not run.

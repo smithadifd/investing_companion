@@ -34,6 +34,7 @@ export function NewsCard({ item, showSymbols = false }: Props) {
     >
       <div className="flex items-start gap-3">
         {hasImage && item.image_url && (
+          // eslint-disable-next-line @next/next/no-img-element -- External image hosts vary by article.
           <img
             src={item.image_url}
             alt=""

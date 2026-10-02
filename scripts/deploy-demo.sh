@@ -1,26 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ===========================================
-# Investing Companion - Deploy to EC2 Demo
-# ===========================================
-# Usage: ./scripts/deploy-demo.sh
+# Deploy the public demo to EC2. This runs Alembic migrations and reseeds demo
+# data and the demo user; those operations write to the demo database.
+# Usage: ./scripts/deploy-demo.sh [--dry-run]
 
 REMOTE="demo"
-REMOTE_PATH="/opt/demos/investing_companion"
-REPO_URL="https://github.com/smithadifd/investing_companion.git"
 INFRA_DIR="${DEMO_INFRA_DIR:-$HOME/demo-infra}"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+info() { printf '[INFO] %s\n' "$1"; }
+warn() { printf '[WARN] %s\n' "$1"; }
 
-info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
-error() { echo -e "${RED}[ERROR]${NC} $1"; }
-
-# --- Ensure SSH access (auto-update security group if IP changed) ---
 ensure_ssh_access() {
     if [ ! -f "$INFRA_DIR/terraform.tfvars" ]; then
         warn "demo-infra not found at $INFRA_DIR — skipping IP check"
@@ -29,8 +19,7 @@ ensure_ssh_access() {
 
     local current_ip tfvars_ip
     current_ip=$(curl -s --max-time 5 ifconfig.me)
-    tfvars_ip=$(grep 'admin_ip' "$INFRA_DIR/terraform.tfvars" | sed 's/.*"\(.*\)".*/\1/')
-
+    tfvars_ip=$(sed -n 's/.*admin_ip.*"\(.*\)".*/\1/p' "$INFRA_DIR/terraform.tfvars")
     if [[ "$current_ip" != "$tfvars_ip" ]]; then
         warn "Admin IP changed ($tfvars_ip -> $current_ip). Updating security group..."
         (cd "$INFRA_DIR" && ./update-ip.sh)
@@ -40,13 +29,14 @@ ensure_ssh_access() {
     fi
 }
 
-info "Deploying Investing Companion demo to EC2..."
-
-ensure_ssh_access
-
-# Clone or pull
-ssh "$REMOTE" bash -s <<REMOTE_SCRIPT
+remote_script() {
+cat <<'REMOTE_SCRIPT'
 set -euo pipefail
+
+DEMO_ROOT="${DEMO_ROOT:-/opt/demos}"
+REMOTE_PATH="$DEMO_ROOT/investing_companion"
+REPO_URL="https://github.com/smithadifd/investing_companion.git"
+compose() { docker compose -f docker-compose.demo.yml --env-file .env.demo "$@"; }
 
 if [ ! -d "$REMOTE_PATH/.git" ]; then
     echo "Cloning repository..."
@@ -61,62 +51,96 @@ else
 fi
 
 cd "$REMOTE_PATH"
-echo "Now at commit: \$(git rev-parse --short HEAD)"
-
-if [ ! -f ".env.demo" ]; then
-    echo "ERROR: .env.demo not found at $REMOTE_PATH/.env.demo"
-    echo "Create it with: SECRET_KEY=<secret> and POSTGRES_PASSWORD=<password>"
+echo "Now at commit: $(git rev-parse --short HEAD)"
+if [ ! -f .env.demo ]; then
+    echo "ERROR: .env.demo not found at $REMOTE_PATH/.env.demo" >&2
     exit 1
 fi
 
-echo ""
-echo "--- Stopping all containers to free memory for build ---"
-docker stop \$(docker ps -q) 2>/dev/null || true
-
-echo "--- Building Docker images ---"
-docker compose -f docker-compose.demo.yml --env-file .env.demo build
-
-echo "--- Starting containers ---"
-docker compose -f docker-compose.demo.yml --env-file .env.demo up -d
-REMOTE_SCRIPT
-
-info "Waiting for services to start..."
-sleep 15
-
-# Run Alembic migrations
-ssh "$REMOTE" "cd $REMOTE_PATH && docker exec investing_demo_api python -m alembic upgrade head 2>/dev/null" || warn "Alembic migrations skipped (may already be up to date)"
-
-# Seed demo data (ratios + macro events)
-ssh "$REMOTE" "cd $REMOTE_PATH && docker exec investing_demo_api python -m scripts.seed_demo_data --all 2>/dev/null" || warn "Demo data seed skipped"
-
-# Seed demo user + watchlists + trades + alerts
-ssh "$REMOTE" "cd $REMOTE_PATH && docker exec investing_demo_api python -m scripts.seed_demo_users 2>/dev/null" || warn "Demo user seed skipped"
-
-# Restart other demo services that were stopped for the build
-info "Restarting other demo services..."
-ssh "$REMOTE" bash -s <<'RESTART_SCRIPT'
-for dir in /opt/demos/*/; do
-    [ "$dir" = "/opt/demos/investing_companion/" ] && continue
-    if [ -f "$dir/docker-compose.demo.yml" ] && [ -f "$dir/.env.demo" ]; then
-        echo "Restarting $(basename $dir)..."
-        (cd "$dir" && docker compose -f docker-compose.demo.yml --env-file .env.demo up -d) || true
+# Record only running projects whose compose file and environment live under DEMO_ROOT.
+running_projects=()
+for dir in "$DEMO_ROOT"/*/; do
+    [ -f "$dir/docker-compose.demo.yml" ] && [ -f "$dir/.env.demo" ] || continue
+    if [ -n "$(cd "$dir" && compose ps -q)" ]; then
+        running_projects+=("$dir")
     fi
 done
-echo ""
-docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-RESTART_SCRIPT
 
-# Health checks
-info "Checking health..."
-if ssh "$REMOTE" "curl -sf --max-time 10 http://localhost:8003/health" > /dev/null 2>&1; then
-    info "API health check passed"
-else
-    warn "API not responding yet"
+restore_stopped() {
+    local dir failed=0
+    for dir in "${running_projects[@]}"; do
+        echo "Restoring demo project: $dir"
+        if ! (cd "$dir" && compose up -d); then
+            echo "ERROR: failed to restore demo project: $dir" >&2
+            echo "Inspect logs: cd $dir && docker compose -f docker-compose.demo.yml --env-file .env.demo logs --tail=100" >&2
+            failed=1
+        fi
+    done
+    return "$failed"
+}
+on_exit() {
+    local status=$?
+    trap - EXIT
+    restore_stopped || status=1
+    exit "$status"
+}
+trap on_exit EXIT
+
+echo "--- Stopping running demo projects to free memory for build ---"
+for dir in "${running_projects[@]}"; do
+    echo "Stopping demo project: $dir"
+    (cd "$dir" && compose stop)
+done
+
+cd "$REMOTE_PATH"
+echo "--- Building Docker images ---"
+compose build
+echo "--- Starting Investing Companion ---"
+compose up -d
+
+# Restore every project recorded before the build, including this one if it ran.
+trap - EXIT
+restore_stopped
+
+# These commands are intentionally best effort for an already initialized demo.
+docker exec investing_demo_api python -m alembic upgrade head || echo "WARN: Alembic migration failed" >&2
+docker exec investing_demo_api python -m scripts.seed_demo_data --all || echo "WARN: Demo data seed failed" >&2
+docker exec investing_demo_api python -m scripts.seed_demo_users || echo "WARN: Demo user seed failed" >&2
+
+check_health() {
+    local url="$1" log_service="$2" attempt delay
+    for attempt in 1 2 3 4 5; do
+        if curl -fsS --max-time 10 -o /dev/null "$url"; then
+            echo "Health check passed: $url"
+            return 0
+        fi
+        if [ "$attempt" -lt 5 ]; then
+            delay=$((2 ** (attempt - 1)))
+            sleep "$delay"
+        fi
+    done
+    echo "ERROR: health check failed: $url" >&2
+    echo "Inspect logs: cd $REMOTE_PATH && docker compose -f docker-compose.demo.yml --env-file .env.demo logs --tail=100 $log_service" >&2
+    echo "Deploy failed: $url" >&2
+    return 1
+}
+
+check_health http://localhost:8003/health api
+check_health http://localhost:3013/ frontend
+printf 'Deploy complete. Demo at https://invest.smithadifd.com; both health checks passed.\n'
+REMOTE_SCRIPT
+}
+
+if [ "${1:-}" = "--dry-run" ] && [ "$#" -eq 1 ]; then
+    printf 'Remote plan for %s (no SSH or local network changes):\n' "$REMOTE"
+    remote_script
+    exit 0
 fi
-if ssh "$REMOTE" "curl -sf --max-time 10 -o /dev/null http://localhost:3013/" 2>&1; then
-    info "Frontend health check passed"
-else
-    warn "Frontend not responding yet"
+if [ "$#" -ne 0 ]; then
+    printf 'Usage: %s [--dry-run]\n' "$0" >&2
+    exit 2
 fi
 
-info "Deploy complete. Demo at https://invest.smithadifd.com"
+info "Deploying Investing Companion demo to EC2..."
+ensure_ssh_access
+remote_script | ssh "$REMOTE" bash -s

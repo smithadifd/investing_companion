@@ -64,6 +64,11 @@ jobs:
           cd backend
           pip install -r requirements.txt
 
+      - name: Validate demo deploy
+        run: |
+          shellcheck scripts/deploy-demo.sh scripts/test-deploy-demo.sh
+          python3 -m pytest scripts/test_deploy_demo.py -q
+
       - name: Lint with ruff
         run: ruff check backend/
 

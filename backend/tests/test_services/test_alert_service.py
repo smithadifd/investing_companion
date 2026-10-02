@@ -5,11 +5,13 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.alert import Alert, AlertDelivery
 from app.db.models.ratio import Ratio
+from app.schemas.alert import AlertCreate
 from app.schemas.equity import QuoteResponse
 from app.services.alert import AlertService
 from tests.factories import create_test_alert, create_test_equity, create_test_user
@@ -386,6 +388,17 @@ class TestEvaluateConditionPercent:
 class TestEvaluateConditionPercentFromHigh:
     """Tests for the percent_from_high (drawdown) condition."""
 
+    @pytest.mark.parametrize("period", ["3m", "6m"])
+    def test_extended_comparison_period_is_valid(self, period: str):
+        alert = AlertCreate(
+            name="Drawdown",
+            condition_type="percent_from_high",
+            threshold_value=Decimal("10"),
+            comparison_period=period,
+            equity_symbol="TEST",
+        )
+        assert alert.comparison_period == period
+
     async def _insert_price_history(
         self,
         db: AsyncSession,
@@ -476,6 +489,30 @@ class TestEvaluateConditionPercentFromHigh:
         triggered, desc = await service._evaluate_condition(alert, Decimal("88"))
         assert triggered is True
         # Reference must be the in-window 100 high, not the 200 spike
+        assert "100" in desc
+        assert "Down 12.00%" in desc
+
+    @pytest.mark.parametrize(
+        ("period", "old_days"), [("3m", 100), ("6m", 190)]
+    )
+    async def test_extended_lookback_window_excludes_old_highs(
+        self, db: AsyncSession, period: str, old_days: int
+    ):
+        equity = await create_test_equity(db, symbol=f"PFH{period.upper()}")
+        now = datetime.now(timezone.utc)
+        await self._insert_price_history(db, equity.id, now - timedelta(days=old_days), 195.0, high=200.0)
+        await self._insert_price_history(db, equity.id, now - timedelta(days=30), 95.0, high=100.0)
+
+        alert = await create_test_alert(
+            db, equity,
+            condition_type="percent_from_high",
+            threshold_value=10.0,
+            comparison_period=period,
+        )
+        service = AlertService(db)
+
+        triggered, desc = await service._evaluate_condition(alert, Decimal("88"))
+        assert triggered is True
         assert "100" in desc
         assert "Down 12.00%" in desc
 

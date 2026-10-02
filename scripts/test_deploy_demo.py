@@ -10,6 +10,7 @@ import pytest
 @pytest.mark.parametrize(
     "test_case",
     [
+        "all",
         "scope", "db_delayed", "db", "migration", "data_seed", "user_seed",
         "restore", "build", "api", "frontend", "dry_run",
     ],

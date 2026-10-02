@@ -103,6 +103,7 @@ fi
 
 if [ "$test_case" = all ] || [ "$test_case" = db_delayed ]; then
 : > "$STUB_LOG"
+: > "$DEMO_ROOT/db-attempts"
 export DB_READY_AFTER=2
 if ! "$SCRIPT" > "$SCRATCH/db-delayed.out" 2>&1; then fail 'database becoming ready exited nonzero'; fi
 [ "$(grep -c 'docker .* pg_isready ' "$STUB_LOG")" -eq 3 ] || fail 'database readiness did not retry until ready'

@@ -9,7 +9,7 @@ services:
   # Database
   # ===========================================
   db:
-    image: timescale/timescaledb:2.25.0-pg15
+    image: timescale/timescaledb:2.26.0-pg15
     container_name: investing_demo_db
     environment:
       POSTGRES_USER: investing_demo

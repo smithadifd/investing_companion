@@ -97,7 +97,9 @@ assert_no_global_stop
 grep -q 'both health checks passed' "$SCRATCH/success.out" || fail 'success health result missing'
 db_line=$(grep -n 'docker .* pg_isready ' "$STUB_LOG" | head -n 1 | cut -d: -f1)
 migration_line=$(grep -n 'docker .* alembic upgrade head' "$STUB_LOG" | head -n 1 | cut -d: -f1)
-[ -n "$db_line" ] && [ -n "$migration_line" ] && [ "$db_line" -lt "$migration_line" ] || fail 'database readiness did not precede migration'
+if ! { [ -n "$db_line" ] && [ -n "$migration_line" ] && [ "$db_line" -lt "$migration_line" ]; }; then
+    fail 'database readiness did not precede migration'
+fi
 printf 'PASS: only recorded demo projects are stopped and restored\n'
 fi
 

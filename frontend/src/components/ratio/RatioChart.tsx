@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useTheme } from 'next-themes';
-import { createChart, IChartApi, Time, LineStyle } from 'lightweight-charts';
+import { createChart, IChartApi, Time, LineStyle, LineSeries } from 'lightweight-charts';
 import { useRatioHistory } from '@/lib/hooks/useRatio';
 import type { Ratio } from '@/lib/api/types';
 
@@ -92,7 +92,7 @@ export function RatioChart({ ratio }: RatioChartProps) {
     chartRef.current = chart;
 
     // Add ratio line
-    const ratioSeries = chart.addLineSeries({
+    const ratioSeries = chart.addSeries(LineSeries, {
       color: '#3b82f6',
       lineWidth: 2,
       crosshairMarkerVisible: true,

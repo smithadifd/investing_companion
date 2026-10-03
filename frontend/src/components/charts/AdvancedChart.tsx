@@ -9,6 +9,9 @@ import {
   Time,
   LineStyle,
   UTCTimestamp,
+  LineSeries,
+  CandlestickSeries,
+  HistogramSeries,
 } from 'lightweight-charts';
 import type { OHLCVData, TechnicalIndicators } from '@/lib/api/types';
 import type { ChartType } from './ChartControls';
@@ -146,7 +149,7 @@ export function AdvancedChart({
 
     // Price series - candlestick or line based on chartType
     if (chartType === 'line') {
-      const lineSeries = chart.addLineSeries({
+      const lineSeries = chart.addSeries(LineSeries, {
         color: '#3b82f6',
         lineWidth: 2,
         crosshairMarkerVisible: true,
@@ -162,7 +165,7 @@ export function AdvancedChart({
       );
       lineSeries.setData(lineData);
     } else {
-      const candlestickSeries = chart.addCandlestickSeries({
+      const candlestickSeries = chart.addSeries(CandlestickSeries, {
         upColor: '#22c55e',
         downColor: '#ef4444',
         borderDownColor: '#ef4444',
@@ -184,7 +187,7 @@ export function AdvancedChart({
     }
 
     // Volume series
-    const volumeSeries = chart.addHistogramSeries({
+    const volumeSeries = chart.addSeries(HistogramSeries, {
       color: '#26a69a',
       priceFormat: { type: 'volume' },
       priceScaleId: 'volume',
@@ -276,7 +279,7 @@ export function AdvancedChart({
     const timestamps = technicals.timestamps.map(t => toChartTime(t));
 
     // RSI line
-    const rsiSeries = chart.addLineSeries({
+    const rsiSeries = chart.addSeries(LineSeries, {
       color: INDICATOR_COLORS.rsi,
       lineWidth: 2,
       priceFormat: { type: 'custom', formatter: (price: number) => price.toFixed(1) },
@@ -291,7 +294,7 @@ export function AdvancedChart({
     rsiSeries.setData(rsiData);
 
     // Overbought/oversold lines
-    const overboughtLine = chart.addLineSeries({
+    const overboughtLine = chart.addSeries(LineSeries, {
       color: '#ef4444',
       lineWidth: 1,
       lineStyle: LineStyle.Dashed,
@@ -301,7 +304,7 @@ export function AdvancedChart({
     });
     overboughtLine.setData(deduplicateByTime(timestamps.map(time => ({ time, value: 70 }))));
 
-    const oversoldLine = chart.addLineSeries({
+    const oversoldLine = chart.addSeries(LineSeries, {
       color: '#22c55e',
       lineWidth: 1,
       lineStyle: LineStyle.Dashed,
@@ -358,7 +361,7 @@ export function AdvancedChart({
     const timestamps = technicals.timestamps.map(t => toChartTime(t));
 
     // MACD histogram
-    const histogramSeries = chart.addHistogramSeries({
+    const histogramSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: 'custom', formatter: (price: number) => price.toFixed(3) },
       priceScaleId: 'macd',
     });
@@ -375,7 +378,7 @@ export function AdvancedChart({
     histogramSeries.setData(histogramData);
 
     // MACD line
-    const macdLine = chart.addLineSeries({
+    const macdLine = chart.addSeries(LineSeries, {
       color: INDICATOR_COLORS.macdLine,
       lineWidth: 2,
       priceScaleId: 'macd',
@@ -390,7 +393,7 @@ export function AdvancedChart({
     macdLine.setData(macdData);
 
     // Signal line
-    const signalLine = chart.addLineSeries({
+    const signalLine = chart.addSeries(LineSeries, {
       color: INDICATOR_COLORS.macdSignal,
       lineWidth: 2,
       priceScaleId: 'macd',
@@ -512,7 +515,7 @@ function addLineSeries(
   lineWidth: 1 | 2 | 3 | 4 = 1,
   lineStyle: LineStyle = LineStyle.Solid
 ) {
-  const series = chart.addLineSeries({
+  const series = chart.addSeries(LineSeries, {
     color,
     lineWidth,
     lineStyle,

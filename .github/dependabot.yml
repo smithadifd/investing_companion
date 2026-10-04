@@ -7,6 +7,20 @@ updates:
     reviewers:
       - "smithadifd"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    groups:
+      minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
 
   - package-ecosystem: "npm"
     directory: "/frontend"
@@ -15,12 +29,26 @@ updates:
     reviewers:
       - "smithadifd"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     groups:
-      # react and react-dom must stay on the exact same version (#64)
+      # react and react-dom must stay on the exact same version (#64).
+      # First matching group wins, so this stays above minor-and-patch.
       react:
         patterns:
           - "react"
           - "react-dom"
+      minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
     ignore:
       # Tailwind v4 requires full config migration (CSS-first)
       - dependency-name: "tailwindcss"
@@ -29,11 +57,46 @@ updates:
       - dependency-name: "zustand"
         versions: [">=5.0.0"]
 
+  - package-ecosystem: "npm"
+    directory: "/docs-site"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    groups:
+      minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
   # NOTE: root docker-compose image tags (timescaledb, redis) are NOT tracked by this or any entry — the deleted "/" block never found anything to scan (3 failed runs); tracking those needs its own correctly-configured entry (follow-up, not scoped here).
   - package-ecosystem: "docker"
     directory: "/docker"
     schedule:
       interval: "monthly"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    groups:
+      minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
     ignore:
       # Only bump to stable LTS versions manually
       - dependency-name: "python"

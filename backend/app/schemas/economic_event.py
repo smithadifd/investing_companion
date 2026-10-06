@@ -195,6 +195,8 @@ class EarningsInfo(BaseModel):
     earnings_date: date | None = None
     earnings_time: str | None = None  # "BMO" (before market open), "AMC" (after market close)
     is_confirmed: bool = False
+    # Set when Yahoo reports an estimate window (start=earnings_date, end=this)
+    earnings_date_end: date | None = None
 
 
 class DividendInfo(BaseModel):

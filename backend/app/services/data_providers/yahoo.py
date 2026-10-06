@@ -558,7 +558,11 @@ class YahooFinanceProvider(MarketDataProvider):
         calendar = data.get("calendar")
         if calendar:
             earnings_date = None
+            earnings_date_end = None
             earnings_time = None
+            # Yahoo reports an *estimate window* as a 2-element list with
+            # distinct start/end dates; a single value is a specific date.
+            is_confirmed = True
 
             # Calendar format varies - could be dict with 'Earnings Date' key
             if isinstance(calendar, dict):
@@ -566,10 +570,15 @@ class YahooFinanceProvider(MarketDataProvider):
                 for key in ["Earnings Date", "earningsDate", "Earnings"]:
                     if key in calendar:
                         val = calendar[key]
-                        if isinstance(val, list) and len(val) > 0:
+                        if isinstance(val, dict) and 0 in val:
+                            val = [v for _, v in sorted(val.items())]
+                        if isinstance(val, (list, tuple)) and len(val) > 0:
                             earnings_date = _parse_date(val[0])
-                        elif isinstance(val, dict) and 0 in val:
-                            earnings_date = _parse_date(val[0])
+                            if len(val) > 1:
+                                end = _parse_date(val[-1])
+                                if end and earnings_date and end != earnings_date:
+                                    earnings_date_end = end
+                                    is_confirmed = False
                         elif val is not None:
                             earnings_date = _parse_date(val)
                         break
@@ -578,7 +587,11 @@ class YahooFinanceProvider(MarketDataProvider):
                 earnings_info = EarningsInfo(
                     earnings_date=earnings_date,
                     earnings_time=earnings_time,
-                    is_confirmed=True,  # Yahoo doesn't give confirmed status
+                    # Yahoo has no explicit confirmed flag. A date range means
+                    # an estimate window (unconfirmed); a single date is treated
+                    # as confirmed.
+                    is_confirmed=is_confirmed,
+                    earnings_date_end=earnings_date_end,
                 )
 
         # Parse dividend info
@@ -630,11 +643,11 @@ def _parse_date(value: Any) -> date | None:
     if value is None:
         return None
 
+    if isinstance(value, datetime):  # before date: datetime subclasses date
+        return value.date()
+
     if isinstance(value, date):
         return value
-
-    if isinstance(value, datetime):
-        return value.date()
 
     if hasattr(value, "date"):  # pandas Timestamp
         return value.date()

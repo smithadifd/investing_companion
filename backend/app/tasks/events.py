@@ -18,6 +18,44 @@ from app.tasks.utils import run_async
 logger = logging.getLogger(__name__)
 
 
+def _summary(ok_symbols: list[str], events_created: int, failed: list[str]) -> dict:
+    """Result of a bulk refresh. ``errors`` is kept as an alias of ``failed``."""
+    return {
+        "symbols_checked": len(ok_symbols) + len(failed),
+        "ok": len(ok_symbols),
+        "failed": len(failed),
+        "errors": len(failed),
+        "failed_symbols": failed,
+        "events_created": events_created,
+    }
+
+
+async def _refresh_symbols(
+    service, symbols: list[str], session=None, delay: float = 1.5
+) -> dict:
+    """Refresh each symbol, isolating failures, and return an ok/failed summary."""
+    ok: list[str] = []
+    failed: list[str] = []
+    events_created = 0
+    for i, symbol in enumerate(symbols):
+        try:
+            events = await service.refresh_equity_events(symbol)
+            events_created += len(events)
+            ok.append(symbol)
+        except Exception as e:
+            logger.warning(f"Failed to refresh events for {symbol}: {e}", exc_info=True)
+            failed.append(symbol)
+            if session is not None:
+                try:
+                    await session.rollback()  # don't poison later symbols
+                except Exception:
+                    logger.exception("rollback failed after error on %s", symbol)
+        # Delay between API calls to avoid rate limiting (skip on last item)
+        if delay and i < len(symbols) - 1:
+            await asyncio.sleep(delay)
+    return _summary(ok, events_created, failed)
+
+
 @celery_app.task(name="events.refresh_all_watchlist_events")
 def refresh_all_watchlist_events():
     """
@@ -40,36 +78,20 @@ def refresh_all_watchlist_events():
             symbols = [row[0] for row in result.all()]
 
             if not symbols:
-                return {"symbols_checked": 0, "events_created": 0, "errors": 0}
+                return _summary([], 0, [])
 
             logger.info(f"Refreshing events for {len(symbols)} symbols")
 
             service = EconomicEventService(session)
-            events_created = 0
-            errors = 0
-
-            for i, symbol in enumerate(symbols):
-                try:
-                    events = await service.refresh_equity_events(symbol)
-                    events_created += len(events)
-                    # Add delay between API calls to avoid rate limiting (skip on last item)
-                    if i < len(symbols) - 1:
-                        await asyncio.sleep(1.5)
-                except Exception as e:
-                    logger.warning(f"Failed to refresh events for {symbol}: {e}")
-                    errors += 1
-
-            return {
-                "symbols_checked": len(symbols),
-                "events_created": events_created,
-                "errors": errors,
-            }
+            return await _refresh_symbols(service, symbols, session)
 
     try:
         result = run_async(_refresh())
         logger.info(
             f"Watchlist events refresh complete: {result['symbols_checked']} symbols, "
-            f"{result['events_created']} events created, {result['errors']} errors"
+            f"{result['ok']} ok, {result['failed']} failed, "
+            f"{result['events_created']} events created"
+            + (f"; failed symbols: {result['failed_symbols']}" if result["failed"] else "")
         )
         return result
     except Exception as e:

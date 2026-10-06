@@ -14,7 +14,8 @@ The policy is enforced twice, both from this one table:
   for every route that authenticates a user, so the policy still holds if the
   middleware is ever absent (e.g. a sub-application).
 
-To open a new read to API tokens, add ONE line to the table below.
+To open a new route to API tokens, add ONE line to the table below (templates
+may use ``{id}`` / ``{symbol}``; see ``_PLACEHOLDERS``).
 """
 
 import logging
@@ -31,14 +32,85 @@ logger = logging.getLogger(__name__)
 API_TOKEN_PREFIX = "ict_"
 
 SCOPE_PACK_READ = "pack:read"
-KNOWN_SCOPES = frozenset({SCOPE_PACK_READ})
+SCOPE_ADVISOR_WRITE = "advisor:write"
+KNOWN_SCOPES = frozenset({SCOPE_PACK_READ, SCOPE_ADVISOR_WRITE})
 
-# (HTTP method, exact request path) -> scope the token must carry.
-API_TOKEN_ROUTE_ALLOWLIST: dict[tuple[str, str], str] = {
-    ("GET", "/api/v1/export/context-pack"): SCOPE_PACK_READ,
-    ("GET", "/api/v1/export/outbox-status"): SCOPE_PACK_READ,
-    ("GET", "/api/v1/export/contract-docs"): SCOPE_PACK_READ,
+# Path templates. A segment is either a literal or one of these placeholders;
+# placeholders match a WHOLE segment only (never a prefix, never across "/").
+#   {id}     - ASCII digits only
+#   {symbol} - an uppercase ticker: optional leading "^", then A-Z/0-9 and
+#              interior "." or "-" (so "AAPL", "BRK.B", "^GSPC"; not "search",
+#              not "..")
+_PLACEHOLDERS: dict[str, re.Pattern[str]] = {
+    "{id}": re.compile(r"[0-9]+"),
+    "{symbol}": re.compile(r"\^?[A-Z0-9][A-Z0-9.\-]*"),
 }
+
+_A = "/api/v1"
+
+# (HTTP method, path or path template) -> scope the token must carry.
+# This is the ONLY table; both enforcement layers read it. Templates use the
+# placeholders above. Anything absent is denied.
+API_TOKEN_ROUTE_ALLOWLIST: dict[tuple[str, str], str] = {
+    # --- pack:read: the context pack ---
+    ("GET", f"{_A}/export/context-pack"): SCOPE_PACK_READ,
+    ("GET", f"{_A}/export/outbox-status"): SCOPE_PACK_READ,
+    ("GET", f"{_A}/export/contract-docs"): SCOPE_PACK_READ,
+    # --- advisor:write: exactly what the advisor-actions vocabulary maps to ---
+    # alerts (GET list = name resolution)
+    ("GET", f"{_A}/alerts"): SCOPE_ADVISOR_WRITE,
+    ("POST", f"{_A}/alerts"): SCOPE_ADVISOR_WRITE,
+    ("PUT", f"{_A}/alerts/{{id}}"): SCOPE_ADVISOR_WRITE,
+    ("DELETE", f"{_A}/alerts/{{id}}"): SCOPE_ADVISOR_WRITE,
+    # watchlists
+    ("GET", f"{_A}/watchlists"): SCOPE_ADVISOR_WRITE,
+    ("GET", f"{_A}/watchlists/{{id}}"): SCOPE_ADVISOR_WRITE,
+    ("POST", f"{_A}/watchlists"): SCOPE_ADVISOR_WRITE,
+    ("POST", f"{_A}/watchlists/{{id}}/items"): SCOPE_ADVISOR_WRITE,
+    ("PUT", f"{_A}/watchlists/{{id}}/items/{{id}}"): SCOPE_ADVISOR_WRITE,
+    # ratios
+    ("POST", f"{_A}/ratios"): SCOPE_ADVISOR_WRITE,
+    # economic events
+    ("POST", f"{_A}/events"): SCOPE_ADVISOR_WRITE,
+    ("PUT", f"{_A}/events/{{id}}"): SCOPE_ADVISOR_WRITE,
+    ("DELETE", f"{_A}/events/{{id}}"): SCOPE_ADVISOR_WRITE,
+    # trades: create only (no edit/delete); accounts: read only (name resolution)
+    ("POST", f"{_A}/trades"): SCOPE_ADVISOR_WRITE,
+    ("GET", f"{_A}/accounts"): SCOPE_ADVISOR_WRITE,
+    # triggers
+    ("POST", f"{_A}/triggers"): SCOPE_ADVISOR_WRITE,
+    ("PUT", f"{_A}/triggers/{{id}}"): SCOPE_ADVISOR_WRITE,
+    ("POST", f"{_A}/triggers/{{id}}/retire"): SCOPE_ADVISOR_WRITE,
+    # lessons
+    ("POST", f"{_A}/lessons"): SCOPE_ADVISOR_WRITE,
+    # audit receipt
+    ("POST", f"{_A}/export/handoff-receipts"): SCOPE_ADVISOR_WRITE,
+    # equity lookup (symbol resolution)
+    ("GET", f"{_A}/equity/{{symbol}}"): SCOPE_ADVISOR_WRITE,
+}
+
+
+def _compile(template: str) -> tuple[str | re.Pattern[str], ...]:
+    return tuple(_PLACEHOLDERS.get(seg, seg) for seg in template.split("/"))
+
+
+# Built once from the table above: literal entries for exact lookup (a template
+# string must never match itself as a literal path), template entries pre-split.
+_LITERALS: dict[tuple[str, str], str] = {
+    k: v for k, v in API_TOKEN_ROUTE_ALLOWLIST.items() if "{" not in k[1]
+}
+_TEMPLATES: tuple[tuple[str, tuple[str | re.Pattern[str], ...], str], ...] = tuple(
+    (method, _compile(tpl), scope)
+    for (method, tpl), scope in API_TOKEN_ROUTE_ALLOWLIST.items()
+    if "{" in tpl
+)
+
+
+def normalize_template(path: str) -> str:
+    """Collapse every ``{name}`` parameter to ``{}`` (for comparing a table
+    template with a live FastAPI route path whose parameter names differ)."""
+    return re.sub(r"\{[^}]*\}", "{}", path)
+
 
 API_TOKEN_ROUTE_DENIED_DETAIL = "API tokens cannot access this endpoint"
 
@@ -77,8 +149,25 @@ def is_api_token(credential: str | None) -> bool:
 
 
 def required_scope(method: str, path: str) -> str | None:
-    """Scope an API token needs for (method, path); None means denied outright."""
-    return API_TOKEN_ROUTE_ALLOWLIST.get((method.upper(), path))
+    """Scope an API token needs for (method, path); None means denied outright.
+
+    Literal entries match exactly; template entries match segment by segment
+    (same segment count, each placeholder fully matching its segment).
+    """
+    method = method.upper()
+    exact = _LITERALS.get((method, path))
+    if exact is not None:
+        return exact
+    segments = path.split("/")
+    for m, parts, scope in _TEMPLATES:
+        if m != method or len(parts) != len(segments):
+            continue
+        if all(
+            seg == part if isinstance(part, str) else part.fullmatch(seg) is not None
+            for part, seg in zip(parts, segments)
+        ):
+            return scope
+    return None
 
 
 def bearer_credential(headers: Headers) -> str | None:

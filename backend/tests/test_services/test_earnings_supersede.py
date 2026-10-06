@@ -52,9 +52,10 @@ def test_plan_is_idempotent():
 
 def test_plan_never_touches_manual_and_flags_mismatch():
     manual = _row(D1, "manual")
-    plan = plan_earnings_supersede([manual, _row(D1)], D2)
+    yahoo = _row(D1)
+    plan = plan_earnings_supersede([manual, yahoo], D2)
     assert plan.blocked_by == [manual] and plan.manual_mismatch
-    assert plan.move is None and plan.delete == []
+    assert plan.move is None and plan.delete == [yahoo]  # manual kept, Yahoo duplicate dropped
 
 
 def test_plan_manual_agreeing_is_blocked_without_mismatch():
@@ -167,3 +168,17 @@ async def test_manual_rows_untouched(db, equity):
     await _refresh(db, equity, D2)
     rows = await _earnings(db, equity)
     assert [(r.event_date, r.source) for r in rows] == [(D1, "manual")]
+
+
+async def test_stale_yahoo_beside_manual_is_dropped(db, equity):
+    await _seed(db, equity, D1, EventSource.MANUAL.value)
+    await _seed(db, equity, D1 + timedelta(days=3), EventSource.YAHOO.value)
+    await _refresh(db, equity, D2)
+    rows = await _earnings(db, equity)
+    assert [(r.event_date, r.source) for r in rows] == [(D1, "manual")]
+
+
+async def test_row_dated_today_is_not_redated(db, equity):
+    await _seed(db, equity, TODAY, EventSource.YAHOO.value)
+    await _refresh(db, equity, D2)
+    assert [r.event_date for r in await _earnings(db, equity)] == [TODAY, D2]

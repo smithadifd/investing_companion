@@ -182,3 +182,35 @@ async def test_row_dated_today_is_not_redated(db, equity):
     await _seed(db, equity, TODAY, EventSource.YAHOO.value)
     await _refresh(db, equity, D2)
     assert [r.event_date for r in await _earnings(db, equity)] == [TODAY, D2]
+
+
+def test_plan_yahoo_today_with_stale_future_deletes_not_moves():
+    today_row, stale = _row(TODAY), _row(D1)
+    plan = plan_earnings_supersede([today_row, stale], TODAY, TODAY)
+    assert plan.move is None and plan.delete == [stale]  # no collision with today's row
+
+
+def test_plan_manual_today_blocks_and_is_kept():
+    manual = _row(TODAY, "manual")
+    plan = plan_earnings_supersede([manual], TODAY, TODAY)
+    assert plan.blocked_by == [manual] and plan.delete == [] and not plan.manual_mismatch
+
+
+def test_plan_today_row_never_moved_when_yahoo_rolls_forward():
+    today_row = _row(TODAY)
+    plan = plan_earnings_supersede([today_row], D2, TODAY)
+    assert plan.move is None and plan.delete == []
+
+
+async def test_yahoo_today_with_stale_future_row_does_not_collide(db, equity):
+    await _seed(db, equity, TODAY, EventSource.YAHOO.value)
+    await _seed(db, equity, D1, EventSource.YAHOO.value)
+    await _refresh(db, equity, TODAY)
+    assert [r.event_date for r in await _earnings(db, equity)] == [TODAY]
+
+
+async def test_manual_row_today_is_not_overwritten(db, equity):
+    await _seed(db, equity, TODAY, EventSource.MANUAL.value)
+    await _refresh(db, equity, TODAY)
+    rows = await _earnings(db, equity)
+    assert [(r.event_date, r.source) for r in rows] == [(TODAY, "manual")]

@@ -74,27 +74,33 @@ class EarningsSupersedePlan:
 
 
 def plan_earnings_supersede(
-    future_rows: list[EconomicEvent], yahoo_date: date
+    future_rows: list[EconomicEvent], yahoo_date: date, today: date | None = None
 ) -> EarningsSupersedePlan:
-    """Pure planning step (no DB): decide how to reconcile future earnings rows.
+    """Pure planning step (no DB): decide how to reconcile upcoming earnings rows.
 
-    Rows from any source other than Yahoo (manual, seed, ...) are never
-    modified; if one exists Yahoo's date is not applied, a disagreement is
-    flagged, and any future Yahoo rows beside it are deleted so the non-Yahoo
-    row is the only upcoming date. Otherwise stale Yahoo rows are re-dated in place (earliest wins,
+    ``future_rows`` are the equity's earnings rows dated today or later. Rows from
+    any source other than Yahoo (manual, seed, ...) are never modified; if one
+    exists Yahoo's date is not applied, a disagreement is flagged, and Yahoo rows
+    after today beside it are deleted so the non-Yahoo row is the only upcoming
+    date. Otherwise stale Yahoo rows are re-dated in place (earliest wins,
     preserving its id) or deleted if a row on Yahoo's date already exists.
+
+    A row dated ``today`` is never moved or deleted: it may be a report that just
+    happened while Yahoo already shows next quarter. It still counts as "a row on
+    Yahoo's date" and still blocks when it is non-Yahoo.
     Idempotent: with a single row already on ``yahoo_date`` the plan is empty.
     """
+    today = today or date.today()
     plan = EarningsSupersedePlan()
     plan.blocked_by = [r for r in future_rows if r.source != EventSource.YAHOO.value]
+    movable = [
+        r for r in future_rows if r.source == EventSource.YAHOO.value and r.event_date > today
+    ]
     if plan.blocked_by:
         plan.manual_mismatch = any(r.event_date != yahoo_date for r in plan.blocked_by)
-        plan.delete = [r for r in future_rows if r.source == EventSource.YAHOO.value]
+        plan.delete = movable
         return plan
-    stale = sorted(
-        (r for r in future_rows if r.event_date != yahoo_date),
-        key=lambda r: r.event_date,
-    )
+    stale = sorted((r for r in movable if r.event_date != yahoo_date), key=lambda r: r.event_date)
     if any(r.event_date == yahoo_date for r in future_rows):
         plan.delete = stale
     elif stale:
@@ -855,9 +861,9 @@ class EconomicEventService:
         """Reconcile future earnings rows with Yahoo's current next date.
 
         Returns True if the caller should go on to upsert Yahoo's row, False
-        if a non-Yahoo row blocks it. Only rows strictly after today are looked
-        at: a row dated today may be a report that just happened, and Yahoo can
-        roll to next quarter's date the same day.
+        if a non-Yahoo row blocks it. Rows dated today or later are planned over
+        (see ``plan_earnings_supersede``: today's row is never moved or deleted),
+        so history is never touched.
         """
         today = date.today()
         if yahoo_date < today:
@@ -865,10 +871,10 @@ class EconomicEventService:
         stmt = select(EconomicEvent).where(
             EconomicEvent.equity_id == equity_id,
             EconomicEvent.event_type == EventType.EARNINGS.value,
-            EconomicEvent.event_date > today,
+            EconomicEvent.event_date >= today,
         )
         rows = list((await self.db.execute(stmt)).scalars().all())
-        plan = plan_earnings_supersede(rows, yahoo_date)
+        plan = plan_earnings_supersede(rows, yahoo_date, today)
 
         if plan.blocked_by:
             for row in plan.delete:

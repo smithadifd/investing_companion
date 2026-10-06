@@ -8,6 +8,12 @@ from app.tasks.alerts import (
     send_morning_pulse,
     send_eod_wrap,
 )
+from app.tasks.events import (
+    refresh_all_watchlist_events,
+    refresh_equity_events,
+    refresh_macro_calendar,
+    refresh_user_watchlist_events,
+)
 from app.tasks.price_history import sync_all_price_history
 from app.tasks.export import publish_context_pack
 from app.tasks.schwab import check_token_expiry
@@ -22,6 +28,10 @@ __all__ = [
     "check_notification_schedule",
     "send_morning_pulse",
     "send_eod_wrap",
+    "refresh_all_watchlist_events",
+    "refresh_equity_events",
+    "refresh_macro_calendar",
+    "refresh_user_watchlist_events",
     "sync_all_price_history",
     "publish_context_pack",
     "check_token_expiry",

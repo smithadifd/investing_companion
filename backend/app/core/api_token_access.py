@@ -15,7 +15,7 @@ The policy is enforced twice, both from this one table:
   middleware is ever absent (e.g. a sub-application).
 
 To open a new route to API tokens, add ONE line to the table below (templates
-may use ``{id}`` / ``{symbol}``; see ``_PLACEHOLDERS``).
+may use ``{id}`` / ``{symbol}`` / ``{uuid}``; see ``_PLACEHOLDERS``).
 """
 
 import logging
@@ -41,8 +41,13 @@ KNOWN_SCOPES = frozenset({SCOPE_PACK_READ, SCOPE_ADVISOR_WRITE})
 #   {symbol} - an uppercase ticker: optional leading "^", then A-Z/0-9 and
 #              interior "." or "-" (so "AAPL", "BRK.B", "^GSPC"; not "search",
 #              not "..")
+#   {uuid}   - a canonical hyphenated UUID (8-4-4-4-12 hex); events are keyed
+#              by UUID, not by integer id
 _PLACEHOLDERS: dict[str, re.Pattern[str]] = {
     "{id}": re.compile(r"[0-9]+"),
+    "{uuid}": re.compile(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    ),
     "{symbol}": re.compile(r"\^?[A-Z0-9][A-Z0-9.\-]*"),
 }
 
@@ -72,12 +77,15 @@ API_TOKEN_ROUTE_ALLOWLIST: dict[tuple[str, str], str] = {
     ("POST", f"{_A}/ratios"): SCOPE_ADVISOR_WRITE,
     # economic events
     ("POST", f"{_A}/events"): SCOPE_ADVISOR_WRITE,
-    ("PUT", f"{_A}/events/{{id}}"): SCOPE_ADVISOR_WRITE,
-    ("DELETE", f"{_A}/events/{{id}}"): SCOPE_ADVISOR_WRITE,
+    ("PUT", f"{_A}/events/{{uuid}}"): SCOPE_ADVISOR_WRITE,
+    ("DELETE", f"{_A}/events/{{uuid}}"): SCOPE_ADVISOR_WRITE,
     # trades: create only (no edit/delete); accounts: read only (name resolution)
     ("POST", f"{_A}/trades"): SCOPE_ADVISOR_WRITE,
     ("GET", f"{_A}/accounts"): SCOPE_ADVISOR_WRITE,
-    # triggers
+    # triggers (the reads give name resolution and a before-state for revert;
+    # the context pack's trigger rows carry no id)
+    ("GET", f"{_A}/triggers"): SCOPE_ADVISOR_WRITE,
+    ("GET", f"{_A}/triggers/{{id}}"): SCOPE_ADVISOR_WRITE,
     ("POST", f"{_A}/triggers"): SCOPE_ADVISOR_WRITE,
     ("PUT", f"{_A}/triggers/{{id}}"): SCOPE_ADVISOR_WRITE,
     ("POST", f"{_A}/triggers/{{id}}/retire"): SCOPE_ADVISOR_WRITE,

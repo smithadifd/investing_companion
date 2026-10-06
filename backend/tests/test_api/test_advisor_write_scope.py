@@ -45,7 +45,10 @@ def test_scope_is_known():
         ("POST", f"{A}/watchlists/3/items"),
         ("PUT", f"{A}/watchlists/3/items/9"),
         ("POST", f"{A}/triggers/5/retire"),
-        ("PUT", f"{A}/events/2"),
+        ("GET", f"{A}/triggers"),
+        ("GET", f"{A}/triggers/5"),
+        ("PUT", f"{A}/events/3f2b8c1e-9d4a-4e7b-8c2f-1a5b6c7d8e9f"),
+        ("DELETE", f"{A}/events/3F2B8C1E-9D4A-4E7B-8C2F-1A5B6C7D8E9F"),
         ("GET", f"{A}/equity/AAPL"),
         ("GET", f"{A}/equity/BRK.B"),
         ("GET", f"{A}/equity/^GSPC"),
@@ -272,3 +275,18 @@ async def test_advisor_write_token_blocked_in_demo_mode(client, db, test_user, m
     resp = await client.post(f"{A}/alerts", json=ALERT, headers=_bearer(token))
     assert resp.status_code == 403
     assert "demo" in resp.json()["detail"].lower()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        f"{A}/events/2",  # events are UUID-keyed; an integer is not an event id
+        f"{A}/events/3f2b8c1e-9d4a-4e7b-8c2f-1a5b6c7d8e9fx",
+        f"{A}/events/3f2b8c1e9d4a4e7b8c2f1a5b6c7d8e9f",  # unhyphenated
+        f"{A}/events/{{3f2b8c1e-9d4a-4e7b-8c2f-1a5b6c7d8e9f}}",  # braced
+        f"{A}/events/3f2b8c1e-9d4a-4e7b-8c2f-1a5b6c7d8e9g",
+        f"{A}/events/3f2b8c1e-9d4a-4e7b-8c2f-1a5b6c7d8e9f/extra",
+    ],
+)
+def test_event_uuid_template_matches_canonical_uuids_only(path):
+    assert required_scope("PUT", path) is None

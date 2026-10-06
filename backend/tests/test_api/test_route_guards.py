@@ -184,7 +184,9 @@ _SAMPLE_EVENT_ID = "3f2b8c1e-9d4a-4e7b-8c2f-1a5b6c7d8e9f"
 def _concrete(path: str) -> str:
     """Fill path parameters with a placeholder so the path can be requested."""
     return re.sub(
-        r"\{[^}]+\}", lambda m: _SAMPLE_EVENT_ID if m.group(0) == "{event_id}" else "1", path
+        r"\{[^}]+\}",
+        lambda m: _SAMPLE_EVENT_ID if m.group(0) in ("{event_id}", "{uuid}") else "1",
+        path,
     )
 
 

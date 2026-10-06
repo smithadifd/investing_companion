@@ -559,7 +559,7 @@ async def test_api_token_under_root_path_reaches_allowlisted_read(client, db, te
 async def test_api_token_under_root_path_still_denied_elsewhere(client, db, test_user):
     _, token = await _mint(db, test_user)
     async with _prefixed_client("/invest") as c:
-        resp = await c.get("/invest/api/v1/watchlists", headers=_bearer(token))
+        resp = await c.get("/invest/api/v1/settings", headers=_bearer(token))
         head = await c.head("/invest/api/v1/export/context-pack", headers=_bearer(token))
     assert resp.status_code == 403
     assert resp.json()["detail"] == API_TOKEN_ROUTE_DENIED_DETAIL
@@ -595,7 +595,7 @@ async def test_middleware_does_not_strip_a_root_path_that_is_not_a_prefix(db, te
     transport = ASGITransport(app=probe, root_path="/invest")
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         allowed = await c.get("/api/v1/export/context-pack", headers=_bearer(token))
-        denied = await c.get("/api/v1/watchlists", headers=_bearer(token))
+        denied = await c.get("/api/v1/settings", headers=_bearer(token))
     assert allowed.status_code == 200
     assert denied.status_code == 403
 

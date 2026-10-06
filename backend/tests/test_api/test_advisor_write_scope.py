@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from app.core.api_token_access import (
     API_TOKEN_ROUTE_ALLOWLIST,
+    API_TOKEN_ROUTE_DENIED_DETAIL,
     KNOWN_SCOPES,
     SCOPE_ADVISOR_WRITE,
     SCOPE_PACK_READ,
@@ -262,7 +263,7 @@ async def test_advisor_write_token_still_refused_elsewhere(client, db, test_user
     for method, path in denied:
         resp = await client.request(method, path, headers=_bearer(token), json={})
         assert resp.status_code == 403, (method, path)
-        assert resp.json()["detail"] == "API token cannot access this endpoint"
+        assert resp.json()["detail"] == API_TOKEN_ROUTE_DENIED_DETAIL
 
 
 async def test_advisor_write_token_blocked_in_demo_mode(client, db, test_user, monkeypatch):

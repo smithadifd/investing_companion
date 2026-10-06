@@ -124,3 +124,19 @@ async def test_list_shows_expired_and_revoked_state(db, test_user, capsys):
         live.token_prefix: "active",
         revoked.token_prefix: "revoked",
     }
+
+
+async def test_mint_with_pack_read_and_advisor_write_scopes(db, test_user, capsys):
+    code = await mint_api_token.run(
+        db,
+        [
+            "mint", "--user", test_user.email, "--name", "hub",
+            "--scope", "pack:read", "--scope", "advisor:write",
+        ],
+    )
+    capsys.readouterr()
+    assert code == 0
+    row = (
+        await db.execute(select(ApiToken).where(ApiToken.user_id == test_user.id))
+    ).scalar_one()
+    assert row.scopes == ["advisor:write", "pack:read"]

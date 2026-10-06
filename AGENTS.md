@@ -126,12 +126,18 @@ this.
 | Schwab | Ingestion (quotes opt-in, default OFF) | Brokerage transactions + positions (`schwab_ingestion.py`). Extended-hours quotes ONLY when `SCHWAB_QUOTES_ENABLED=true` | Opt-in OAuth; tokens expire every 7 days. The two roles are decoupled (#273): expiry stops transaction sync, not prices |
 
 **AI advisor contract** — an external Claude advisor reads a versioned context pack and writes changes
-back through a handoff loop. The single source of truth is `docs/api/handoff-schema.md` (pack shape,
+back, preferably **directly**: an API token (`ict_...`) with scope `advisor:write` may call the short
+allow-list of endpoints the action vocabulary maps to (`backend/app/core/api_token_access.py` is the
+one table; deny-by-default; trades are create-only, no account/cash/settings/auth). Handoff blocks
+applied by a human remain supported but optional/legacy; receipts (`POST /export/handoff-receipts`)
+stay the audit log. The single source of truth is `docs/api/handoff-schema.md` (pack shape,
 `SCHEMA_VERSION`) and `docs/api/advisor-actions.md` (write vocab, `ADVISOR_ACTIONS_VERSION`); both
 versions live in `backend/app/schemas/context_pack.py`, and `UNSUPPORTED_FEATURES` in
-`backend/app/services/context_pack.py` is the live authority on capability. See § Conventions for the
-sync rule. The operational handoff-execution API reference (how Andrew applies pasted handoff blocks) is
-in `CLAUDE.local.md`, not here — it's operational, not a repo fact.
+`backend/app/services/context_pack.py` is the live authority on capability. Mint tokens with
+`python -m scripts.mint_api_token mint --user <email|id> --name <label> --scope pack:read --scope advisor:write`
+(run from `backend/`). Widening a token's reach = one line in that table plus a contract bump. See
+§ Conventions for the sync rule. The operational handoff-execution API reference (how Andrew applies
+pasted handoff blocks) is in `CLAUDE.local.md`, not here — it's operational, not a repo fact.
 
 ## Database / storage
 

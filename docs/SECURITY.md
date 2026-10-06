@@ -195,19 +195,29 @@ class UserCreate(BaseModel):
 - Users can view and revoke sessions in settings
 - "Logout all" option available
 
-### Read-only API Tokens
+### API Tokens
 
-A script or external tool that only needs to *read* the context pack can use a
-long-lived API token instead of a login session.
+A script or external tool can use a long-lived API token instead of a login
+session. Scopes: `pack:read` (read the context pack) and `advisor:write`
+(apply the advisor action vocabulary directly, see below).
 
-**What a token can reach.** Exactly three endpoints, and only with the
-`pack:read` scope:
+**What a `pack:read` token can reach.** Exactly three endpoints:
 
 - `GET /api/v1/export/context-pack` (JSON, or `?format=markdown`)
 - `GET /api/v1/export/outbox-status`
 - `GET /api/v1/export/contract-docs` (both advisor contract docs and their version stamps, as deployed)
 
-Every other endpoint - every write, every other read, `/health`, `/docs`, the
+**`advisor:write`** additionally allows exactly the endpoints the advisor
+action vocabulary maps to (`docs/api/advisor-actions.md`): create/update/delete
+alerts; create watchlists, add/update watchlist items; create ratios;
+create/update/delete calendar events; create trades (never edit/delete);
+create/update/retire triggers; create lessons; post handoff receipts; plus the
+reads `GET` alerts / watchlists (+ by id) / accounts / equity by symbol for name
+resolution. Paths may carry integer ids / uppercase symbols as whole segments.
+Writes act as the token's owner. It cannot create accounts, move cash, change
+settings or touch auth. Demo mode still blocks the mutations.
+
+Every other endpoint - every other write, every other read, `/health`, `/docs`, the
 auth endpoints, and any endpoint added later - answers **403** to an API token.
 The allow-list lives in one place, `backend/app/core/api_token_access.py`
 (`API_TOKEN_ROUTE_ALLOWLIST`); opening another read to tokens is one line
@@ -219,6 +229,10 @@ sessions are unaffected.
 ```bash
 python -m scripts.mint_api_token mint --user you@example.com --name "advisor pull"
 # optional: --expires-days 90
+
+# direct advisor writes (read + write)
+python -m scripts.mint_api_token mint --user you@example.com --name "advisor" \
+  --scope pack:read --scope advisor:write --expires-days 90
 ```
 
 The token (`ict_<prefix>_<secret>`) is printed **once**, alone, on stdout; the

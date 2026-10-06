@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Mint, list or revoke read-only API tokens.
+"""Mint, list or revoke API tokens.
 
-An API token lets a script or external tool fetch the context pack
-(``GET /api/v1/export/context-pack``) and the outbox status without a login
-session. It is sent as ``Authorization: Bearer ict_...`` and is refused (403)
-on every other endpoint.
+An API token lets a script or external tool call a short allow-list of
+endpoints without a login session. Scope ``pack:read`` (the default) fetches the
+context pack (``GET /api/v1/export/context-pack``) and the outbox status;
+scope ``advisor:write`` additionally allows the advisor-action write endpoints
+(see ``app/core/api_token_access.py``). It is sent as
+``Authorization: Bearer ict_...`` and is refused (403) on every other endpoint.
 
 The plaintext token is printed ONCE, alone, on stdout - capture it then; only
 its hash is stored and it cannot be shown again. Everything else (the token's
@@ -17,6 +19,10 @@ Usage::
     # mint (scope defaults to pack:read)
     python -m scripts.mint_api_token mint --user you@example.com --name "advisor pull"
     python -m scripts.mint_api_token mint --user <user-uuid> --name ci --expires-days 90
+
+    # read + direct advisor writes (repeat --scope)
+    python -m scripts.mint_api_token mint --user you@example.com --name "hub" \\
+        --scope pack:read --scope advisor:write --expires-days 90
 
     # list a user's tokens (never shows the secret)
     python -m scripts.mint_api_token list --user you@example.com

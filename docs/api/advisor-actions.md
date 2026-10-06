@@ -1,6 +1,6 @@
 # Advisor Action Vocabulary
 
-**`advisor_actions_version`: 1.5** — MAJOR.MINOR (MINOR = additive action/field/enum; MAJOR =
+**`advisor_actions_version`: 1.6** — MAJOR.MINOR (MINOR = additive action/field/enum; MAJOR =
 rename/removal). The context pack emits this same value as `advisor_actions_version`, so an
 advisor can detect when *this* uploaded copy is behind: if the pack's version is higher than the
 one stamped here, ask for a re-upload before relying on the vocabulary (tolerate minor gaps).
@@ -17,13 +17,33 @@ the API mapping and resolves names to IDs.
 ## The loop, in one line
 
 ```text
-context pack ──▶ advisor triages ──▶ HANDOFF BLOCK ──▶ executor runs API ──▶ receipt ──▶ next pack
+context pack ──▶ advisor triages ──▶ ACTIONS ──▶ executed ──▶ receipt ──▶ next pack
 ```
 
-The advisor's only job on the write side is to emit a **handoff block**: a markdown action list
-the executor can run unambiguously.
+The action vocabulary below is the **write interface**. There are two ways the same actions get
+executed; the vocabulary, the names-not-IDs rule, the approval marks and the `applied` / `skipped`
+/ `flagged` outcomes are identical in both:
 
-## Handoff block format
+- **Direct execution (preferred).** An advisor holding an API token with the **`advisor:write`**
+  scope (`Authorization: Bearer ict_...`) applies each action itself against the IC API, as the
+  token's owner, and posts a receipt (`POST /api/v1/export/handoff-receipts`) as the audit log.
+  The token can reach only the endpoints these actions map to, plus the reads needed to resolve a
+  name to an ID (alerts, watchlists, accounts, an equity by symbol). Everything else - editing or
+  deleting trades, creating accounts, cash movements, settings, auth - answers `403` to a token.
+  Actions marked `⚠️ approval required` still need explicit human sign-off *before* they are
+  applied; a token does not waive approval. Resolve names yourself: an ambiguous or unknown name is
+  `flagged`, never guessed.
+- **Handoff block (optional / legacy).** The advisor emits a **handoff block** - a markdown action
+  list - and a human or executor applies it. Still supported; the format is described next.
+
+Receipts remain the audit log either way: every action, applied directly or via a block, should be
+recorded so it folds into the next pack's `recent_handoffs`.
+
+## Handoff block format (optional / legacy)
+
+Used when actions are handed to a human or executor instead of applied directly. When writing
+directly with an `advisor:write` token, the same action list is your plan; the block is not
+required.
 
 Emit one fenced block. Start with a one-line `Summary:`, then a numbered list. Each item is an
 **ACTION_TYPE — target**, followed by indented `field: value` lines. Mark anything that should not
@@ -244,7 +264,7 @@ Emit one when a closed position taught something worth weighing on the next simi
 
 ## After execution
 
-The executor posts a receipt (`applied` / `skipped` / `flagged` per action) that folds into the
+The executor (or the advisor itself, when writing directly) posts a receipt (`applied` / `skipped` / `flagged` per action) that folds into the
 next context pack's `recent_handoffs`. The advisor reads that to learn what actually happened —
 no need to ask. If actions come back `skipped`/`flagged` repeatedly, the cause is usually a missed
 approval mark or an `unsupported_features` collision.
@@ -266,3 +286,4 @@ write-vocabulary change (a new action that adds no pack field) bumps **this** ve
 | 1.3 | 2026-07-18 | Documented the `percent_up` / `percent_down` alert `condition_type` values (percent change over `comparison_period` vs a percent `threshold_value`) and added the `comparison_period` field to `ADD_ALERT`. The create endpoint, `AlertCreate` schema (enum + `comparison_period` validation), and evaluator have accepted these since #48/#51 was fixed; this catches the written contract up so an advisor can construct a valid percent alert. Additive (enum values + a field), so MINOR; pack `schema_version` unchanged (no read-side pack field added) |
 | 1.4 | 2026-08-30 | Widened `LOG_TRADE`'s `trade_type` enum with `dividend` and `split` (the total-return build, foundry `plans/investing_companion/total-return-design.md`). Both are manual-entry only and both repurpose `quantity`/`price` — documented above. Added the `account` field (account **name**; the executor resolves it), **required for `dividend`** because dividend cash is folded per account and an unassigned one disappears from that account's balance and NAV; forbidden for `split`, ignored for fills. `split` also requires `fees: 0`. Deliberately NOT added: a cash-ledger verb. `deposit`/`withdrawal` now exist as API endpoints (`/api/v1/cash`), but adding a write verb for money movement is a separate decision from adding a trade type, so the write vocabulary stays silent on it and such a `LOG_TRADE` comes back `flagged`. Additive (enum values + one field), so MINOR; pack `schema_version` unchanged — NAV is a new endpoint, not a new context-pack field |
 | 1.5 | 2026-10-01 | `LOG_TRADE` gains an optional `executed_at` (trade date) and honours `account` on the four fills (`buy` / `sell` / `short` / `cover`), which 1.4 ignored. Sells match buys only within one account, so a fill logged without its account could not close a position opened in that account. Both fields already existed on `POST /trades`; this exposes them to the advisor. An unknown account or a future `executed_at` comes back `flagged`. Additive (fields), so MINOR; pack `schema_version` unchanged |
+| 1.6 | 2026-10-06 | Direct execution: an API token with the new `advisor:write` scope may apply the vocabulary itself, instead of emitting a handoff block for a human to run. The token is allow-listed to exactly the endpoints the actions map to (alerts, watchlists and items, ratios, calendar events, `POST /trades`, triggers incl. retire, lessons, `POST /export/handoff-receipts`) plus name-resolution reads (`GET` alerts / watchlists / accounts / equity by symbol). No action was added, renamed or removed; trades can be created but not edited or deleted, and accounts and cash cannot be created. Handoff blocks become optional/legacy; receipts stay the audit log and approval marks still apply. Additive (new execution path, no vocabulary change), so MINOR; pack `schema_version` unchanged |

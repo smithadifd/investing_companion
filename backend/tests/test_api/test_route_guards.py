@@ -130,8 +130,11 @@ from starlette.websockets import WebSocket, WebSocketDisconnect  # noqa: E402
 from app.core.api_token_access import (  # noqa: E402
     API_TOKEN_ROUTE_ALLOWLIST,
     API_TOKEN_ROUTE_DENIED_DETAIL,
+    SCOPE_ADVISOR_WRITE,
     SCOPE_PACK_READ,
     ApiTokenRouteGuardMiddleware,
+    normalize_template,
+    required_scope,
 )
 from app.core.dependencies import get_current_user  # noqa: E402
 from app.db.models.api_token import ApiToken  # noqa: E402
@@ -198,25 +201,25 @@ def _bearer(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_allowlist_grants_only_the_pack_read_scope():
+def test_allowlist_grants_only_known_scopes():
     assert API_TOKEN_ROUTE_ALLOWLIST, "the allow-list must not be empty"
-    assert set(API_TOKEN_ROUTE_ALLOWLIST.values()) == {SCOPE_PACK_READ}
+    assert set(API_TOKEN_ROUTE_ALLOWLIST.values()) == {SCOPE_PACK_READ, SCOPE_ADVISOR_WRITE}
 
 
 def test_allowlisted_routes_exist():
-    live = set(_iter_all_routes(app))
-    allowed = set(API_TOKEN_ROUTE_ALLOWLIST)
+    live = {(m, normalize_template(p)) for m, p in _iter_all_routes(app)}
+    allowed = {(m, normalize_template(p)) for m, p in API_TOKEN_ROUTE_ALLOWLIST}
     assert allowed <= live, f"allow-listed routes missing from the app: {allowed - live}"
 
 
 async def test_api_token_sweep_every_route_denied_except_allowlist(client, db, test_user):
-    """Every registered route NOT in API_TOKEN_ROUTE_ALLOWLIST answers 403 to a
-    pack:read token. Each allow-listed route answers 200 to that token and 403
-    (missing scope) to a token without it, so an entry added to the allow-list
-    for a route that does not enforce the scope is caught too. A route added
-    later is covered automatically because this enumerates the live route
-    table."""
-    _, token = await _mint(db, test_user)
+    """Every registered route NOT in the allow-list answers 403 to a token.
+    Each allow-listed route answers 403 (missing scope) to a token holding only
+    the wrong scope; pack:read routes answer 200 to a pack:read token.
+    A route added later is covered automatically because this enumerates the
+    live route table."""
+    _, pack_token = await _mint(db, test_user)
+    _, write_token = await _mint(db, test_user, scopes=(SCOPE_ADVISOR_WRITE,))
     no_scope = await _raw_token(db, test_user, ["other:read"])
     routes = sorted(set(_iter_all_routes(app)))
     assert len(routes) >= MIN_SWEEP_ROUTES, (
@@ -228,20 +231,32 @@ async def test_api_token_sweep_every_route_denied_except_allowlist(client, db, t
     wrong = []
     for method, path in routes:
         concrete = _concrete(path)
-        resp = await client.request(method, concrete, headers=_bearer(token))
-        if (method, path) in API_TOKEN_ROUTE_ALLOWLIST:
-            if resp.status_code != 200:
-                wrong.append(f"{method} {path}: expected 200, got {resp.status_code}")
-            scoped = await client.request(method, concrete, headers=_bearer(no_scope))
+        needed = required_scope(method, concrete)
+        # The sweep fills params with "1"; "1" is a valid {id} and {symbol}.
+        right_token, wrong_token = (
+            (pack_token, write_token) if needed == SCOPE_PACK_READ else (write_token, pack_token)
+        )
+        if needed is None:
+            resp = await client.request(method, concrete, headers=_bearer(pack_token))
+            if resp.status_code != 403 or (
+                method != "HEAD" and resp.json().get("detail") != API_TOKEN_ROUTE_DENIED_DETAIL
+            ):
+                wrong.append(f"{method} {path}: expected 403, got {resp.status_code}")
+            continue
+        for label, tok in (("no scope", no_scope), ("wrong scope", wrong_token)):
+            scoped = await client.request(method, concrete, headers=_bearer(tok))
             if scoped.status_code != 403:
                 wrong.append(
-                    f"{method} {path}: expected 403 without {SCOPE_PACK_READ}, "
-                    f"got {scoped.status_code}"
+                    f"{method} {path}: expected 403 with {label}, got {scoped.status_code}"
                 )
-        elif resp.status_code != 403 or (
-            method != "HEAD" and resp.json().get("detail") != API_TOKEN_ROUTE_DENIED_DETAIL
-        ):
-            wrong.append(f"{method} {path}: expected 403, got {resp.status_code}")
+        if needed != SCOPE_PACK_READ:
+            # advisor:write routes mutate data or may reach external providers
+            # (GET /equity/{symbol}); the right-scope path is exercised against
+            # real fixtures in test_advisor_write_scope.py instead.
+            continue
+        resp = await client.request(method, concrete, headers=_bearer(right_token))
+        if resp.status_code != 200:
+            wrong.append(f"{method} {path}: expected 200, got {resp.status_code}")
     assert not wrong, "API-token route policy violated:\n  " + "\n  ".join(wrong)
 
 
@@ -325,6 +340,7 @@ async def test_api_token_without_pack_read_is_403_on_allowlisted_routes(
 ):
     token = await _raw_token(db, test_user, ["other:read"])
     for method, path in sorted(API_TOKEN_ROUTE_ALLOWLIST):
+        path = _concrete(path)
         resp = await client.request(method, path, headers=_bearer(token))
         assert resp.status_code == 403, path
         assert resp.json()["detail"] == "API token lacks the required scope"
@@ -543,7 +559,7 @@ async def test_api_token_under_root_path_reaches_allowlisted_read(client, db, te
 async def test_api_token_under_root_path_still_denied_elsewhere(client, db, test_user):
     _, token = await _mint(db, test_user)
     async with _prefixed_client("/invest") as c:
-        resp = await c.get("/invest/api/v1/watchlists", headers=_bearer(token))
+        resp = await c.get("/invest/api/v1/settings", headers=_bearer(token))
         head = await c.head("/invest/api/v1/export/context-pack", headers=_bearer(token))
     assert resp.status_code == 403
     assert resp.json()["detail"] == API_TOKEN_ROUTE_DENIED_DETAIL
@@ -579,7 +595,7 @@ async def test_middleware_does_not_strip_a_root_path_that_is_not_a_prefix(db, te
     transport = ASGITransport(app=probe, root_path="/invest")
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         allowed = await c.get("/api/v1/export/context-pack", headers=_bearer(token))
-        denied = await c.get("/api/v1/watchlists", headers=_bearer(token))
+        denied = await c.get("/api/v1/settings", headers=_bearer(token))
     assert allowed.status_code == 200
     assert denied.status_code == 403
 

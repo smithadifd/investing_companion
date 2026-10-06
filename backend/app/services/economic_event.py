@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from dataclasses import dataclass, field as dc_field
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
@@ -60,6 +61,51 @@ class MacroKeyMigrationPendingError(RuntimeError):
     run yet, ran partially, or this is a fresh/restored/staging DB) -- run
     ``alembic upgrade head`` and retry.
     """
+
+
+@dataclass
+class EarningsSupersedePlan:
+    """What to do with an equity's future earnings rows given Yahoo's date."""
+
+    move: EconomicEvent | None = None  # stale yahoo row to re-date in place
+    delete: list[EconomicEvent] = dc_field(default_factory=list)
+    blocked_by: list[EconomicEvent] = dc_field(default_factory=list)  # non-yahoo rows
+    manual_mismatch: bool = False
+
+
+def plan_earnings_supersede(
+    future_rows: list[EconomicEvent], yahoo_date: date, today: date | None = None
+) -> EarningsSupersedePlan:
+    """Pure planning step (no DB): decide how to reconcile upcoming earnings rows.
+
+    ``future_rows`` are the equity's earnings rows dated today or later. Rows from
+    any source other than Yahoo (manual, seed, ...) are never modified; if one
+    exists Yahoo's date is not applied, a disagreement is flagged, and Yahoo rows
+    after today beside it are deleted so the non-Yahoo row is the only upcoming
+    date. Otherwise stale Yahoo rows are re-dated in place (earliest wins,
+    preserving its id) or deleted if a row on Yahoo's date already exists.
+
+    A row dated ``today`` is never moved or deleted: it may be a report that just
+    happened while Yahoo already shows next quarter. It still counts as "a row on
+    Yahoo's date" and still blocks when it is non-Yahoo.
+    Idempotent: with a single row already on ``yahoo_date`` the plan is empty.
+    """
+    today = today or date.today()
+    plan = EarningsSupersedePlan()
+    plan.blocked_by = [r for r in future_rows if r.source != EventSource.YAHOO.value]
+    movable = [
+        r for r in future_rows if r.source == EventSource.YAHOO.value and r.event_date > today
+    ]
+    if plan.blocked_by:
+        plan.manual_mismatch = any(r.event_date != yahoo_date for r in plan.blocked_by)
+        plan.delete = movable
+        return plan
+    stale = sorted((r for r in movable if r.event_date != yahoo_date), key=lambda r: r.event_date)
+    if any(r.event_date == yahoo_date for r in future_rows):
+        plan.delete = stale
+    elif stale:
+        plan.move, plan.delete = stale[0], stale[1:]
+    return plan
 
 
 class EconomicEventService:
@@ -416,16 +462,27 @@ class EconomicEventService:
 
         # Process earnings
         if calendar_info.earnings and calendar_info.earnings.earnings_date:
-            event = await self._upsert_equity_event(
-                equity_id=equity.id,
-                event_type=EventType.EARNINGS.value,
-                event_date=calendar_info.earnings.earnings_date,
-                title=f"{symbol} Earnings",
-                importance=EventImportance.HIGH.value,
-                is_confirmed=calendar_info.earnings.is_confirmed,
-            )
-            if event:
-                created_events.append(await self._to_response(event))
+            earn = calendar_info.earnings
+            description = None
+            if earn.earnings_date_end:
+                description = (
+                    f"Estimated window {earn.earnings_date.isoformat()} to "
+                    f"{earn.earnings_date_end.isoformat()} (date not confirmed)"
+                )
+            if await self._supersede_stale_earnings(
+                equity.id, symbol, earn.earnings_date
+            ):
+                event = await self._upsert_equity_event(
+                    equity_id=equity.id,
+                    event_type=EventType.EARNINGS.value,
+                    event_date=earn.earnings_date,
+                    title=f"{symbol} Earnings",
+                    importance=EventImportance.HIGH.value,
+                    is_confirmed=earn.is_confirmed,
+                    description=description,
+                )
+                if event:
+                    created_events.append(await self._to_response(event))
 
         # Process ex-dividend
         if calendar_info.dividend and calendar_info.dividend.ex_dividend_date:
@@ -798,6 +855,58 @@ class EconomicEventService:
         """Get or create equity by symbol. Delegates to EquityService."""
         return await self.equity_service.get_or_create_equity(symbol)
 
+    async def _supersede_stale_earnings(
+        self, equity_id: int, symbol: str, yahoo_date: date
+    ) -> bool:
+        """Reconcile future earnings rows with Yahoo's current next date.
+
+        Returns True if the caller should go on to upsert Yahoo's row, False
+        if a non-Yahoo row blocks it. Rows dated today or later are planned over
+        (see ``plan_earnings_supersede``: today's row is never moved or deleted),
+        so history is never touched.
+        """
+        today = date.today()
+        if yahoo_date < today:
+            return True  # stale Yahoo data; nothing to supersede
+        stmt = select(EconomicEvent).where(
+            EconomicEvent.equity_id == equity_id,
+            EconomicEvent.event_type == EventType.EARNINGS.value,
+            EconomicEvent.event_date >= today,
+        )
+        rows = list((await self.db.execute(stmt)).scalars().all())
+        plan = plan_earnings_supersede(rows, yahoo_date, today)
+
+        if plan.blocked_by:
+            for row in plan.delete:
+                await self.db.delete(row)
+            if plan.delete:
+                await self.db.flush()
+            if plan.manual_mismatch:
+                logger.warning(
+                    "Earnings date mismatch for %s: %s row on %s disagrees with "
+                    "Yahoo (%s); leaving the row untouched and not adding Yahoo's date",
+                    symbol,
+                    plan.blocked_by[0].source,
+                    ", ".join(r.event_date.isoformat() for r in plan.blocked_by),
+                    yahoo_date.isoformat(),
+                )
+            return False
+
+        if plan.move:
+            plan.move.event_date = yahoo_date  # in place: keeps the row id
+        for row in plan.delete:
+            await self.db.delete(row)
+        if plan.move or plan.delete:
+            await self.db.flush()
+            logger.info(
+                "Superseded stale earnings for %s -> %s (moved=%s, deleted=%d)",
+                symbol,
+                yahoo_date.isoformat(),
+                bool(plan.move),
+                len(plan.delete),
+            )
+        return True
+
     async def _upsert_equity_event(
         self,
         equity_id: int,
@@ -807,6 +916,7 @@ class EconomicEventService:
         importance: str = "medium",
         is_confirmed: bool = True,
         actual_value: float | None = None,
+        description: str | None = None,
     ) -> EconomicEvent | None:
         """Create or update an equity event (upsert by unique constraint)."""
         # Check if exists
@@ -824,6 +934,8 @@ class EconomicEventService:
             existing.importance = importance
             existing.is_confirmed = is_confirmed
             existing.source = EventSource.YAHOO.value
+            if event_type == EventType.EARNINGS.value:
+                existing.description = description  # clears a stale window note
             if actual_value is not None:
                 existing.actual_value = actual_value
             await self.db.commit()
@@ -840,6 +952,7 @@ class EconomicEventService:
                 source=EventSource.YAHOO.value,
                 is_confirmed=is_confirmed,
                 actual_value=actual_value,
+                description=description,
             )
             self.db.add(event)
             await self.db.commit()

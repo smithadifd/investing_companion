@@ -77,13 +77,15 @@ API_TOKEN_ROUTE_ALLOWLIST: dict[tuple[str, str], str] = {
     ("POST", f"{_A}/ratios"): SCOPE_ADVISOR_WRITE,
     # economic events
     ("POST", f"{_A}/events"): SCOPE_ADVISOR_WRITE,
-    ("GET", f"{_A}/events/{{uuid}}"): SCOPE_ADVISOR_WRITE,
     ("PUT", f"{_A}/events/{{uuid}}"): SCOPE_ADVISOR_WRITE,
     ("DELETE", f"{_A}/events/{{uuid}}"): SCOPE_ADVISOR_WRITE,
     # trades: create only (no edit/delete); accounts: read only (name resolution)
     ("POST", f"{_A}/trades"): SCOPE_ADVISOR_WRITE,
     ("GET", f"{_A}/accounts"): SCOPE_ADVISOR_WRITE,
-    # triggers
+    # triggers (the reads give name resolution and a before-state for revert;
+    # the context pack's trigger rows carry no id)
+    ("GET", f"{_A}/triggers"): SCOPE_ADVISOR_WRITE,
+    ("GET", f"{_A}/triggers/{{id}}"): SCOPE_ADVISOR_WRITE,
     ("POST", f"{_A}/triggers"): SCOPE_ADVISOR_WRITE,
     ("PUT", f"{_A}/triggers/{{id}}"): SCOPE_ADVISOR_WRITE,
     ("POST", f"{_A}/triggers/{{id}}/retire"): SCOPE_ADVISOR_WRITE,

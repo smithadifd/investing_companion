@@ -43,7 +43,7 @@ redis>=5.0.0
 # version this repo currently resolves to and is verified against; the
 # provider-boundary normalization in data_providers/yahoo.py keeps the canonical
 # (fraction) scale correct regardless. Bumping is a separate, tested change.
-yfinance==1.1.0
+yfinance==1.7.0
 pandas>=2.2.0
 numpy>=2.5.3
 ta>=0.11.0  # Technical analysis library
@@ -73,5 +73,5 @@ pytest>=8.0.0
 pytest-asyncio>=0.23.0
 pytest-cov>=7.1.0
 httpx>=0.28.1  # For TestClient
-ruff==0.16.0  # Linting; pinned + paired with backend/ruff.toml so local == CI
+ruff==0.16.9  # Linting; pinned + paired with backend/ruff.toml so local == CI
 mypy>=1.8.0  # Type checking

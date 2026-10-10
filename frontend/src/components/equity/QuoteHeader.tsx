@@ -1,6 +1,6 @@
 'use client';
 
-import { TrendingUp, TrendingDown, AlertTriangle, Clock } from 'lucide-react';
+import { TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react';
 import type { EquityDetail, Quote } from '@/lib/api/types';
 import {
   formatCurrency,
@@ -13,60 +13,25 @@ interface QuoteHeaderProps {
   equity: EquityDetail;
 }
 
-/**
- * Providers whose plan is *contractually* behind, and by how many minutes.
- *
- * These are a different thing from a degraded fallback, and the badge has to
- * say so. A quote from Massive's 15-minute Starter plan is exactly what the
- * install was configured to serve — nothing failed — so warning that the
- * "primary data source is unavailable" would be false, and false often enough
- * that the badge stops meaning anything. A fallback quote still gets the
- * warning, because there something did go wrong.
- *
- * Mirrors `delayed_quotes` / `quote_delay_minutes` on the backend providers
- * (`backend/app/services/data_providers/base.py`); the quote payload carries
- * only `source` and `stale`, so the delay minutes live here.
- */
-const CONTRACTUAL_QUOTE_DELAY_MINUTES: Record<string, number> = {
-  massive: 15,
-};
-
 interface QuoteProvenance {
   label: string;
   title: string;
-  /** Neutral (a known, configured delay) vs. degraded (something failed). */
-  contractual: boolean;
 }
 
 /**
- * What the provenance badge should say, or `null` when there is nothing to say.
+ * What the provenance badge should say, or `null` when the quote is fresh.
  *
- * Driven by `source` first and `stale` second: the delay is a fact about the
- * plan, so a known-delayed source is labelled even if the flag went missing on
- * the way here.
+ * A stale quote is a fallback: the primary did not answer. No remaining
+ * provider is contractually delayed, so a source name alone never badges.
  */
 function describeProvenance(quote: Quote): QuoteProvenance | null {
-  const source = quote.source ?? null;
-  const delayMinutes = source
-    ? CONTRACTUAL_QUOTE_DELAY_MINUTES[source]
-    : undefined;
-
-  if (delayMinutes !== undefined) {
-    return {
-      label: `${delayMinutes}-min delayed · via ${source}`,
-      title: `${source} serves quotes on a ${delayMinutes}-minute delay; this is the configured data source, not a failure`,
-      contractual: true,
-    };
-  }
-
   if (!quote.stale) return null;
-
+  const source = quote.source ?? null;
   return {
     label: source ? `Delayed data · via ${source}` : 'Delayed data',
     title: source
       ? `Primary data source unavailable — showing delayed data via ${source}`
       : 'Primary data source unavailable — showing delayed fallback data',
-    contractual: false,
   };
 }
 
@@ -162,18 +127,10 @@ export function QuoteHeader({ equity }: QuoteHeaderProps) {
         {provenance && (
           <span
             data-testid="quote-provenance"
-            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-medium ${
-              provenance.contractual
-                ? 'border-border bg-muted text-muted-foreground'
-                : 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-400'
-            }`}
+            className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-medium border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-400"
             title={provenance.title}
           >
-            {provenance.contractual ? (
-              <Clock className="h-3 w-3" />
-            ) : (
-              <AlertTriangle className="h-3 w-3" />
-            )}
+            <AlertTriangle className="h-3 w-3" />
             {provenance.label}
           </span>
         )}

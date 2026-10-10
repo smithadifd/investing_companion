@@ -441,12 +441,10 @@ class TestFailover:
 
 
 class TestDelayedQuoteDemotion:
-    """``delayed_quotes`` ordering — the generic machinery (Wave AT row AT7).
+    """``delayed_quotes`` ordering — the generic failover machinery.
 
-    A provider on a contractually delayed plan (Massive/Polygon's 15-minute
-    Starter tier) must never be consulted for a quote ahead of a live source.
-    The provider-specific end of this lives in ``test_massive_provider.py``;
-    these pin the behavior of the failover layer itself.
+    A provider on a contractually delayed plan must never be consulted for a
+    quote ahead of a live source. These pin the failover layer itself.
     """
 
     @staticmethod
@@ -514,10 +512,10 @@ class TestDelayedQuoteDemotion:
     def test_resilient_wrapper_delegates_rather_than_snapshots(self):
         """The wrapper reads the flag through, it does not copy it once.
 
-        Delayedness is a static class attribute today, but the Massive provider
-        already parses a per-response ``status: DELAYED``. If that ever drives
-        the flag at runtime, a value copied at construction would disagree with
-        its own upstream in the unsafe direction (wrapper says live).
+        Delayedness is a static class attribute today. If a provider ever
+        derives the flag at runtime, a value copied at construction would
+        disagree with its own upstream in the unsafe direction (wrapper says
+        live).
         """
         provider = StaticProvider("late")
         wrapped = ResilientProvider(provider)
@@ -885,8 +883,8 @@ class TestExplicitQuotePrimary:
         The elected primary is an *addition* in front of the chain, so the rest
         is ranked as if the election did not exist: Yahoo is still the head of
         the free chain and its quote is still fresh. Ranking it as a fallback
-        would badge every live Yahoo price "delayed" for the whole life of a
-        keyed install whose Massive quote surface is unentitled.
+        would badge every live Yahoo price "delayed" whenever the elected
+        primary has nothing to say.
         """
         delayed = self._delayed(quote=None)  # entitled but nothing to say
         yahoo = StaticProvider("yahoo", _quote(price="100"))

@@ -43,7 +43,7 @@ A few things are incomplete or not wired up yet.
 
 **FIFO matching has known edge cases.** Realized P&L on trade pairs excludes fees (`fees` is stored on the `Trade` row but not subtracted from `realized_pnl`). If a sell order exceeds open long inventory, the excess quantity is dropped silently — it does not open a short. Neither the FIFO algorithm nor the overall trade service has a test file yet. See [FIFO trade matching](/design-decisions/fifo-matching/) for the edge case inventory.
 
-**Alpha Vantage and Polygon are not wired.** Both API keys have env-var placeholders in `.env.example` and are mentioned in the roadmap as upgrade paths, but no provider client exists for either in `backend/app/services/data_providers/`. The app runs entirely on Yahoo Finance (quotes, fundamentals, earnings) and Finnhub (news) today. See [data source strategy](/design-decisions/data-sources/).
+**Polygon is not a data source.** Quotes come from Yahoo, with Stooq as the keyless fallback and Alpha Vantage appended only when `ALPHA_VANTAGE_API_KEY` is set. There is no Polygon/Massive provider and no `POLYGON_API_KEY` setting.
 
 **AI analysis only runs on the equity detail page.** The backend defines four `AnalysisType` values — `equity`, `ratio`, `watchlist`, and `general` — but only the `equity` path has a frontend UI. The other three types are reachable via the API but nothing renders their output yet. See [AI analysis](/features/ai-analysis/).
 

@@ -13,7 +13,7 @@ Investing Companion's API is a lot of fan-out I/O: quote requests, historical pu
 
 FastAPI was picked for three reasons that show up repeatedly in the code:
 
-- Async-first request handling. The data provider services (Yahoo Finance, Alpha Vantage, Polygon, Claude) are all network-bound, and FastAPI lets endpoints await them without tying up a worker.
+- Async-first request handling. The data provider services (Yahoo Finance, Stooq, Alpha Vantage, Claude) are all network-bound, and FastAPI lets endpoints await them without tying up a worker.
 - Pydantic schemas. Request and response validation is written once and reused by the OpenAPI docs at `/docs`. The schemas live under `backend/app/schemas/` and double as the contract the frontend types against.
 - Streaming responses. The AI analysis endpoint (`POST /api/v1/ai/analyze`) streams via SSE. FastAPI supports that natively.
 

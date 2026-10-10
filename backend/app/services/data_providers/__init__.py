@@ -37,7 +37,7 @@ def get_quote_provider() -> FailoverQuoteProvider:
     """Build (once) the resilient, failover-capable market-data provider.
 
     Sibling of ``get_extended_quote_provider``: *selection* lives here and the
-    providers stay unaware of each other. The free chain is, in priority order:
+    providers stay unaware of each other. The chain is, in priority order:
 
       1. **Yahoo**, wrapped in retry + exponential backoff + circuit-breaker
          (``ResilientProvider``) — the primary for quote/history/fundamentals/
@@ -46,33 +46,6 @@ def get_quote_provider() -> FailoverQuoteProvider:
          flaky Stooq is retried/broken independently.
       3. **Alpha Vantage** — a quote fallback added *only* when
          ``ALPHA_VANTAGE_API_KEY`` is set (key-gated; inert otherwise).
-
-    **A configured ``POLYGON_API_KEY`` promotes Massive (Polygon.io) to the
-    front of that chain on every surface, and elects it as the quote primary.**
-    A key is an explicit purchase of a better feed, so the paid source leads
-    rather than backstops. Nothing about the free chain changes: without the
-    key this function builds exactly the list above and elects nobody.
-
-    Massive's Starter plan is 15-minute delayed, and the promotion deliberately
-    does *not* pretend otherwise:
-
-    - The quote still comes back ``stale=True`` (stamped by ``parse_snapshot``
-      at the source), and the UI renders that provenance as a neutral
-      "15-min delayed" label instead of a degraded-fallback warning.
-    - The structural demotion in ``FailoverQuoteProvider`` is untouched and
-      still the default. It is overridden only by the explicit ``quote_primary``
-      election passed below, so a chain that puts a delayed provider first *by
-      accident* is still corrected — the guard survives, it just now
-      distinguishes an accident from a decision.
-    - The election is an addition in front of the chain, so Yahoo remains the
-      free chain's own head: when Massive cannot answer, Yahoo's quote is still
-      reported fresh rather than badged as fallback data.
-
-    Which of Massive's surfaces are usable is declared in
-    ``MASSIVE_ENTITLEMENTS``; an unentitled surface raises
-    ``ProviderUnentitledError`` *before the request leaves the process* and the
-    chain routes past it exactly as it would past a failure, so an unowned
-    surface costs nothing on the way to the free chain.
 
     A quote served by any fallback is stamped ``stale=True`` with its ``source``
     so the UI can show a degraded-data badge. Cached at module scope; call
@@ -100,38 +73,7 @@ def get_quote_provider() -> FailoverQuoteProvider:
     except Exception as exc:  # noqa: BLE001 — a bad optional provider must not break the chain
         logger.warning("Alpha Vantage fallback unavailable: %s", exc)
 
-    # Key-gated, and PROMOTED TO THE FRONT: a configured key is an explicit
-    # purchase of the paid feed, so Massive leads every surface. Quotes need the
-    # election as well as the position — the delayed demotion in
-    # ``FailoverQuoteProvider`` outranks list order by design, and only an
-    # explicit ``quote_primary`` yields to intent.
-    quote_primary: MarketDataProvider | None = None
-    try:
-        from app.services.data_providers.massive import (
-            MassiveProvider,
-            is_massive_configured,
-        )
-
-        if is_massive_configured():
-            massive = MassiveProvider()
-            # One object, used as both the chain member and the election — the
-            # chain checks identity, so a second instance would never be
-            # consulted.
-            quote_primary = ResilientProvider(massive)
-            chain.insert(0, quote_primary)
-            logger.info(
-                "Massive (Polygon.io) provider enabled (API key configured) and "
-                "elected PRIMARY on every surface; its quotes are 15-minute "
-                "delayed and are labelled as such rather than ranked below the "
-                "free chain. Entitled surfaces: %s (MASSIVE_ENTITLEMENTS) — "
-                "anything else routes to the next provider",
-                massive.entitlements.describe(),
-            )
-    except Exception as exc:  # noqa: BLE001 — a bad optional provider must not break the chain
-        logger.warning("Massive provider unavailable: %s", exc)
-        quote_primary = None
-
-    _quote_provider = FailoverQuoteProvider(chain, quote_primary=quote_primary)
+    _quote_provider = FailoverQuoteProvider(chain)
     return _quote_provider
 
 
@@ -143,57 +85,6 @@ def reset_quote_provider() -> None:
 
 async def get_extended_quote_provider(db: AsyncSession):
     """Pick the extended-hours quote provider for briefings.
-
-    **A configured ``POLYGON_API_KEY`` promotes Massive to the front of this
-    chain too (BS10) — the extended-hours sibling of ``get_quote_provider``'s
-    regular-quote promotion.** ``_get_base_extended_provider`` below computes
-    exactly what this function used to return on its own (Yahoo, or Schwab
-    when its own separate opt-in is on — see its docstring for that seam in
-    full); when Massive is configured, this function wraps that result as the
-    per-symbol fallback behind a ``MassiveExtendedQuoteProvider`` instead of
-    returning it directly. Unconfigured, this function returns exactly what
-    ``_get_base_extended_provider`` returns — unwrapped, same object, same
-    type — so a keyless install (or any install before BS10) sees no change
-    at all.
-
-    Massive's quotes are 15-minute delayed on the Starter plan, same as the
-    regular chain, and the same honesty rule applies: every quote Massive
-    serves here is stamped ``source="massive"``/``stale=True`` (see
-    ``MassiveProvider.get_extended_quote``) rather than presented as live.
-    Deliberately **not** a promotion of ``get_quote_provider``'s real-time
-    chain — that seam is untouched by this function and by this row.
-
-    A bad/erroring Massive falls through **per symbol** to the fallback
-    (``MassiveExtendedQuoteProvider``), matching ``SchwabProvider``'s existing
-    per-symbol fallback shape — one Massive hiccup never blanks a briefing
-    section that would otherwise have an answer.
-    """
-    base = await _get_base_extended_provider(db)
-
-    try:
-        from app.services.data_providers.massive import (
-            MassiveExtendedQuoteProvider,
-            MassiveProvider,
-            is_massive_configured,
-        )
-
-        if is_massive_configured():
-            massive = MassiveProvider()
-            logger.info(
-                "Massive (Polygon.io) elected primary for extended-hours "
-                "quotes (POLYGON_API_KEY configured); falling back to %s "
-                "per symbol",
-                getattr(base, "name", type(base).__name__),
-            )
-            return MassiveExtendedQuoteProvider(massive, fallback=base)
-    except Exception as exc:  # noqa: BLE001 — a bad optional provider must not break extended-hours quotes
-        logger.warning("Massive extended-quote provider unavailable: %s", exc)
-
-    return base
-
-
-async def _get_base_extended_provider(db: AsyncSession):
-    """Yahoo-or-Schwab half of extended-hours selection — Massive-unaware.
 
     **Yahoo by default, including when Schwab is connected (#273).** Schwab's
     quote role is opt-in and default-off (``SCHWAB_QUOTES_ENABLED``): a Schwab

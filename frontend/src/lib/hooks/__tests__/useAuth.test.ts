@@ -63,7 +63,6 @@ const user: User = {
 const settings: AppSettings = {
   claude_api_key: null,
   alpha_vantage_api_key: null,
-  polygon_api_key: null,
   discord_webhook_url: null,
   default_watchlist_id: null,
   theme: 'system',

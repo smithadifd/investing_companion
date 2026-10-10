@@ -105,22 +105,15 @@ open or it returns no data, the call falls through to a fallback and the quote i
 `stale`/`source` so the UI can flag degraded data. `get_quote_provider()` (`__init__.py`)
 builds the chain — the sibling of `get_extended_quote_provider` (extended-hours selection).
 
-**Who leads depends on one key.** Without `POLYGON_API_KEY` the chain is the free one
-(Yahoo → Stooq → Alpha Vantage). *With* it, Massive is promoted to the front on every surface and
-elected the quote primary (`FailoverQuoteProvider(chain, quote_primary=…)`). Quotes need the
-election as well as the position: `delayed_quotes=True` demotes a delayed provider below every live
-one regardless of list order, and only an explicit election yields to that — so a chain mis-ordered
-*by accident* is still corrected. The election is an addition in front of the chain, so Yahoo stays
-the free chain's own head and its quotes are still reported fresh when Massive cannot answer.
-Extended-hours quotes are a separate seam (`get_extended_quote_provider`): the same
-`POLYGON_API_KEY` promotes Massive to the front there too (BS10), with Yahoo (or Schwab, when its
-own separate opt-in is on) as the per-symbol fallback — the real-time chain above is untouched by
-this.
+**Yahoo leads the chain.** `get_quote_provider()` builds Yahoo → Stooq, and appends
+Alpha Vantage only when `ALPHA_VANTAGE_API_KEY` is set. There is no paid quote primary.
+Extended-hours quotes are a separate seam (`get_extended_quote_provider`): Yahoo by
+default, or Schwab when `SCHWAB_QUOTES_ENABLED=true`. The real-time chain above is
+untouched by that flag.
 
 | Provider | Role | Usage | Notes |
 |----------|------|-------|-------|
-| Massive (Polygon.io) | **Primary when keyed** (opt-in) | Quotes (incl. extended-hours), history, fundamentals, search (`massive.py`) | Paid key `POLYGON_API_KEY`; promoted to the head of the chain and elected `quote_primary`. Quotes are 15-min delayed (`delayed_quotes=True`) and the UI labels them neutrally ("15-min delayed"), not as a fallback warning. Per-product entitlements declared in `MASSIVE_ENTITLEMENTS`; an unentitled surface raises before the request leaves the process and routes on |
-| Yahoo Finance | Primary of the free chain | Quotes, fundamentals, history, search; `^VIX` and other index/forex/futures | Unofficial — be gentle; may break; retry/backoff/breaker-wrapped. Also the default extended-hours source (and Massive's own extended-hours fallback when keyed) |
+| Yahoo Finance | Primary | Quotes, fundamentals, history, search; `^VIX` and other index/forex/futures | Unofficial — be gentle; may break; retry/backoff/breaker-wrapped. Also the default extended-hours source |
 | Stooq | Fallback | Quotes + daily history (`stooq.py`) | **No key**; US equities/ETFs; always active |
 | Alpha Vantage | Fallback (opt-in) | Quotes (`alpha_vantage.py`) | Free key `ALPHA_VANTAGE_API_KEY`, ~5 req/min; key-gated, inert without it |
 | Schwab | Ingestion (quotes opt-in, default OFF) | Brokerage transactions + positions (`schwab_ingestion.py`). Extended-hours quotes ONLY when `SCHWAB_QUOTES_ENABLED=true` | Opt-in OAuth; tokens expire every 7 days. The two roles are decoupled (#273): expiry stops transaction sync, not prices |
@@ -211,8 +204,7 @@ the hosts.
 | `SECRET_KEY` | JWT signing |
 | `CLAUDE_API_KEY` | Optional; users provide their own (stored encrypted per-user) |
 | `DISCORD_WEBHOOK_URL` | Alert notifications |
-| `ALPHA_VANTAGE_API_KEY` / `POLYGON_API_KEY` | Optional providers |
-| `MASSIVE_ENTITLEMENTS` | Which Massive products the key holds (`quote,history,fundamentals,search`); unset/blank = all. A surface left off routes to the next provider |
+| `ALPHA_VANTAGE_API_KEY` | Optional quote fallback |
 | `SCHWAB_APP_KEY` / `SCHWAB_APP_SECRET` / `SCHWAB_CALLBACK_URL` / `FRONTEND_URL` | Schwab OAuth (see gotchas) |
 | `SCHWAB_QUOTES_ENABLED` | Opt-in, **default false**: also use the Schwab connection as the extended-hours quote provider. Off = Yahoo serves pre/post-market quotes and a lapsed Schwab token can't degrade prices |
 | `NEXT_PUBLIC_API_URL` | Frontend → API base |

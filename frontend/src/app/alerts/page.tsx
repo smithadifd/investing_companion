@@ -112,7 +112,7 @@ function AlertCard({
         ? `${toNumber(alert.threshold_value)}%`
         : formatValue(alert.threshold_value, isRatio);
 
-  // Last-checked observation — not a live print (Massive is 15-min delayed).
+  // Last-checked observation — not a live print.
   const lastCheckedPrice = alert.last_checked_value !== null && alert.last_checked_value !== undefined
     ? formatValue(alert.last_checked_value, isRatio)
     : null;

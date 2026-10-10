@@ -22,12 +22,10 @@ export interface Quote {
   volume: number;
   market_cap: number | null;
   timestamp: string;
-  /** Provider that produced the quote (e.g. "yahoo", "stooq", "massive"). */
+  /** Provider that produced the quote (e.g. "yahoo", "stooq"). */
   source?: string | null;
   /**
-   * True when the price is behind — either a fallback served it because the
-   * primary was unavailable, or the winning provider's plan is contractually
-   * delayed. `source` is what tells those apart; see `QuoteHeader`.
+   * True when a fallback served the price because the primary was unavailable.
    */
   stale?: boolean;
 }
@@ -725,7 +723,6 @@ export interface RegistrationStatus {
 export interface AppSettings {
   claude_api_key: string | null;
   alpha_vantage_api_key: string | null;
-  polygon_api_key: string | null;
   discord_webhook_url: string | null;
   default_watchlist_id: number | null;
   theme: string;
@@ -741,7 +738,6 @@ export interface AppSettings {
 export interface AppSettingsUpdate {
   claude_api_key?: string;
   alpha_vantage_api_key?: string;
-  polygon_api_key?: string;
   discord_webhook_url?: string;
   default_watchlist_id?: number;
   theme?: string;

@@ -68,7 +68,6 @@ export default function SettingsPage() {
   // API keys state
   const [claudeKey, setClaudeKey] = useState('');
   const [alphaVantageKey, setAlphaVantageKey] = useState('');
-  const [polygonKey, setPolygonKey] = useState('');
   const [discordWebhook, setDiscordWebhook] = useState('');
 
   // Schwab connection state
@@ -123,7 +122,6 @@ export default function SettingsPage() {
     const updates: Record<string, string> = {};
     if (claudeKey) updates.claude_api_key = claudeKey;
     if (alphaVantageKey) updates.alpha_vantage_api_key = alphaVantageKey;
-    if (polygonKey) updates.polygon_api_key = polygonKey;
     if (discordWebhook) updates.discord_webhook_url = discordWebhook;
 
     if (Object.keys(updates).length > 0) {
@@ -131,7 +129,6 @@ export default function SettingsPage() {
       // Clear form fields after save
       setClaudeKey('');
       setAlphaVantageKey('');
-      setPolygonKey('');
       setDiscordWebhook('');
     }
   };
@@ -347,36 +344,9 @@ export default function SettingsPage() {
                   </p>
                 </div>
 
-                {/* Polygon Key */}
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
-                    Polygon.io API Key
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="password"
-                      value={polygonKey}
-                      onChange={(e) => setPolygonKey(e.target.value)}
-                      placeholder={appSettings?.polygon_api_key || 'Not configured'}
-                      className="flex-1 px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100"
-                    />
-                    {appSettings?.polygon_api_key && (
-                      <button
-                        onClick={() => handleClearKey('polygon_api_key')}
-                        className="px-3 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                  <p className="text-xs text-neutral-500">
-                    Optional, for real-time data (paid tier).
-                  </p>
-                </div>
-
                 <button
                   onClick={handleSaveApiKeys}
-                  disabled={updateSettings.isPending || (!claudeKey && !alphaVantageKey && !polygonKey)}
+                  disabled={updateSettings.isPending || (!claudeKey && !alphaVantageKey)}
                   className="px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-400 text-white font-medium rounded-lg transition-colors flex items-center gap-2"
                 >
                   {updateSettings.isPending ? (

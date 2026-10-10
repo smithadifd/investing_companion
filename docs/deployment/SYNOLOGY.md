@@ -82,7 +82,6 @@ ENVIRONMENT=production
 ```bash
 DISCORD_WEBHOOK_URL=<webhook-url>
 ALPHA_VANTAGE_API_KEY=<api-key>
-POLYGON_API_KEY=<api-key>
 CLAUDE_API_KEY=<api-key>
 ```
 

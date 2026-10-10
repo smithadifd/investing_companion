@@ -202,10 +202,9 @@ class ResilientProvider(MarketDataProvider):
     #
     # These *delegate* rather than snapshot the wrapped provider's values at
     # construction. A snapshot is correct only while delayedness is a static
-    # class attribute; the Massive provider already parses a per-response
-    # ``status: DELAYED``, so the day any provider derives the flag at runtime
-    # a copied value would silently disagree with its source — and disagree in
-    # the unsafe direction (wrapper says live, upstream says delayed). Reading
+    # class attribute. If a provider ever derives the flag at runtime, a copied
+    # value would silently disagree with its source — and disagree in the
+    # unsafe direction (wrapper says live, upstream says delayed). Reading
     # through keeps one source of truth.
     @property
     def delayed_quotes(self) -> bool:
@@ -377,11 +376,11 @@ def _winning_source(provider: MarketDataProvider, quote: QuoteResponse) -> str:
     """The provider name to stamp as the quote's ``source``.
 
     Normally the provider that answered. The guard is for a *nested* chain: an
-    inner ``FailoverQuoteProvider`` has already stamped the real origin (e.g.
-    ``massive``), and overwriting that with the generic ``failover`` name would
-    throw away the provenance the UI badge depends on. Flattening usually makes
-    this moot — the candidates are leaves, so ``provider.name`` *is* the origin
-    — but the cycle guard in ``_flatten_quote_providers`` can still hand back a
+    inner ``FailoverQuoteProvider`` has already stamped the real origin, and
+    overwriting that with the generic ``failover`` name would throw away the
+    provenance the UI badge depends on. Flattening usually makes this moot —
+    the candidates are leaves, so ``provider.name`` *is* the origin — but the
+    cycle guard in ``_flatten_quote_providers`` can still hand back a
     chain, so the guard stays.
     """
     inner = _unwrap(provider)
@@ -403,12 +402,11 @@ class FailoverQuoteProvider(MarketDataProvider):
 
     **Quotes carry one extra ordering rule, and exactly one override.** A
     provider that declares ``delayed_quotes = True`` (a plan contracted to serve
-    prices behind a fixed delay — Massive/Polygon's 15-minute Starter tier) is
-    consulted only after *every* live provider, no matter where the caller
-    placed it in the list, and any quote it wins is always stamped
-    ``stale=True``. The ordering is enforced here rather than left to the chain
-    builder because getting it wrong is silent: the UI would render a
-    15-minute-old price as current. See ``_quote_candidates``.
+    prices behind a fixed delay) is consulted only after *every* live provider,
+    no matter where the caller placed it in the list, and any quote it wins is
+    always stamped ``stale=True``. The ordering is enforced here rather than
+    left to the chain builder because getting it wrong is silent: the UI would
+    render an old price as current. See ``_quote_candidates``.
 
     The override is ``quote_primary``: an **explicit election**, naming one
     member of ``providers`` as the quote primary. An elected provider is

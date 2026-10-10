@@ -21,21 +21,14 @@ EMBED_DESCRIPTION_LIMIT = 4096
 # name cannot crowd every other alert out of a batched embed.
 BATCH_LINE_NAME_LIMIT = 60
 
-# Mirrors frontend QuoteHeader CONTRACTUAL_QUOTE_DELAY_MINUTES. QuoteResponse
-# ``source``/``stale`` is the existing delay convention; this map is display
-# copy only and must not grow a new public alert schema.
-CONTRACTUAL_QUOTE_DELAY_MINUTES = {"massive": 15}
-
-
 def quote_delay_label(source: str | None, *, stale: bool = False) -> str | None:
-    """Existing equity/market delay copy, or None when the quote is unlabeled.
+    """Delay copy for a stale observation, or None when the quote is fresh.
 
-    A known contractually delayed source (Massive) is labelled even if ``stale``
-    went missing on the way here — same rule as QuoteHeader.
+    ``source`` is accepted so callers can pass provenance through unchanged.
+    No remaining provider is contractually delayed, so the label does not
+    vary by source.
     """
-    minutes = CONTRACTUAL_QUOTE_DELAY_MINUTES.get((source or "").lower())
-    if minutes is not None:
-        return f"{minutes}-min delayed"
+    del source
     if stale:
         return "Delayed data"
     return None

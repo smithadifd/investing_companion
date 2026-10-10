@@ -1,9 +1,9 @@
 ---
 title: Data source strategy
-description: Why Yahoo Finance is the primary quote source, where Finnhub fits for news, and what Alpha Vantage and Polygon are reserved for.
+description: Why Yahoo Finance is the primary quote source, where Finnhub fits for news, and how Alpha Vantage fits as an optional fallback.
 ---
 
-Investing Companion pulls market data from multiple providers, each chosen for a specific job. Two are wired into the backend today: Yahoo Finance for quotes, history, fundamentals, and earnings calendars, and Finnhub for news. Alpha Vantage and Polygon have env-var placeholders but no provider client yet — they live in the roadmap, not in `backend/app/services/data_providers/`.
+Investing Companion pulls market data from multiple providers, each chosen for a specific job. Yahoo Finance leads quotes, history, fundamentals, and earnings calendars, with Stooq as the keyless fallback. Finnhub covers news. Alpha Vantage is an optional quote fallback when its key is set. Polygon/Massive is not a provider and has no env var.
 
 This page records why the current choices were made, what to watch out for, and how a future provider would slot in.
 
@@ -25,9 +25,9 @@ Finnhub was picked over layering news on top of Yahoo because it has an official
 
 `ALPHA_VANTAGE_API_KEY` is declared in `.env.example` with a link to the free-tier signup, but there is no `alpha_vantage.py` in `data_providers/` and nothing is exported from the package `__init__.py`. The roadmap (`docs/ROADMAP.md`, Phases 2 and 3) lists Alpha Vantage as optional for additional indicators, forex, and economic data, and the `yahoo.py` search method explicitly points at Alpha Vantage `SYMBOL_SEARCH` as the eventual upgrade for search quality. Treat this as scaffolded intent, not a live integration.
 
-## Polygon (env-configured, not yet wired)
+## Polygon / Massive (removed)
 
-`POLYGON_API_KEY` is also in `.env.example`, labeled as optional and paid. The roadmap's "Data Source Strategy" note positions Polygon.io Starter ($29/mo) as the upgrade path once the free tier stops being enough — real-time quotes and more history. Like Alpha Vantage, there is no provider client today and nothing upstream of `data_providers/` references it.
+There is no Polygon or Massive provider, and `POLYGON_API_KEY` is not a setting. Quotes come from the Yahoo → Stooq chain.
 
 ## The normalization layer
 
@@ -37,7 +37,7 @@ The roadmap mentions fallback logic ("if one provider fails, try another") as a 
 
 ## Adding a new provider
 
-If you are adding Alpha Vantage, Polygon, or something else, the shape to follow is visible in the two existing clients:
+If you are adding another quote source, the shape to follow is visible in the existing clients:
 
 1. Create `backend/app/services/data_providers/<name>.py` with a provider class.
 2. Read the API key from `app.core.config.settings` and expose an `is_configured` check. Degrade to empty results, not exceptions, when the key is missing — match the Finnhub pattern.
@@ -46,4 +46,4 @@ If you are adding Alpha Vantage, Polygon, or something else, the shape to follow
 5. Export the class from `backend/app/services/data_providers/__init__.py`.
 6. Add any new env vars to `.env.example` and document them in [Configuration](/running/configuration/).
 
-Cache TTLs belong next to the provider that sets them. The goal is that a call into the service layer looks the same whether Yahoo, Alpha Vantage, or Polygon answers it.
+Cache TTLs belong next to the provider that sets them. The goal is that a call into the service layer looks the same whichever provider answers it.

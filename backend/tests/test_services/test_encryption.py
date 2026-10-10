@@ -149,7 +149,6 @@ def test_existing_encrypted_keys_still_present():
     for key in (
         SettingsService.CLAUDE_API_KEY,
         SettingsService.ALPHA_VANTAGE_API_KEY,
-        SettingsService.POLYGON_API_KEY,
         SettingsService.SCHWAB_TOKEN,
     ):
         assert key in SettingsService.ENCRYPTED_KEYS

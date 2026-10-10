@@ -45,7 +45,6 @@ class SettingsService:
     # Settings keys
     CLAUDE_API_KEY = "CLAUDE_API_KEY"
     ALPHA_VANTAGE_API_KEY = "ALPHA_VANTAGE_API_KEY"
-    POLYGON_API_KEY = "POLYGON_API_KEY"
     DISCORD_WEBHOOK_URL = "DISCORD_WEBHOOK_URL"
     DEFAULT_WATCHLIST_ID = "DEFAULT_WATCHLIST_ID"
     THEME = "THEME"
@@ -77,7 +76,6 @@ class SettingsService:
     ENCRYPTED_KEYS = {
         CLAUDE_API_KEY,
         ALPHA_VANTAGE_API_KEY,
-        POLYGON_API_KEY,
         SCHWAB_TOKEN,
         DISCORD_WEBHOOK_URL,
     }
@@ -355,7 +353,6 @@ class SettingsService:
         return AppSettings(
             claude_api_key=self._mask_key(settings_dict.get(self.CLAUDE_API_KEY)),
             alpha_vantage_api_key=self._mask_key(settings_dict.get(self.ALPHA_VANTAGE_API_KEY)),
-            polygon_api_key=self._mask_key(settings_dict.get(self.POLYGON_API_KEY)),
             discord_webhook_url=self._mask_url(settings_dict.get(self.DISCORD_WEBHOOK_URL)),
             default_watchlist_id=default_watchlist_id,
             theme=settings_dict.get(self.THEME, "dark"),
@@ -398,16 +395,6 @@ class SettingsService:
                     "Alpha Vantage API key",
                 )
 
-        if updates.polygon_api_key is not None:
-            if updates.polygon_api_key == "":
-                await self.delete_setting(self.POLYGON_API_KEY, user_id)
-            else:
-                await self.set_setting(
-                    self.POLYGON_API_KEY,
-                    updates.polygon_api_key,
-                    user_id,
-                    "Polygon.io API key",
-                )
 
         if updates.discord_webhook_url is not None:
             if updates.discord_webhook_url == "":

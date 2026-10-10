@@ -41,7 +41,6 @@ A self-hosted web application serving as a comprehensive investing companion. It
 |---------|---------|------|
 | **Yahoo Finance** | Basic quotes, fundamentals | Free |
 | **Alpha Vantage** | Technical indicators, forex | Free (rate limited) |
-| **Polygon.io** | Real-time data, alerts | Paid (optional) |
 | **Claude API** | AI analysis | User-provided key |
 
 ---
@@ -94,7 +93,7 @@ A self-hosted web application serving as a comprehensive investing companion. It
 │    PostgreSQL       │  │       Redis         │  │   External APIs     │
 │    + TimescaleDB    │  │  - Cache            │  │  - Yahoo Finance    │
 │  - User data        │  │  - Task broker      │  │  - Alpha Vantage    │
-│  - Watchlists       │  │  - Pub/Sub          │  │  - Polygon.io       │
+│  - Watchlists       │  │  - Pub/Sub          │  │  - Stooq            │
 │  - Alerts config    │  │  - Rate limiting    │  │  - Claude API       │
 │  - Price history    │  │                     │  │                     │
 └─────────────────────┘  └─────────────────────┘  └─────────────────────┘
@@ -230,7 +229,7 @@ investing_companion/
 │   │   ├── core/                # Config, security, dependencies
 │   │   ├── db/models/           # SQLAlchemy models
 │   │   ├── services/            # Business logic
-│   │   │   ├── data_providers/  # Yahoo, Alpha Vantage, Polygon
+│   │   │   ├── data_providers/  # Yahoo, Stooq, Alpha Vantage
 │   │   │   ├── analysis/        # Technical/fundamental analysis
 │   │   │   ├── ai/              # Claude integration
 │   │   │   └── notifications/   # Discord, future channels

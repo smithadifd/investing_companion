@@ -1171,9 +1171,8 @@ class AlertService:
     def _stamp_quote_provenance(self, *quotes) -> None:
         """Keep QuoteResponse source/stale/timestamp for notification copy.
 
-        Internal only — AlertCheckResult stays numeric. A ratio is as delayed
-        as its delayed leg; Massive on either side wins the existing
-        "15-min delayed" label.
+        Internal only — AlertCheckResult stays numeric. A ratio is as stale as
+        any stale leg; the first present source is the one notifications name.
         """
         present = [quote for quote in quotes if quote is not None]
         if not present:
@@ -1187,14 +1186,7 @@ class AlertService:
             if getattr(quote, "timestamp", None) is not None
         ]
         self._quote_timestamp = min(timestamps) if timestamps else None
-        lowered = {(source or "").lower() for source in sources}
-        if "massive" in lowered:
-            self._quote_source = "massive"
-            self._quote_stale = True
-        elif sources:
-            self._quote_source = sources[0]
-        else:
-            self._quote_source = None
+        self._quote_source = sources[0] if sources else None
 
     def _quote_provenance_fields(self) -> dict:
         return {
@@ -1212,11 +1204,10 @@ class AlertService:
         High/low are used by crossing alerts to detect threshold breaches
         that may occur between polling intervals.
 
-        Quotes come from the elected capability-aware chain. That chain already
-        stamps ``source``/``stale``/``timestamp`` on ``QuoteResponse``
-        (equity/market UI: Massive → "15-min delayed"). Those fields are kept
-        internally for notification rendering; ``AlertCheckResult`` stays
-        numeric. Evaluation uses the delayed price/high/low as-is.
+        Quotes come from the capability-aware chain. That chain already stamps
+        ``source``/``stale``/``timestamp`` on ``QuoteResponse``. Those fields
+        are kept internally for notification rendering; ``AlertCheckResult``
+        stays numeric. Evaluation uses the price/high/low as-is.
         """
         self._clear_quote_provenance()
         target_info = await self._get_target_info(alert)

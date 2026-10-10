@@ -154,7 +154,6 @@ class AppSettings(BaseModel):
 
     claude_api_key: str | None = None
     alpha_vantage_api_key: str | None = None
-    polygon_api_key: str | None = None
     discord_webhook_url: str | None = None
     default_watchlist_id: int | None = None
     theme: str = "dark"
@@ -172,7 +171,6 @@ class AppSettingsUpdate(BaseModel):
 
     claude_api_key: str | None = None
     alpha_vantage_api_key: str | None = None
-    polygon_api_key: str | None = None
     discord_webhook_url: str | None = None
     default_watchlist_id: int | None = None
     theme: str | None = None

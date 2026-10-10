@@ -210,7 +210,6 @@ CREATE INDEX idx_settings_user_key ON user_settings(user_id, key);
 | Key | Description | Encrypted |
 |-----|-------------|-----------|
 | `claude_api_key` | Anthropic API key | Yes |
-| `polygon_api_key` | Polygon.io key | Yes |
 | `alpha_vantage_key` | Alpha Vantage key | Yes |
 | `discord_webhook` | Discord notification URL | Yes |
 | `default_watchlist_id` | Default watchlist | No |

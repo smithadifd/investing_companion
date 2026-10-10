@@ -181,8 +181,7 @@ timestamp.
 | Claude API | — | AI-powered analysis | User-provided key |
 
 Stooq needs no key and is always active, so failover works out of the box.
-Alpha Vantage is added to the chain only when its key is configured. Polygon.io
-remains documented-but-unimplemented (paid tier).
+Alpha Vantage is added to the chain only when its key is configured.
 
 ## Support This Project
 

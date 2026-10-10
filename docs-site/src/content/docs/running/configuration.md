@@ -67,10 +67,9 @@ Celery workers and Celery Beat both use `REDIS_URL` as their broker and result b
 | Variable | Required | Default | Purpose |
 | --- | --- | --- | --- |
 | `ALPHA_VANTAGE_API_KEY` | No | `""` | Key for Alpha Vantage market data. Free tier available. |
-| `POLYGON_API_KEY` | No | `""` | Key for Polygon.io. Paid tier required for real-time data. |
 | `FINNHUB_API_KEY` | No | `""` | Key for Finnhub news data. Free tier allows 60 requests/minute. |
 
-All three keys are optional at startup. Features that depend on a missing key will return errors at runtime.
+Both keys are optional at startup. Features that depend on a missing key will return errors at runtime.
 
 ---
 
@@ -134,7 +133,6 @@ POSTGRES_DB=investing_companion
 REDIS_URL=redis://localhost:6379/0
 
 ALPHA_VANTAGE_API_KEY=
-POLYGON_API_KEY=
 FINNHUB_API_KEY=
 
 DISCORD_WEBHOOK_URL=

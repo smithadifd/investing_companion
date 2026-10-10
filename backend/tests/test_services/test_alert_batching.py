@@ -609,10 +609,10 @@ class TestDeepLink:
         assert description == "**GLD/SLV** (Gold / Silver) is above $80.00"
 
 
-class TestDelayedMassiveProvenance:
-    """A known 15-minute-delayed Massive observation must not read as live."""
+class TestStaleQuoteProvenance:
+    """A stale observation must not read as live, and no source is contractually delayed."""
 
-    async def test_single_notification_uses_delay_label_not_current(self):
+    async def test_single_notification_uses_delayed_label_not_current(self):
         client = _mock_client()
         notifier = _notifier(client)
         observed = "2026-08-10T14:45:00"
@@ -635,7 +635,8 @@ class TestDelayedMassiveProvenance:
         assert "Current Value" not in names
         assert "Current Value" not in blob
         assert "(now " not in blob
-        assert "15-min delayed" in names
+        assert "15-min delayed" not in blob
+        assert "Delayed data" in names
         assert embed["timestamp"] == observed
 
     async def test_batch_line_uses_observed_delay_not_now(self):
@@ -658,8 +659,28 @@ class TestDelayedMassiveProvenance:
         description = embed["description"]
         assert "(now " not in description
         assert "Current" not in description
-        assert "observed $105.00 · 15-min delayed" in description
+        assert "15-min delayed" not in description
+        assert "observed $105.00 · Delayed data" in description
         assert embed["timestamp"] == "2026-08-10T14:45:00"
+
+    async def test_source_name_alone_is_not_a_contractual_delay(self):
+        client = _mock_client()
+        notifier = _notifier(client)
+
+        await notifier.send_alert_notification(
+            alert_name="AAPL breakout",
+            target_symbol="AAPL",
+            target_name="Apple Inc.",
+            condition_type="above",
+            threshold_value=Decimal("200"),
+            current_value=Decimal("205"),
+            source="massive",
+            stale=False,
+        )
+
+        names = [field["name"] for field in _sent_payload(client)["embeds"][0]["fields"]]
+        assert "15-min delayed" not in names
+        assert "Observed Value" in names
 
     async def test_unlabeled_payload_is_still_not_current_or_now(self):
         """Old outbox rows without source still must not claim live."""

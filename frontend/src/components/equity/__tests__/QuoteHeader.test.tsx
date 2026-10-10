@@ -40,15 +40,9 @@ describe('QuoteHeader provenance badge', () => {
     expect(screen.queryByTestId('quote-provenance')).toBeNull();
   });
 
-  it('labels a contractually delayed source neutrally, not as a failure', () => {
-    render(<QuoteHeader equity={equity({ source: 'massive', stale: true })} />);
-
-    const badge = screen.getByTestId('quote-provenance');
-    expect(badge).toHaveTextContent('15-min delayed');
-    expect(badge).toHaveTextContent('massive');
-    // The neutral label must not carry the degraded-fallback framing.
-    expect(badge.textContent).not.toMatch(/fallback/i);
-    expect(badge.getAttribute('title')).not.toMatch(/unavailable/i);
+  it('does not treat a source name as a contractual delay', () => {
+    render(<QuoteHeader equity={equity({ source: 'massive', stale: false })} />);
+    expect(screen.queryByTestId('quote-provenance')).toBeNull();
   });
 
   it('still warns when a live primary fell through to a fallback', () => {
@@ -57,20 +51,22 @@ describe('QuoteHeader provenance badge', () => {
     const badge = screen.getByTestId('quote-provenance');
     expect(badge).toHaveTextContent('Delayed data');
     expect(badge).toHaveTextContent('stooq');
+    expect(badge).not.toHaveTextContent('15-min delayed');
     expect(badge.getAttribute('title')).toMatch(/unavailable/i);
   });
 
-  it('labels the delayed source even if the stale flag never arrived', () => {
-    // Defence in depth: the delay is a fact about the plan, so the label is
-    // driven by provenance and does not depend on an upstream flag surviving.
-    render(<QuoteHeader equity={equity({ source: 'massive', stale: false })} />);
-    expect(screen.getByTestId('quote-provenance')).toHaveTextContent(
-      '15-min delayed',
-    );
+  it('warns for a removed delayed source instead of a neutral delay label', () => {
+    render(<QuoteHeader equity={equity({ source: 'massive', stale: true })} />);
+
+    const badge = screen.getByTestId('quote-provenance');
+    expect(badge).toHaveTextContent('Delayed data');
+    expect(badge).toHaveTextContent('massive');
+    expect(badge).not.toHaveTextContent('15-min delayed');
+    expect(badge.getAttribute('title')).toMatch(/unavailable/i);
   });
 
   it('keeps rendering the as-of timestamp alongside the label', () => {
-    render(<QuoteHeader equity={equity({ source: 'massive', stale: true })} />);
+    render(<QuoteHeader equity={equity({ source: 'stooq', stale: true })} />);
     expect(screen.getByText(/^As of /)).toBeInTheDocument();
   });
 });

@@ -70,7 +70,7 @@ pytz>=2026.4
 # Development & Testing
 # ===========================================
 pytest>=8.0.0
-pytest-asyncio>=0.23.0
+pytest-asyncio>=1.4.0
 pytest-cov>=7.1.0
 httpx>=0.28.1  # For TestClient
 ruff==0.16.10  # Linting; pinned + paired with backend/ruff.toml so local == CI

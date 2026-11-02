@@ -119,15 +119,27 @@ services:
     # works but is undocumented-in-repo and version-fragile, and 1.0s leaves
     # little headroom under transient broker load (Redis persistence pause,
     # GC, etc.) before a healthy worker gets marked unhealthy. Pin it
-    # explicitly to 5s - still safely inside this healthcheck's own 10s
-    # `timeout:` ceiling below, which remains the real backstop against a
-    # true hang (e.g. broker connect() stalling, which `-t` does not bound).
+    # explicitly to 5s - still inside this healthcheck's own `timeout:`
+    # ceiling below, which remains the real backstop against a true hang
+    # (e.g. broker connect() stalling, which `-t` does not bound).
+    #
+    # Cost: every probe boots a fresh Python process that imports the whole
+    # app (~85% of a vCPU for several seconds). At a 30s interval that kept
+    # the demo's t3.small above its 20% CPU baseline and billed burst
+    # credits. Probe every 5 minutes instead; nothing consumes this status
+    # (the deploy scripts health-check the HTTP ports only), and
+    # `restart: unless-stopped` already covers a crashed worker. The 30s
+    # `timeout:` matches celery_beat's earlier finding that the app boot
+    # alone can exceed 10s on this host.
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping --timeout=5"]
-      interval: 30s
-      timeout: 10s
+      interval: 5m
+      timeout: 30s
       retries: 3
-      start_period: 30s
+      start_period: 60s
+    # Reap timed-out probe processes. Without an init, PID 1 is celery itself,
+    # which does not reap orphans, and killed probes piled up as zombies.
+    init: true
     depends_on:
       db:
         condition: service_healthy
@@ -156,45 +168,21 @@ services:
       - ENVIRONMENT=production
       - DEMO_MODE=true
     command: ["celery", "-A", "app.tasks.celery_app", "beat", "--loglevel=info"]
-    # Same override rationale as celery_worker above: the baked :8000/health
-    # curl check can never pass for a non-HTTP process. Unlike the worker,
-    # beat has no local worker identity to target with `-d`, so ping the
-    # broker broadcast-style - a reply from celery_worker confirms this
-    # container can reach the same broker it needs to dispatch tasks on.
-    #
-    # Known limitation (disclosed, not fixed here): `inspect ping` targets
-    # celery's remote-control bus, which only WORKER nodes subscribe to -
-    # celery beat does not respond to it. So this reply is evidence that (a)
-    # this beat container can reach the broker and (b) some worker is alive
-    # on it; it is NOT direct evidence beat's own scheduling loop is still
-    # ticking. A beat process wedged internally while the container/broker
-    # link stays nominal would still report healthy. That's a real gap, but
-    # strictly better than the status quo this PR fixes (celery_beat is
-    # currently ALWAYS unhealthy, a 100% false negative) - a true beat-
-    # liveness signal (e.g. schedule-file mtime heartbeat) is a bigger change
-    # than this config-only fix's scope and is left as a follow-up.
-    #
-    # Same --timeout=5 hardening as celery_worker above (explicit instead of
-    # relying on celery's undocumented 1.0s CLI default).
-    #
-    # `timeout:` below is 30s, not celery_worker's 10s (BR16): the ping itself
-    # replies with "pong ... 1 node online" well inside 5s, but this container
-    # boots app.tasks.celery_app fresh on every invocation, which re-runs
-    # Settings' production validation and re-prints its two non-fatal startup
-    # WARNINGs (ENCRYPTION_KEY fallback + CORS_ORIGINS localhost, see
-    # core/config.py) on every single healthcheck exec, not just once at
-    # process start. That per-invocation overhead was pushing the total
-    # `CMD-SHELL` invocation past a 10s ceiling intermittently - a real pong
-    # arriving too late to be counted, not a flaky broker or a slow worker,
-    # so retries never helped. Widened to match `interval: 30s` above; the
-    # two WARNINGs are left visible/unsilenced (out of this config-only
-    # fix's scope - see ENCRYPTION_KEY/CORS handling in core/config.py).
+    # No healthcheck for beat. The image's baked :8000/health curl can never
+    # pass for a non-HTTP process, and the `inspect ping` override this
+    # replaced only proved that some worker answered on the broker: celery
+    # beat does not subscribe to the remote-control bus, so it said nothing
+    # about beat itself. It also cost real money: each probe booted a second
+    # copy of the app inside beat's 128M limit, got OOM-killed (exit 137),
+    # left beat permanently "unhealthy", and helped keep the demo's t3.small
+    # above its CPU baseline. Beat runs as the container's main process, so
+    # if it dies the container exits and `restart: unless-stopped` brings it
+    # back. A true beat-liveness signal (e.g. a schedule-file mtime
+    # heartbeat) remains a possible follow-up.
     healthcheck:
-      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping --timeout=5"]
-      interval: 30s
-      timeout: 30s
-      retries: 3
-      start_period: 30s
+      disable: true
+    # Reap any orphaned child processes (same reason as celery_worker).
+    init: true
     depends_on:
       celery_worker:
         condition: service_started

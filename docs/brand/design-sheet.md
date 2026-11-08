@@ -32,9 +32,10 @@ A dark room with one light in it. There is no light theme.
 | `border-ghost` | `rgba(255,255,255,0.05)` to `0.08` | Card and row borders. Never a solid mid-grey line |
 | `divider` | `rgba(255,255,255,0.05)` | Row separators inside a card |
 
-Depth comes from the surface step (base to raised) and from the accent glow. No drop shadows
-with a visible edge, no bevels, no gradients between two colours. The one gradient allowed is
-the fade under a chart line (see Charts).
+Depth comes from the surface step (base to raised) and from the accent glow. The glow is the
+only shadow: a soft, edgeless spread of the accent at 12 to 18 percent behind a primary button,
+an active chip or a chart marker. No drop shadows with a visible edge, no bevels, no gradients
+between two colours. The one gradient allowed is the fade under a chart line (see Charts).
 
 ## Colour
 
@@ -44,8 +45,8 @@ the fade under a chart line (see Charts).
 | `accent-glow` | `rgba(37,99,235,0.12)` to `0.18` | Soft glow behind the accent: button shadow, active chip, hover |
 | `accent-wash` | `rgba(37,99,235,0.14)` | Active chip and tab background |
 | `text` | `#ffffff` | Primary text |
-| `text-secondary` | `#adaaaa` | Labels, descriptions, secondary numbers (8.5:1 on base) |
-| `text-muted` | `#767575` | Axis labels and non-essential captions only (3.9:1; never for text that must be read) |
+| `text-secondary` | `#adaaaa` | Labels, descriptions, secondary numbers, table headers (8.5:1 on base) |
+| `text-muted` | `#767575` | Axis labels and non-essential captions only (4.3:1 on base, 3.9:1 on raised; never for text that must be read) |
 | `gain` | `#22c55e` | Up, rise, good. Text and marks |
 | `gain-wash` | `rgba(34,197,94,0.12)` | Background of a positive change chip |
 | `loss` | `#ef4444` | Down, fall, bad. Text and marks |
@@ -54,8 +55,8 @@ the fade under a chart line (see Charts).
 
 Rules:
 
-- The accent is never small text. Blue-600 on near-black is 3.7:1, below the floor for body
-  text. Use it as fill (white text on it), as glow, as a line, as an active indicator. If blue
+- The accent is never small text. Blue-600 is 3.8:1 on base and lower on raised, below the
+  floor for body text. Use it as fill (white text on it), as glow, as a line, as an active indicator. If blue
   words are ever needed, add a lighter text step and record it here.
 - Gain and loss are data colours. They say which way a number went and nothing else. They never
   appear as decoration, in the brand, or on a chart line by default. Every gain or loss colour is
@@ -66,7 +67,7 @@ Rules:
 
 ## Type
 
-Two faces and a label voice. All Google-hosted, no font files.
+Two text faces, one monospace for symbols, and a label voice. All Google-hosted, no font files.
 
 | Role | Face | Notes |
 |---|---|---|
@@ -88,7 +89,7 @@ Scale (phone, desktop in brackets where different):
 | Secondary | 13 px | 400 |
 | Caption | 12 px | 400 |
 | Label | 11 px / 16 px (10 px in table headers) | 500, uppercase, tracked |
-| Axis | 10 px | 400, `text-muted` |
+| Axis | 10 px | 400, `text-muted` (axis labels only) |
 
 Numbers are formatted once, the same everywhere: thousands separators, two decimals for
 prices, two decimals and a percent sign for changes, a leading glyph for direction. Large
@@ -178,7 +179,7 @@ positions, the portfolio value leads and the market line is the second block. Wh
 none (a fresh install, the demo), the market leads. What a watchlist highlight is, and how the
 portfolio block is sourced, is a product decision still open; the layout holds a slot for it.
 
-**Desktop tables.** Column headers are labels (10 px, tracked, `text-muted`). Rows are 48 px,
+**Desktop tables.** Column headers are labels (10 px, tracked, `text-secondary`). Rows are 48 px,
 hover is `accent` at 6 percent. Numbers right-aligned and tabular.
 
 ## Motion

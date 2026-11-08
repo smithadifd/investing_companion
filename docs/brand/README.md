@@ -14,3 +14,6 @@ level with where it began. It shows the market moving without promising a direct
 Checked at 16, 32 and 128 px on `#171717` and on white. The line still reads at 16 px on both.
 
 Drawn by hand as SVG; no image model was used.
+
+The rest of the visual system (surfaces, colour, type, components, charts, layout) is in
+[`design-sheet.md`](design-sheet.md).

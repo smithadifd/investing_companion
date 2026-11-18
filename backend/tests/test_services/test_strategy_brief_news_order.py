@@ -29,7 +29,7 @@ id, and the row inserted SECOND gets the HIGHER id - so the correct
 accidental match to it.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,7 +43,7 @@ class TestCollectNewsTiebreak:
         them id-descending - not whichever order the DB happens to return
         for the tie - and the same way on every repeated call.
         """
-        shared_published_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        shared_published_at = datetime.now(UTC) - timedelta(hours=1)
 
         # Insert the LOWER id first (physically first), then the HIGHER id
         # second (physically last) - decouples physical/insertion order from
@@ -110,7 +110,7 @@ class TestCollectNewsCapBoundary:
         """
         base_id = 812_000
         tie_count = NEWS_LIMIT + 3
-        shared_published_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        shared_published_at = datetime.now(UTC) - timedelta(hours=1)
 
         all_ids = [base_id + i for i in range(tie_count)]
         id_to_url = {

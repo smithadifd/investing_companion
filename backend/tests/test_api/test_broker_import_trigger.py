@@ -13,7 +13,7 @@ user's OWN linked hash, and that another user's account can neither be imported
 into nor even be proven to exist.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 
 import pytest
 from httpx import AsyncClient
@@ -95,7 +95,7 @@ def spy_pulls(monkeypatch, db: AsyncSession):
                 kind=kind,
                 status=ImportStatus.COMPLETE,
                 item_count=3,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db.add(run)
             await db.flush()
@@ -400,8 +400,8 @@ class TestHistoryHorizonIsDocumented:
 
     def test_gap_note_prefix_is_shared(self):
         note = schwab_ingestion._history_gap_note(
-            datetime.now(timezone.utc) - timedelta(days=400),
-            datetime.now(timezone.utc) - timedelta(days=59),
+            datetime.now(UTC) - timedelta(days=400),
+            datetime.now(UTC) - timedelta(days=59),
         )
         assert note.startswith(schwab_ingestion.HISTORY_GAP_NOTE_PREFIX)
         assert "recovery path" in note

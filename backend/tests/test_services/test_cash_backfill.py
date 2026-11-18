@@ -23,7 +23,7 @@ the adoptions:
   skipped-and-listed rather than guessed at.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,7 +51,7 @@ HASH = "BACKFILL_HASH"
 
 
 def _ago(days: float = 0) -> datetime:
-    return datetime.now(timezone.utc) - timedelta(days=days)
+    return datetime.now(UTC) - timedelta(days=days)
 
 
 async def _link(db, user, account_id, account_hash=HASH):

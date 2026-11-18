@@ -1,6 +1,6 @@
 """Tests for the dashboard trade-readiness endpoint + shared builder."""
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, UTC
 from decimal import Decimal
 
 from httpx import AsyncClient
@@ -76,7 +76,7 @@ class TestBuildTradeReadiness:
             db, equity,
             threshold_value=100.0,
             last_checked_value=50.0,
-            last_triggered_at=datetime.now(timezone.utc) - timedelta(hours=3),
+            last_triggered_at=datetime.now(UTC) - timedelta(hours=3),
         )
         await create_test_trade(
             db, equity, test_user,
@@ -190,7 +190,7 @@ class TestBuildTradeReadiness:
             db, eq_b,
             threshold_value=100.0,
             last_checked_value=50.0,
-            last_triggered_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            last_triggered_at=datetime.now(UTC) - timedelta(hours=1),
         )
         await _make_trigger(db, [hit.id], name="Hit one")
 

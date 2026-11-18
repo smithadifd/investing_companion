@@ -1,6 +1,6 @@
 """Tests for the context pack export (service + endpoint)."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 
 from httpx import AsyncClient
@@ -41,7 +41,7 @@ async def _seed_state(db: AsyncSession):
     )
     db.add(PriceHistory(
         equity_id=equity.id,
-        timestamp=datetime.now(timezone.utc) - timedelta(days=1),
+        timestamp=datetime.now(UTC) - timedelta(days=1),
         open=100, high=101, low=99, close=100,
     ))
     await db.flush()

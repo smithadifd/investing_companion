@@ -10,7 +10,7 @@ it finds no coverage for a symbol.
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from sqlalchemy import distinct, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -35,8 +35,8 @@ def _to_utc(ts: datetime) -> datetime:
     (equity_id, timestamp) upsert dedup, so everything is stored UTC-anchored.
     """
     if ts.tzinfo is None:
-        return ts.replace(tzinfo=timezone.utc)
-    return ts.astimezone(timezone.utc)
+        return ts.replace(tzinfo=UTC)
+    return ts.astimezone(UTC)
 
 
 # First sync for an equity pulls enough history to cover the longest alert

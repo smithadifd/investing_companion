@@ -22,7 +22,7 @@ needed (matches test_ai.py's mocking style).
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
@@ -61,11 +61,11 @@ def test_compute_review_window_monday_beat_run_selects_week_just_ended():
     """The Monday-05:30-UTC beat schedule resolves to the week that just finished."""
     # Monday 2026-07-13 05:30 UTC = 01:30 EDT Monday - the agent's actual
     # beat trigger time, a few hours after the ET week ended.
-    now = datetime(2026, 7, 13, 5, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 13, 5, 30, tzinfo=UTC)
     window = compute_review_window(now)
 
-    assert window.start == datetime(2026, 7, 6, 4, 0, tzinfo=timezone.utc)  # Mon 00:00 EDT
-    assert window.end == datetime(2026, 7, 13, 4, 0, tzinfo=timezone.utc)  # this Mon 00:00 EDT
+    assert window.start == datetime(2026, 7, 6, 4, 0, tzinfo=UTC)  # Mon 00:00 EDT
+    assert window.end == datetime(2026, 7, 13, 4, 0, tzinfo=UTC)  # this Mon 00:00 EDT
 
 
 def test_compute_review_window_midweek_run_selects_last_week_not_current():
@@ -73,25 +73,25 @@ def test_compute_review_window_midweek_run_selects_last_week_not_current():
     # 2026-07-15 is a Wednesday; July is EDT (UTC-4). The week containing this
     # instant (Mon 07-13 through Mon 07-20) is still in progress and must
     # never be the one selected.
-    now = datetime(2026, 7, 15, 18, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 15, 18, 0, tzinfo=UTC)
     window = compute_review_window(now)
 
     # Same result as the Monday-beat-run case above: last week, not this one.
-    assert window.start == datetime(2026, 7, 6, 4, 0, tzinfo=timezone.utc)
-    assert window.end == datetime(2026, 7, 13, 4, 0, tzinfo=timezone.utc)
+    assert window.start == datetime(2026, 7, 6, 4, 0, tzinfo=UTC)
+    assert window.end == datetime(2026, 7, 13, 4, 0, tzinfo=UTC)
 
 
 def test_compute_review_window_dst_edge():
     """The completed week spans 2026 spring-forward (Mon 03-02 EST -> Mon 03-09 EDT)."""
     # Monday 2026-03-09 05:30 UTC: the beat's actual trigger time the Monday
     # AFTER the DST-spanning week ends (DST began earlier that week, Mar 8).
-    now = datetime(2026, 3, 9, 5, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 3, 9, 5, 30, tzinfo=UTC)
     window = compute_review_window(now)
 
     # Mon 2026-03-02 00:00 EST (UTC-5) -> 05:00 UTC
-    assert window.start == datetime(2026, 3, 2, 5, 0, tzinfo=timezone.utc)
+    assert window.start == datetime(2026, 3, 2, 5, 0, tzinfo=UTC)
     # Mon 2026-03-09 00:00 EDT (UTC-4, DST already in effect) -> 04:00 UTC
-    assert window.end == datetime(2026, 3, 9, 4, 0, tzinfo=timezone.utc)
+    assert window.end == datetime(2026, 3, 9, 4, 0, tzinfo=UTC)
     # The offsets genuinely differ across the window (spring-forward "loses"
     # an hour of real elapsed time for the same 7 local calendar days) - this
     # is the DST edge the deterministic-metrics window must not mishandle.
@@ -102,13 +102,13 @@ def test_compute_review_window_dst_fallback_edge():
     """The completed week spans 2026 fall-back (Mon 10-26 EDT -> Mon 11-02 EST)."""
     # Monday 2026-11-02 05:30 UTC: the beat's actual trigger time the Monday
     # AFTER the fall-back-spanning week ends (fall-back happened Nov 1).
-    now = datetime(2026, 11, 2, 5, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 11, 2, 5, 30, tzinfo=UTC)
     window = compute_review_window(now)
 
     # Mon 2026-10-26 00:00 EDT (UTC-4) -> 04:00 UTC
-    assert window.start == datetime(2026, 10, 26, 4, 0, tzinfo=timezone.utc)
+    assert window.start == datetime(2026, 10, 26, 4, 0, tzinfo=UTC)
     # Mon 2026-11-02 00:00 EST (UTC-5, fall-back already in effect) -> 05:00 UTC
-    assert window.end == datetime(2026, 11, 2, 5, 0, tzinfo=timezone.utc)
+    assert window.end == datetime(2026, 11, 2, 5, 0, tzinfo=UTC)
     # Fall-back "gains" an hour of real elapsed time for the same 7 local
     # calendar days.
     assert (window.end - window.start) == timedelta(days=7, hours=1)
@@ -177,8 +177,8 @@ def test_compute_metrics_no_losses_win_rate_and_loser_avg():
 # ---------------------------------------------------------------------------
 def test_fallback_summary_uses_inclusive_display_end_date():
     window = JournalWindow(
-        start=datetime(2026, 7, 13, 4, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 7, 20, 4, 0, tzinfo=timezone.utc),
+        start=datetime(2026, 7, 13, 4, 0, tzinfo=UTC),
+        end=datetime(2026, 7, 20, 4, 0, tzinfo=UTC),
     )
     summary = tj._fallback_summary(window, compute_metrics([]))
     assert "Week 2026-07-13 – 2026-07-19" in summary
@@ -187,7 +187,7 @@ def test_fallback_summary_uses_inclusive_display_end_date():
 
 def test_fallback_summary_inclusive_display_end_date_across_dst():
     """The display-only end-date shift stays correct across a DST transition."""
-    window = compute_review_window(datetime(2026, 3, 9, 5, 30, tzinfo=timezone.utc))
+    window = compute_review_window(datetime(2026, 3, 9, 5, 30, tzinfo=UTC))
     summary = tj._fallback_summary(window, compute_metrics([]))
     assert "Week 2026-03-02 – 2026-03-08" in summary
 
@@ -209,8 +209,8 @@ def _fake_prompt_pair(symbol: str, *, closed_at: datetime) -> MagicMock:
 
 
 _INJECTION_WINDOW = JournalWindow(
-    start=datetime(2026, 7, 13, 4, 0, tzinfo=timezone.utc),
-    end=datetime(2026, 7, 20, 4, 0, tzinfo=timezone.utc),
+    start=datetime(2026, 7, 13, 4, 0, tzinfo=UTC),
+    end=datetime(2026, 7, 20, 4, 0, tzinfo=UTC),
 )
 
 
@@ -313,8 +313,8 @@ async def test_call_llm_settles_tokens_even_when_content_parsing_fails(monkeypat
 # Fixtures / helpers for the DB-backed execute() tests
 # ---------------------------------------------------------------------------
 FIXED_WINDOW = JournalWindow(
-    start=datetime(2026, 7, 13, 4, 0, tzinfo=timezone.utc),
-    end=datetime(2026, 7, 20, 4, 0, tzinfo=timezone.utc),
+    start=datetime(2026, 7, 13, 4, 0, tzinfo=UTC),
+    end=datetime(2026, 7, 20, 4, 0, tzinfo=UTC),
 )
 
 

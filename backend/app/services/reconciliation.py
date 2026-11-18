@@ -25,7 +25,7 @@ calls the ``schwab_ingestion`` pull functions (which own their own sessions) -
 only that module's read helpers, which explicitly accept any caller session.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 from uuid import UUID
 
@@ -246,7 +246,7 @@ class ReconciliationService:
             return None
         account_hash = link.account_hash
 
-        window_end = datetime.now(timezone.utc)
+        window_end = datetime.now(UTC)
         window_days = days if days is not None else _DEFAULT_TRANSACTION_VIEW_DAYS
         window_start = window_end - timedelta(days=window_days)
 

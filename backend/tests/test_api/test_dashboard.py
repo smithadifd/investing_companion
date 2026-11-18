@@ -1,6 +1,6 @@
 """Tests for the dashboard needs-attention endpoint + shared builder."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 
 from httpx import AsyncClient
@@ -28,7 +28,7 @@ class TestBuildNeedsAttention:
             name="NA1 crisis tier",
             threshold_value=100.0,
             last_checked_value=50.0,
-            last_triggered_at=datetime.now(timezone.utc) - timedelta(hours=3),
+            last_triggered_at=datetime.now(UTC) - timedelta(hours=3),
         )
         alert.notes = "Deploy tranche 1\nSecond line ignored"
         await db.flush()
@@ -77,7 +77,7 @@ class TestBuildNeedsAttention:
         ))
         db.add(PriceHistory(
             equity_id=equity.id,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             open=Decimal("97"), high=Decimal("98"), low=Decimal("96"),
             close=Decimal("97"),
         ))
@@ -101,7 +101,7 @@ class TestBuildNeedsAttention:
         ))
         db.add(PriceHistory(
             equity_id=equity.id,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             open=Decimal("50"), high=Decimal("51"), low=Decimal("49"),
             close=Decimal("50"),
         ))
@@ -121,7 +121,7 @@ class TestFormatNeedsAttentionLines:
             name="NA6 tier",
             threshold_value=100.0,
             last_checked_value=50.0,
-            last_triggered_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            last_triggered_at=datetime.now(UTC) - timedelta(hours=1),
         )
         triggered.notes = "Sell half"
         equity2 = await create_test_equity(db, symbol="NA7")

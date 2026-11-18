@@ -24,7 +24,7 @@ Same spirit as ``schemas/reconciliation.py``'s "show it, flag it" rule and the
 alert-staleness precedent from ``20260814_001``: unknown reads as unknown.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from decimal import Decimal
 from uuid import UUID
 
@@ -157,7 +157,7 @@ class NavService:
             fees_paid=fees_paid,
             total_return_amount=total_return_amount,
             total_return_percent=total_return_percent,
-            as_of=datetime.now(timezone.utc),
+            as_of=datetime.now(UTC),
             is_estimated=bool(reasons),
             estimate_reasons=reasons,
             coverage=coverage,

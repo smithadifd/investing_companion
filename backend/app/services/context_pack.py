@@ -9,7 +9,7 @@ and at most a few minutes stale.
 """
 
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, UTC
 from decimal import Decimal
 from uuid import UUID
 
@@ -138,7 +138,7 @@ class ContextPackService:
         ]
 
         return ContextPack(
-            generated_at=datetime.now(timezone.utc),
+            generated_at=datetime.now(UTC),
             positions=positions,
             portfolio_value=portfolio.current_value,
             total_invested=portfolio.total_invested,
@@ -239,7 +239,7 @@ class ContextPackService:
         alerts = result.scalars().all()
 
         packed: list[PackAlert] = []
-        recently = datetime.now(timezone.utc) - timedelta(days=2)
+        recently = datetime.now(UTC) - timedelta(days=2)
         for a in alerts:
             symbol = (
                 a.equity.symbol
@@ -289,7 +289,7 @@ class ContextPackService:
     async def _recent_triggers(
         self, user_id: UUID | None = None, days: int = 7
     ) -> list[PackTrigger]:
-        since = datetime.now(timezone.utc) - timedelta(days=days)
+        since = datetime.now(UTC) - timedelta(days=days)
         stmt = (
             select(AlertHistory)
             .options(selectinload(AlertHistory.alert).selectinload(Alert.equity))

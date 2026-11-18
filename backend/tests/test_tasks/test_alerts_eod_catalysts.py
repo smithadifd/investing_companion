@@ -13,7 +13,7 @@ tests/test_services/test_catalysts.py.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from unittest.mock import AsyncMock, MagicMock
 
 from app.db.models.news_item import NewsItem
@@ -123,7 +123,7 @@ async def test_mention_laden_catalyst_neutralized_through_the_eod_path(db):
             headline="@everyone big catalyst, buy now",
             url="https://example.com/eod-mention",
             source="AP",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
             relevance=0.9,
             summary=None,
         )

@@ -37,7 +37,7 @@ import argparse
 import asyncio
 import sys
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 # Allow `python backend/scripts/mint_api_token.py` from the repo root too.
@@ -77,7 +77,7 @@ async def _cmd_mint(db: AsyncSession, args: argparse.Namespace) -> int:
         if args.expires_days <= 0:
             _err("--expires-days must be positive")
             return 1
-        expires_at = datetime.now(timezone.utc) + timedelta(days=args.expires_days)
+        expires_at = datetime.now(UTC) + timedelta(days=args.expires_days)
 
     scopes = args.scope or [SCOPE_PACK_READ]
     try:
@@ -102,7 +102,7 @@ async def _cmd_list(db: AsyncSession, args: argparse.Namespace) -> int:
     if user is None:
         _err(f"No user matches {args.user!r}")
         return 1
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for row in await ApiTokenService(db).list_for_user(user.id):
         if row.revoked_at:
             state = "revoked"

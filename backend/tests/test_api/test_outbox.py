@@ -1,7 +1,7 @@
 """Tests for the context pack outbox (service + endpoints)."""
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 import pytest
 from fastapi import HTTPException
@@ -97,7 +97,7 @@ class TestOutboxService:
         fresh = history / "20990101_0900.md"
         fresh.write_text("fresh", encoding="utf-8")
         # backdate the old file well past the retention window
-        old_ts = datetime(2020, 1, 1, tzinfo=timezone.utc).timestamp()
+        old_ts = datetime(2020, 1, 1, tzinfo=UTC).timestamp()
         os.utime(old, (old_ts, old_ts))
 
         ContextPackOutboxService._prune_history(history)

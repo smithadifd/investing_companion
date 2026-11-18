@@ -16,7 +16,7 @@ external boundary (it reaches Yahoo/Stooq/Alpha Vantage), not an internal
 collaborator.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,7 +28,7 @@ from tests.factories import create_test_account, create_test_equity, create_test
 
 
 def _at(days_ago: int) -> datetime:
-    return datetime.now(timezone.utc) - timedelta(days=days_ago)
+    return datetime.now(UTC) - timedelta(days=days_ago)
 
 
 class _Quote:

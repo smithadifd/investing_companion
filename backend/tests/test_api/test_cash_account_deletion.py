@@ -17,7 +17,7 @@ and the endpoint over it. The invariant is *"no user action destroys financial
 history without saying so"*.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 
 import pytest
@@ -34,7 +34,7 @@ ACCOUNTS_URL = "/api/v1/accounts"
 
 
 def _ago(days: float = 0) -> datetime:
-    return datetime.now(timezone.utc) - timedelta(days=days)
+    return datetime.now(UTC) - timedelta(days=days)
 
 
 async def _cash(db, user, account, amount="1000", kind=TradeType.DEPOSIT):

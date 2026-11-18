@@ -8,7 +8,7 @@ whitespace-normalized, truncated to 80 chars including the ellipsis, and
 neutralized before it can reach a webhook message.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 
 from app.db.models.news_item import NewsItem
 from app.services.catalysts import (
@@ -58,7 +58,7 @@ async def test_get_catalyst_lines_filters_below_relevance_bar(db):
             headline="Low relevance",
             url="https://example.com/low",
             source="AP",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
             relevance=0.5,
         )
     )
@@ -74,7 +74,7 @@ async def test_get_catalyst_lines_filters_unscored_rows(db):
             headline="Unscored",
             url="https://example.com/unscored",
             source="AP",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
             relevance=None,
         )
     )
@@ -90,7 +90,7 @@ async def test_get_catalyst_lines_filters_outside_lookback_window(db):
             headline="Stale catalyst",
             url="https://example.com/stale",
             source="AP",
-            published_at=datetime.now(timezone.utc) - timedelta(hours=48),
+            published_at=datetime.now(UTC) - timedelta(hours=48),
             relevance=0.9,
         )
     )
@@ -100,7 +100,7 @@ async def test_get_catalyst_lines_filters_outside_lookback_window(db):
 
 
 async def test_get_catalyst_lines_picks_highest_relevance_per_symbol(db):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db.add_all(
         [
             NewsItem(
@@ -137,7 +137,7 @@ async def test_get_catalyst_lines_prefers_summary_falls_back_to_headline(db):
             headline="Headline text",
             url="https://example.com/c",
             source="AP",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
             relevance=0.8,
             summary=None,
         )
@@ -148,7 +148,7 @@ async def test_get_catalyst_lines_prefers_summary_falls_back_to_headline(db):
 
 
 async def test_get_catalyst_lines_only_returns_requested_symbols(db):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db.add_all(
         [
             NewsItem(
@@ -221,7 +221,7 @@ async def test_get_catalyst_lines_neutralizes_mention_in_headline(db):
             headline="@everyone big catalyst, buy now",
             url="https://example.com/mention",
             source="AP",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
             relevance=0.9,
             summary=None,
         )
@@ -240,7 +240,7 @@ async def test_get_catalyst_lines_neutralizes_mention_in_summary(db):
             headline="Headline text",
             url="https://example.com/mention-summary",
             source="AP",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
             relevance=0.9,
             summary="Ping <@&999888777666555444> for details @here",
         )

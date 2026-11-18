@@ -26,7 +26,7 @@ from their physical insertion order: the pair inserted FIRST gets the HIGHER
 id, and the pair inserted SECOND gets the LOWER id.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -70,10 +70,10 @@ class TestClosedTradePairsTiebreak:
         await db.commit()
 
         window = JournalWindow(
-            start=datetime(2026, 7, 13, tzinfo=timezone.utc),
-            end=datetime(2026, 7, 20, tzinfo=timezone.utc),
+            start=datetime(2026, 7, 13, tzinfo=UTC),
+            end=datetime(2026, 7, 20, tzinfo=UTC),
         )
-        shared_closed_at = datetime(2026, 7, 14, 15, 30, tzinfo=timezone.utc)
+        shared_closed_at = datetime(2026, 7, 14, 15, 30, tzinfo=UTC)
 
         open_a = await _make_trade(
             db,

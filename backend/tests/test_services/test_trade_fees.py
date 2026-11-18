@@ -13,7 +13,7 @@ Contrast (the pre-fix, fee-LESS behaviour these tests would catch):
     total_realized_pnl 270.00 - instead of 0.5 / 5.75 / 190.00.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +25,7 @@ from tests.factories import create_test_equity
 
 
 def _at(days_ago: int) -> datetime:
-    return datetime.now(timezone.utc) - timedelta(days=days_ago)
+    return datetime.now(UTC) - timedelta(days=days_ago)
 
 
 async def _trade(service, user_id, equity_id, ttype, qty, price, fees, days_ago):

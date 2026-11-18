@@ -23,7 +23,7 @@ import logging
 import re
 import uuid
 from datetime import date as date_
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -99,7 +99,7 @@ def _today_et(now_utc: datetime | None = None) -> date_:
     Accepts an optional ``now_utc`` for deterministic testing around the
     UTC/ET day boundary; production callers always use the real clock.
     """
-    now_utc = now_utc if now_utc is not None else datetime.now(timezone.utc)
+    now_utc = now_utc if now_utc is not None else datetime.now(UTC)
     return now_utc.astimezone(ET).date()
 
 
@@ -323,7 +323,7 @@ async def _collect_needs_attention(db: AsyncSession, user_id: uuid.UUID | None) 
 
 async def _collect_news(db: AsyncSession) -> list[dict]:
     """Most recent news_items (table may be empty - the News agent is a sibling PR)."""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=NEWS_LOOKBACK_HOURS)
+    cutoff = datetime.now(UTC) - timedelta(hours=NEWS_LOOKBACK_HOURS)
     stmt = (
         select(NewsItem)
         .where(NewsItem.published_at >= cutoff)

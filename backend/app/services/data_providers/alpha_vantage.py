@@ -13,7 +13,7 @@ behind Stooq in the chain: a last-resort quote source, not a primary.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from decimal import Decimal, InvalidOperation
 
 import httpx
@@ -70,7 +70,7 @@ def parse_global_quote(symbol: str, payload: dict) -> QuoteResponse | None:
         previous_close=prev_close,
         volume=int(_safe_decimal(quote.get("06. volume")) or 0),
         market_cap=None,
-        timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
+        timestamp=datetime.now(UTC).replace(tzinfo=None),
         source="alpha_vantage",
         stale=False,  # the failover layer flags degraded fallback data
     )

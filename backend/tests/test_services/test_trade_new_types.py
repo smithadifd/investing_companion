@@ -13,7 +13,7 @@ Every assertion here crosses the public interface. Nothing reaches into
 shape.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 
 import pytest
@@ -33,7 +33,7 @@ from tests.factories import create_test_account, create_test_equity
 
 
 def _at(days_ago: int) -> datetime:
-    return datetime.now(timezone.utc) - timedelta(days=days_ago)
+    return datetime.now(UTC) - timedelta(days=days_ago)
 
 
 async def _create(service, user_id, equity_id, trade_type, qty, price, account_id, days_ago):

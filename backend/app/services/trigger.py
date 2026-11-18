@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 
 from sqlalchemy import delete, or_, select
@@ -42,7 +42,7 @@ def _is_stale(alert: Alert) -> bool:
     """
     if alert.last_checked_at is None:
         return True
-    return datetime.now(timezone.utc) - alert.last_checked_at > STALE_AFTER
+    return datetime.now(UTC) - alert.last_checked_at > STALE_AFTER
 
 
 def _alert_distance(alert: Alert) -> Decimal | None:
@@ -84,7 +84,7 @@ def derive_signal(alerts: list[Alert]) -> TriggerSignal:
         # indistinguishable from ARMED.
         return TriggerSignal.DISARMED
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for a in active:
         if a.last_triggered_at and now - a.last_triggered_at <= HIT_WINDOW:
             return TriggerSignal.HIT
@@ -185,7 +185,7 @@ class TriggerService:
         if not trigger:
             return None
         trigger.status = TriggerLifecycle.EXECUTED.value
-        trigger.executed_at = datetime.now(timezone.utc)
+        trigger.executed_at = datetime.now(UTC)
         trigger.execution_note = note
         await self.db.commit()
         return await self.get_trigger(trigger_id)

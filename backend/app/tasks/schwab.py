@@ -31,7 +31,7 @@ nothing to sync, so there is nothing to fall behind and nothing to say.
 
 import logging
 import math
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import NamedTuple
 
 from sqlalchemy import func, select
@@ -101,7 +101,7 @@ def _import_link() -> str:
 
 def _as_utc(value: datetime) -> datetime:
     """A naive row is read as UTC, never as local."""
-    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 async def _transaction_sync_lag(
@@ -165,7 +165,7 @@ async def _transaction_sync_lag(
             worst = (reference, last_sync is not None)
 
     reference, ever_synced = worst
-    elapsed = (datetime.now(timezone.utc) - reference).total_seconds() / 86400
+    elapsed = (datetime.now(UTC) - reference).total_seconds() / 86400
     return _SyncLag(
         days=max(0.0, elapsed),
         ever_synced=ever_synced,

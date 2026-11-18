@@ -7,7 +7,7 @@ detection (more closed than opened), the short side, and that the walk is
 strictly read-only (writes no pairs, never commits).
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -19,7 +19,7 @@ from tests.factories import create_test_account, create_test_equity, create_test
 
 
 def _at(days_ago: int) -> datetime:
-    return datetime.now(timezone.utc) - timedelta(days=days_ago)
+    return datetime.now(UTC) - timedelta(days=days_ago)
 
 
 class TestGetOpenLots:

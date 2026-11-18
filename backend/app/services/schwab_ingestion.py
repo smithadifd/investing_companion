@@ -61,7 +61,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal, InvalidOperation
 from collections.abc import Callable, Iterator
 
@@ -251,8 +251,8 @@ def _parse_schwab_datetime(value) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def account_scoped_external_id(account_hash: str, external_id: str) -> str:
@@ -571,7 +571,7 @@ async def _default_transaction_window_start(
     )
     if latest is not None:
         return latest
-    return datetime.now(timezone.utc) - timedelta(
+    return datetime.now(UTC) - timedelta(
         days=_DEFAULT_TRANSACTION_LOOKBACK_DAYS
     )
 
@@ -622,7 +622,7 @@ async def pull_transactions(
     """
     factory = session_factory or _default_session_factory()
     async with factory() as db:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         window_end = end_date or now
         requested_start = start_date or await _default_transaction_window_start(
             db, user_id, account_hash

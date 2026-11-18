@@ -1,7 +1,7 @@
 """Celery tasks for alert monitoring and notifications."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from app.db.session import AsyncSessionLocal
 from app.services.alert import AlertService
@@ -262,7 +262,7 @@ def send_morning_pulse():
             ) or 0
             # Triggered since previous close (21:30 UTC yesterday = 4:30 PM ET)
             yesterday_close = (
-                datetime.now(timezone.utc).replace(hour=21, minute=30, second=0, microsecond=0)
+                datetime.now(UTC).replace(hour=21, minute=30, second=0, microsecond=0)
                 - timedelta(days=1)
             )
             triggered_overnight = await session.scalar(
@@ -465,7 +465,7 @@ def send_eod_wrap():
                 logger.warning(f"Failed to build post-market movers: {e}")
 
             # --- Alert data ---
-            today_start = datetime.now(timezone.utc).replace(
+            today_start = datetime.now(UTC).replace(
                 hour=0, minute=0, second=0, microsecond=0
             )
             active_count = await session.scalar(
@@ -613,7 +613,7 @@ def check_notification_schedule():
         from app.services.settings import SettingsService
 
         ET = ZoneInfo("America/New_York")
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         now_et = now_utc.astimezone(ET)
 
         # Skip weekends

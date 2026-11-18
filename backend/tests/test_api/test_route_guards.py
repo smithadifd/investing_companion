@@ -118,7 +118,7 @@ def test_event_refresh_routes_are_guarded():
 
 import logging  # noqa: E402
 import re  # noqa: E402
-from datetime import datetime, timedelta, timezone  # noqa: E402
+from datetime import datetime, timedelta, UTC  # noqa: E402
 
 from fastapi import Depends, FastAPI  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
@@ -305,7 +305,7 @@ async def test_revoked_api_token_is_401(client, db, test_user):
 async def test_expired_api_token_is_401(client, db, test_user):
     token = await _raw_token(
         db, test_user, [SCOPE_PACK_READ],
-        expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+        expires_at=datetime.now(UTC) - timedelta(seconds=1),
     )
     resp = await client.get("/api/v1/export/context-pack", headers=_bearer(token))
     assert resp.status_code == 401
@@ -314,7 +314,7 @@ async def test_expired_api_token_is_401(client, db, test_user):
 async def test_unexpired_api_token_with_expiry_is_accepted(client, db, test_user):
     token = await _raw_token(
         db, test_user, [SCOPE_PACK_READ],
-        expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+        expires_at=datetime.now(UTC) + timedelta(days=1),
     )
     resp = await client.get("/api/v1/export/context-pack", headers=_bearer(token))
     assert resp.status_code == 200

@@ -11,7 +11,7 @@ Covers: retention pruning runs even when the guard denies (binding addendum
 path invokes ``execute()`` while the guard-denied path does not.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from unittest.mock import AsyncMock
 
 from sqlalchemy import select
@@ -49,7 +49,7 @@ async def test_prunes_even_when_guard_denies(db, monkeypatch):
         headline="Old",
         url="https://example.com/stale-task-test",
         source="Reuters",
-        published_at=datetime.now(timezone.utc) - timedelta(days=45),
+        published_at=datetime.now(UTC) - timedelta(days=45),
     )
     db.add(old)
     await db.flush()

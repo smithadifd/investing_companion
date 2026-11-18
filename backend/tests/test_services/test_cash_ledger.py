@@ -21,7 +21,7 @@ record and its cash leg is computed here, never stored a second time. Two
 ledgers cannot drift if only one of them is written.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 
 import pytest
@@ -36,7 +36,7 @@ from tests.factories import create_test_account, create_test_equity, create_test
 
 
 def _at(days_ago: int) -> datetime:
-    return datetime.now(timezone.utc) - timedelta(days=days_ago)
+    return datetime.now(UTC) - timedelta(days=days_ago)
 
 
 async def _cash(db, user, account, kind, amount, days_ago, **kw):

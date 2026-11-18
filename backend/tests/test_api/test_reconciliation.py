@@ -8,7 +8,7 @@ dropped), §3 ledger_inconsistent, and the link/ownership gates (409 without an
 active link, 404 for an account that isn't the user's).
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 
 from httpx import AsyncClient
@@ -31,7 +31,7 @@ HASH = "RECON_HASH"
 
 
 def _now(minutes_ago: int = 0) -> datetime:
-    return datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+    return datetime.now(UTC) - timedelta(minutes=minutes_ago)
 
 
 async def _link(db, user, account_id, account_hash=HASH):
@@ -77,7 +77,7 @@ async def _seed_positions_run(
 
 
 async def _ic_buy(authed_client, symbol, qty, price, account_id, days_ago=5):
-    executed = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+    executed = (datetime.now(UTC) - timedelta(days=days_ago)).isoformat()
     return await authed_client.post("/api/v1/trades", json={
         "symbol": symbol, "trade_type": "buy", "quantity": str(qty),
         "price": str(price), "executed_at": executed, "account_id": account_id,
@@ -245,7 +245,7 @@ class TestReconciliationEndpoint:
         await create_test_equity(db, symbol="BAD")
         # IC: buy 5 then sell 10 (more closed than opened) -> malformed ledger.
         await _ic_buy(authed_client, "BAD", 5, 100, acct["id"], days_ago=10)
-        sell_at = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        sell_at = (datetime.now(UTC) - timedelta(days=1)).isoformat()
         await authed_client.post("/api/v1/trades", json={
             "symbol": "BAD", "trade_type": "sell", "quantity": "10", "price": "150",
             "executed_at": sell_at, "account_id": acct["id"],

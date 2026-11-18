@@ -102,7 +102,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 import redis.asyncio as redis
 from redis import exceptions as redis_exceptions
@@ -365,7 +365,7 @@ class AITokenBudget:
 
     @staticmethod
     def _today() -> str:
-        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return datetime.now(UTC).strftime("%Y-%m-%d")
 
     @classmethod
     def _key(cls, user_id: uuid.UUID | None) -> str:

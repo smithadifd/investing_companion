@@ -1,6 +1,6 @@
 """Tests for the trigger playbook (service signal derivation + endpoints)."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 
 from httpx import AsyncClient
@@ -55,7 +55,7 @@ class TestSignalDerivation:
             db, equity,
             threshold_value=100.0,
             last_checked_value=50.0,
-            last_triggered_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            last_triggered_at=datetime.now(UTC) - timedelta(hours=2),
         )
         trigger = await _make_trigger(db, [alert.id])
         assert trigger.signal == TriggerSignal.HIT
@@ -66,7 +66,7 @@ class TestSignalDerivation:
             db, equity,
             threshold_value=100.0,
             last_checked_value=50.0,
-            last_triggered_at=datetime.now(timezone.utc) - timedelta(days=5),
+            last_triggered_at=datetime.now(UTC) - timedelta(days=5),
         )
         trigger = await _make_trigger(db, [alert.id])
         assert trigger.signal == TriggerSignal.ARMED
@@ -138,7 +138,7 @@ class TestSilencedTriggers:
             db, equity,
             threshold_value=88.0,
             last_checked_value=85.62,
-            last_triggered_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            last_triggered_at=datetime.now(UTC) - timedelta(hours=2),
             is_active=False,
         )
         trigger = await _make_trigger(db, [alert.id])
@@ -152,7 +152,7 @@ class TestSilencedTriggers:
             db, equity,
             threshold_value=88.0,
             last_checked_value=85.62,  # (88 - 85.62) / 85.62 = +2.78%
-            last_checked_at=datetime.now(timezone.utc) - timedelta(days=21),
+            last_checked_at=datetime.now(UTC) - timedelta(days=21),
             is_active=False,
         )
         trigger = await _make_trigger(db, [alert.id])
@@ -166,7 +166,7 @@ class TestSilencedTriggers:
             db, equity,
             threshold_value=88.0,
             last_checked_value=85.62,
-            last_checked_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+            last_checked_at=datetime.now(UTC) - timedelta(minutes=5),
         )
         trigger = await _make_trigger(db, [alert.id])
 
@@ -180,7 +180,7 @@ class TestSilencedTriggers:
             db, equity,
             threshold_value=88.0,
             last_checked_value=85.62,
-            last_checked_at=datetime.now(timezone.utc) - timedelta(days=21),
+            last_checked_at=datetime.now(UTC) - timedelta(days=21),
             is_active=True,  # active, but nothing has refreshed it
         )
         trigger = await _make_trigger(db, [alert.id])
@@ -317,7 +317,7 @@ class TestLifecycle:
             name="stale rung",
             threshold_value=88.0,
             last_checked_value=85.62,
-            last_checked_at=datetime.now(timezone.utc) - timedelta(days=21),
+            last_checked_at=datetime.now(UTC) - timedelta(days=21),
             user_id=test_user.id,
         )
 

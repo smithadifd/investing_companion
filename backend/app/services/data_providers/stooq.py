@@ -21,7 +21,7 @@ being end-of-day data rather than pretending to be real-time.
 import csv
 import io
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, UTC
 from decimal import Decimal, InvalidOperation
 
 import httpx
@@ -96,11 +96,11 @@ def _period_start(period: str) -> date | None:
     if period == "max":
         return None
     if period == "ytd":
-        return date(datetime.now(timezone.utc).year, 1, 1)
+        return date(datetime.now(UTC).year, 1, 1)
     days = _PERIOD_DAYS.get(period, 366)
     if days is None:
         return None
-    return (datetime.now(timezone.utc).date()) - timedelta(days=days)
+    return (datetime.now(UTC).date()) - timedelta(days=days)
 
 
 def parse_history_csv(text: str) -> list[OHLCVData]:
@@ -211,7 +211,7 @@ class StooqProvider(MarketDataProvider):
         start = _period_start(period)
         if start is not None:
             params["d1"] = start.strftime("%Y%m%d")
-            params["d2"] = datetime.now(timezone.utc).strftime("%Y%m%d")
+            params["d2"] = datetime.now(UTC).strftime("%Y%m%d")
         text = await self._fetch_csv(params)
         return parse_history_csv(text)
 
@@ -221,9 +221,9 @@ class StooqProvider(MarketDataProvider):
             "s": _to_stooq_symbol(symbol),
             "i": "d",
             "d1": (
-                datetime.now(timezone.utc).date() - timedelta(days=10)
+                datetime.now(UTC).date() - timedelta(days=10)
             ).strftime("%Y%m%d"),
-            "d2": datetime.now(timezone.utc).strftime("%Y%m%d"),
+            "d2": datetime.now(UTC).strftime("%Y%m%d"),
         }
         text = await self._fetch_csv(params)
         bars = parse_history_csv(text)

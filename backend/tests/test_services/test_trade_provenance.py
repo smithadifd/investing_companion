@@ -8,7 +8,7 @@ trade, and AdoptionService's IntegrityError-catch (a concurrent double-adopt is
 reported already_adopted, never a 500).
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 
 import pytest
@@ -34,7 +34,7 @@ from tests.factories import (
 
 
 def _now(minutes_ago: int = 0) -> datetime:
-    return datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+    return datetime.now(UTC) - timedelta(minutes=minutes_ago)
 
 
 async def _seed_run(db, user, positions, *, account_hash="PVHASH", status=ImportStatus.COMPLETE):

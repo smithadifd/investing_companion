@@ -22,7 +22,7 @@ session: the Celery entrypoint around it only opens a session and logs.
 
 import json
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from unittest.mock import AsyncMock
 
 import pytest
@@ -47,7 +47,7 @@ HASH = "HASH-INGEST"
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _token(age_days: float) -> str:

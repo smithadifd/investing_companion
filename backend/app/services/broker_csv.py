@@ -102,7 +102,7 @@ import io
 import logging
 import re
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from decimal import Decimal, InvalidOperation
 from uuid import UUID
 
@@ -363,8 +363,8 @@ def _parse_date(value: str) -> datetime | None:
     if parsed is None:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _classify_action(action: str) -> tuple[str, int, str] | None:

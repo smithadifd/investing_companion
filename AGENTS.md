@@ -154,6 +154,19 @@ state, Zustand for client state; component files `ComponentName.tsx`, hooks `use
 **General** — Conventional Commits (`feat:`, `fix:`, `docs:`, …). Public repo with branch protection:
 work on a feature branch → PR → CI green → squash-merge.
 
+Release class: versioned
+
+**Releases** — squash-merge titles are Conventional Commits and become the commit on `main` that
+release-please reads (`feat` → minor, `fix`/`perf` → patch while 0.x; `chore`/`ci`/`docs` open no
+release). `.github/workflows/pr-title.yml` checks titles but is advisory: `main` has no required
+status checks, so it blocks nothing unless it is made a required check. release-please
+(`.github/workflows/release-please.yml`, config `release-please-config.json`, manifest
+`.release-please-manifest.json`) opens a release PR, tags `vX.Y.Z`, and updates `CHANGELOG.md`.
+`frontend/package.json` is the version source the self-hoster reads, kept equal to the manifest;
+`backend/app/main.py` follows via `x-release-please-version` markers. Merging the release PR is the
+owner's go. Deploys are unchanged: prod and the demo still deploy from `main`; a release adds only a
+tag and notes.
+
 **Advisor-contract sync (cross-cutting — same PR, not a follow-up):** when a change touches what the app
 **exports** or the actions the executor **supports**, update the contract in the same PR:
 

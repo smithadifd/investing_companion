@@ -1,0 +1,28 @@
+name: PR title
+
+# Advisory: checks that the PR title is a Conventional Commit, because the
+# squash-merge title becomes the commit release-please reads on main. It does
+# not block merges unless it is made a required check.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  conventional-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Conventional Commit title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(feat|fix|perf|revert|docs|style|chore|refactor|test|build|ci)(\([a-z0-9._/-]+\))?!?: .+'
+          if [[ ! "$PR_TITLE" =~ $pattern ]]; then
+            echo "::error::PR title is not a Conventional Commit: $PR_TITLE"
+            echo "Expected: type(scope)?: description, e.g. 'fix(alerts): stop double-firing'."
+            echo "Types: feat fix perf revert docs style chore refactor test build ci"
+            exit 1
+          fi
+          echo "Title OK: $PR_TITLE"

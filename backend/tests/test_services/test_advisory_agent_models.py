@@ -8,7 +8,7 @@ connection (the ``db``/``engine`` fixtures in tests/conftest.py) - runs in CI,
 not necessarily locally if Postgres isn't available.
 """
 
-from datetime import date, datetime, UTC
+from datetime import date, datetime, timezone
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -29,7 +29,7 @@ async def test_news_item_instantiates_and_persists(db):
         headline="DOE announces new uranium reserve program",
         url="https://example.com/uuuu-doe-reserve",
         source="Reuters",
-        published_at=datetime.now(UTC),
+        published_at=datetime.now(timezone.utc),
         summary="The DOE announced a new strategic uranium reserve program.",
         relevance=0.92,
     )
@@ -48,7 +48,7 @@ async def test_news_item_symbol_is_optional_for_general_market_news(db):
         headline="Fed holds rates steady",
         url="https://example.com/fed-holds-rates",
         source="AP",
-        published_at=datetime.now(UTC),
+        published_at=datetime.now(timezone.utc),
     )
     db.add(item)
     await db.flush()
@@ -65,7 +65,7 @@ async def test_news_item_url_is_unique(db):
             headline="First",
             url=url,
             source="Reuters",
-            published_at=datetime.now(UTC),
+            published_at=datetime.now(timezone.utc),
         )
     )
     await db.flush()
@@ -75,7 +75,7 @@ async def test_news_item_url_is_unique(db):
             headline="Re-fetched duplicate",
             url=url,
             source="Reuters",
-            published_at=datetime.now(UTC),
+            published_at=datetime.now(timezone.utc),
         )
     )
     with pytest.raises(IntegrityError):
@@ -89,8 +89,8 @@ async def test_trade_journal_entry_relationship_resolves(db):
     user = await create_test_user(db, email="journal@example.com")
     entry = TradeJournalEntry(
         user_id=user.id,
-        window_start=datetime(2026, 7, 6, tzinfo=UTC),
-        window_end=datetime(2026, 7, 12, tzinfo=UTC),
+        window_start=datetime(2026, 7, 6, tzinfo=timezone.utc),
+        window_end=datetime(2026, 7, 12, tzinfo=timezone.utc),
         summary="You sold winners 3x faster than losers this week.",
         metrics={"win_rate": 0.6, "avg_hold_winners_days": 1.2, "avg_hold_losers_days": 4.1},
     )
@@ -105,8 +105,8 @@ async def test_trade_journal_entry_relationship_resolves(db):
 
 async def test_trade_journal_entry_window_is_unique_per_user(db):
     user = await create_test_user(db, email="journal-dupe@example.com")
-    window_start = datetime(2026, 7, 6, tzinfo=UTC)
-    window_end = datetime(2026, 7, 12, tzinfo=UTC)
+    window_start = datetime(2026, 7, 6, tzinfo=timezone.utc)
+    window_end = datetime(2026, 7, 12, tzinfo=timezone.utc)
 
     db.add(
         TradeJournalEntry(

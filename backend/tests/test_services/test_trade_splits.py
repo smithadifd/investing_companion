@@ -22,7 +22,7 @@ fresh ordered walk on every create/update/delete, so entering a split
 retroactively re-derives the whole history through the corrected walk.
 """
 
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,7 +33,7 @@ from tests.factories import create_test_account, create_test_equity, create_test
 
 
 def _at(days_ago: int) -> datetime:
-    return datetime.now(UTC) - timedelta(days=days_ago)
+    return datetime.now(timezone.utc) - timedelta(days=days_ago)
 
 
 async def _trade(db, equity, user, ttype, qty, price, days_ago, account_id=None, fees="0"):

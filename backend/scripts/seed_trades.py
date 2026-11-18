@@ -2,7 +2,7 @@
 
 import asyncio
 import sys
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -81,7 +81,7 @@ async def seed_trades():
                 continue
 
             # Calculate execution date
-            executed_at = datetime.now(UTC) - timedelta(days=days_ago)
+            executed_at = datetime.now(timezone.utc) - timedelta(days=days_ago)
 
             # Create trade
             trade = Trade(

@@ -5,7 +5,7 @@ while Yahoo answers. Alpha Vantage is appended only when its key is set.
 """
 
 import asyncio
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, Mock
 
@@ -208,7 +208,7 @@ async def test_history_upserts_yahoo_bar(offline):
     params = stmt.compile().params
     assert params["equity_id_m0"] == 42
     assert params["close_m0"] == Decimal("90")
-    assert params["timestamp_m0"] == AS_OF.replace(tzinfo=UTC)
+    assert params["timestamp_m0"] == AS_OF.replace(tzinfo=timezone.utc)
     assert "ON CONFLICT (equity_id, timestamp) DO UPDATE" in str(stmt)
     db.flush.assert_awaited_once()
     db.commit.assert_not_awaited()

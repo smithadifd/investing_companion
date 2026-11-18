@@ -1,7 +1,7 @@
 """Per-account position math: FIFO within an account, distinct positions per
 account, and that the aggregate views are unchanged."""
 
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +16,7 @@ from tests.factories import (
 
 
 def _at(days_ago: int) -> datetime:
-    return datetime.now(UTC) - timedelta(days=days_ago)
+    return datetime.now(timezone.utc) - timedelta(days=days_ago)
 
 
 async def _buy(service, user_id, equity_id, qty, price, account_id, days_ago):

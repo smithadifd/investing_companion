@@ -19,7 +19,7 @@ import hmac
 import logging
 import secrets
 import uuid
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -137,7 +137,7 @@ class ApiTokenService:
             logger.warning("API token rejected: hash mismatch prefix=%s", prefix)
             return None
 
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         if row.revoked_at is not None:
             logger.warning("API token rejected: revoked id=%s prefix=%s", row.id, prefix)
             return None
@@ -149,7 +149,7 @@ class ApiTokenService:
 
     async def mark_used(self, row: ApiToken) -> None:
         """Stamp ``last_used_at`` on a token that has just been authorized."""
-        row.last_used_at = datetime.now(UTC)
+        row.last_used_at = datetime.now(timezone.utc)
         await self.db.commit()
 
     async def get_by_prefix(self, prefix: str) -> ApiToken | None:
@@ -173,7 +173,7 @@ class ApiTokenService:
     async def revoke(self, row: ApiToken) -> ApiToken:
         """Revoke a token (idempotent; the first revocation time is kept)."""
         if row.revoked_at is None:
-            row.revoked_at = datetime.now(UTC)
+            row.revoked_at = datetime.now(timezone.utc)
             await self.db.commit()
             logger.info("API token revoked id=%s prefix=%s", row.id, row.token_prefix)
         return row

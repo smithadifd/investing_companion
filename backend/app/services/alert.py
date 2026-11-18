@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import func, select, text
@@ -414,7 +414,7 @@ class AlertService:
 
     async def get_stats(self) -> AlertStats:
         """Get alert statistics."""
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         week_start = today_start - timedelta(days=7)
 
@@ -568,7 +568,7 @@ class AlertService:
             # so a crash here neither drops the notification (the pending row
             # is durable and retried) nor sends it twice from a re-evaluation
             # (the enqueue is idempotent on a STABLE per-trigger key).
-            now = datetime.now(UTC)
+            now = datetime.now(timezone.utc)
             # Capture the id up front: after a dedup savepoint rollback the
             # alert row is expired, and async SQLAlchemy can't lazily reload it
             # in the except branch.
@@ -817,7 +817,7 @@ class AlertService:
         invisible while each row got its own message and became user-visible
         the moment a group renders as ordered lines in one embed (BZ14).
         """
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         lease_until = now + timedelta(seconds=lease_seconds)
         claim = text(
             """
@@ -920,7 +920,7 @@ class AlertService:
         ``failed`` (with a reason) so every row reaches a terminal state and is
         visible in the health view. Runs cheaply on the delivery cadence.
         """
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         reap = text(
             """
             UPDATE alert_deliveries
@@ -1018,7 +1018,7 @@ class AlertService:
             success, error = await asyncio.wait_for(
                 send, timeout=DELIVERY_SEND_TIMEOUT_SECONDS
             )
-        except TimeoutError:
+        except asyncio.TimeoutError:
             # Aborted before the lease could expire -> failed/retryable, never
             # left in flight past its lease.
             success, error = False, (
@@ -1036,7 +1036,7 @@ class AlertService:
 
             if success:
                 delivery.status = AlertDeliveryStatus.DELIVERED.value
-                delivery.delivered_at = datetime.now(UTC)
+                delivery.delivered_at = datetime.now(timezone.utc)
                 delivery.lease_expires_at = None
                 delivery.last_error = None
                 if history is not None:
@@ -1470,7 +1470,7 @@ class AlertService:
         so the check time and the fire time on the same row agree exactly.
         """
         alert.last_checked_value = value
-        alert.last_checked_at = now or datetime.now(UTC)
+        alert.last_checked_at = now or datetime.now(timezone.utc)
 
     def _evaluate_sustained(
         self, alert: Alert, current_value: Decimal, above: bool
@@ -1552,7 +1552,7 @@ class AlertService:
         _process_zone_alert. Tiers removed from the item drop out of state;
         new (or renamed) tiers baseline without firing.
         """
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         old_state = alert.zone_state or {}
         new_state: dict = {}
         fired: list = []
@@ -1595,7 +1595,7 @@ class AlertService:
             return True
         fired_at = datetime.fromisoformat(last_fired_at)
         cooldown_end = fired_at + timedelta(minutes=alert.cooldown_minutes)
-        return datetime.now(UTC) >= cooldown_end
+        return datetime.now(timezone.utc) >= cooldown_end
 
     @staticmethod
     def _zone_range_desc(zone) -> str:
@@ -1680,7 +1680,7 @@ class AlertService:
                 alert, zones, current_value
             )
 
-            now = datetime.now(UTC)
+            now = datetime.now(timezone.utc)
             alert_id = alert.id  # capture before any dedup savepoint rollback
             try:
                 # Nested savepoint so a duplicate tier key rolls back just this
@@ -1772,7 +1772,7 @@ class AlertService:
             logger.warning(f"Alert {alert.id}: unknown comparison_period '{period}'")
             return None
 
-        target_time = datetime.now(UTC) - lookback
+        target_time = datetime.now(timezone.utc) - lookback
 
         if alert.equity_id:
             close = await self._get_closest_close(alert.equity_id, target_time)
@@ -1883,7 +1883,7 @@ class AlertService:
             logger.warning(f"Alert {alert.id}: unknown comparison_period '{period}'")
             return None
 
-        since = datetime.now(UTC) - lookback
+        since = datetime.now(timezone.utc) - lookback
         stmt = select(func.max(PriceHistory.high)).where(
             PriceHistory.equity_id == alert.equity_id,
             PriceHistory.timestamp >= since,
@@ -1922,7 +1922,7 @@ class AlertService:
         cooldown_end = alert.last_triggered_at + timedelta(
             minutes=alert.cooldown_minutes
         )
-        return datetime.now(UTC) >= cooldown_end
+        return datetime.now(timezone.utc) >= cooldown_end
 
     async def _get_or_create_equity(self, symbol: str) -> Equity | None:
         """Get or create equity from symbol. Delegates to EquityService."""

@@ -1,6 +1,6 @@
 """Tests for the price history persistence service."""
 
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock
 
@@ -24,7 +24,7 @@ from tests.factories import (
 
 
 def _bar(days_ago: int, close: float, high: float | None = None) -> OHLCVData:
-    ts = datetime.now(UTC).replace(
+    ts = datetime.now(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
     ) - timedelta(days=days_ago)
     return OHLCVData(
@@ -109,7 +109,7 @@ class TestSyncEquity:
 
         equity = await create_test_equity(db, symbol="PHS5")
         eastern = datetime(2026, 6, 10, 0, 0, tzinfo=ZoneInfo("America/New_York"))
-        as_utc = eastern.astimezone(UTC)
+        as_utc = eastern.astimezone(timezone.utc)
         naive_utc = as_utc.replace(tzinfo=None)
 
         for ts in (eastern, as_utc, naive_utc):

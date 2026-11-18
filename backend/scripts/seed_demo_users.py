@@ -16,7 +16,7 @@ Usage:
 """
 
 import asyncio
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -129,7 +129,7 @@ async def seed_trades(db, user_id: int) -> None:
         print("Trades already exist, skipping")
         return
 
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
 
     trade_data = [
         # AAPL - long position

@@ -3,7 +3,7 @@
 import hashlib
 import secrets
 import uuid
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 
 import argon2
 import jwt
@@ -51,13 +51,13 @@ class AuthService:
 
     def _create_access_token(self, user_id: uuid.UUID) -> tuple[str, datetime]:
         """Create a JWT access token."""
-        expires_at = datetime.now(UTC) + timedelta(
+        expires_at = datetime.now(timezone.utc) + timedelta(
             minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
         )
         payload = {
             "sub": str(user_id),
             "exp": expires_at,
-            "iat": datetime.now(UTC),
+            "iat": datetime.now(timezone.utc),
             "type": "access",
         }
         token = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
@@ -140,7 +140,7 @@ class AuthService:
         refresh_token_hash = self._hash_token(refresh_token)
 
         # Calculate refresh token expiration
-        refresh_expires = datetime.now(UTC) + timedelta(
+        refresh_expires = datetime.now(timezone.utc) + timedelta(
             days=settings.REFRESH_TOKEN_EXPIRE_DAYS
         )
 
@@ -155,7 +155,7 @@ class AuthService:
         self.db.add(session)
 
         # Update last login time
-        user.last_login_at = datetime.now(UTC)
+        user.last_login_at = datetime.now(timezone.utc)
 
         await self.db.commit()
 
@@ -181,7 +181,7 @@ class AuthService:
             .where(
                 Session.refresh_token_hash == refresh_token_hash,
                 Session.revoked_at.is_(None),
-                Session.expires_at > datetime.now(UTC),
+                Session.expires_at > datetime.now(timezone.utc),
                 User.is_active.is_(True),
             )
         )
@@ -197,7 +197,7 @@ class AuthService:
             return None
 
         # Revoke old session
-        session.revoked_at = datetime.now(UTC)
+        session.revoked_at = datetime.now(timezone.utc)
 
         # Create new session
         return await self.create_session(user, user_agent, ip_address)
@@ -211,7 +211,7 @@ class AuthService:
                 Session.refresh_token_hash == refresh_token_hash,
                 Session.revoked_at.is_(None),
             )
-            .values(revoked_at=datetime.now(UTC))
+            .values(revoked_at=datetime.now(timezone.utc))
         )
         result = await self.db.execute(stmt)
         await self.db.commit()
@@ -225,7 +225,7 @@ class AuthService:
                 Session.user_id == user_id,
                 Session.revoked_at.is_(None),
             )
-            .values(revoked_at=datetime.now(UTC))
+            .values(revoked_at=datetime.now(timezone.utc))
         )
         result = await self.db.execute(stmt)
         await self.db.commit()
@@ -238,7 +238,7 @@ class AuthService:
             .where(
                 Session.user_id == user_id,
                 Session.revoked_at.is_(None),
-                Session.expires_at > datetime.now(UTC),
+                Session.expires_at > datetime.now(timezone.utc),
             )
             .order_by(Session.created_at.desc())
         )
@@ -248,7 +248,7 @@ class AuthService:
     async def cleanup_expired_sessions(self) -> int:
         """Remove expired sessions from the database."""
         stmt = delete(Session).where(
-            Session.expires_at < datetime.now(UTC)
+            Session.expires_at < datetime.now(timezone.utc)
         )
         result = await self.db.execute(stmt)
         await self.db.commit()

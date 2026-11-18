@@ -65,7 +65,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -151,7 +151,7 @@ def compute_review_window(now: datetime | None = None) -> JournalWindow:
     fields, so simple timedelta arithmetic on an aware ``ZoneInfo`` datetime is
     safe here - no ``pytz``-style ``normalize()`` dance needed).
     """
-    now = now if now is not None else datetime.now(UTC)
+    now = now if now is not None else datetime.now(timezone.utc)
     now_et = now.astimezone(ET)
     # The Monday 00:00 ET that starts the week CONTAINING now - i.e. the
     # in-progress week, which this agent must never review (it isn't over).
@@ -164,8 +164,8 @@ def compute_review_window(now: datetime | None = None) -> JournalWindow:
     week_start_et = current_week_start_et - timedelta(days=7)
     week_end_et = current_week_start_et
     return JournalWindow(
-        start=week_start_et.astimezone(UTC),
-        end=week_end_et.astimezone(UTC),
+        start=week_start_et.astimezone(timezone.utc),
+        end=week_end_et.astimezone(timezone.utc),
     )
 
 

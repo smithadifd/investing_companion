@@ -10,7 +10,7 @@ two users upload the byte-identical file, which derives identical content
 hashes and must still not collide.
 """
 
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -53,7 +53,7 @@ SCHWAB_CSV = '''"Transactions  for account XXXX-1234 as of 08/12/2026"
 
 
 def _ago(days: float) -> datetime:
-    return datetime.now(UTC) - timedelta(days=days)
+    return datetime.now(timezone.utc) - timedelta(days=days)
 
 
 def _dated_csv(rows: list[str]) -> str:

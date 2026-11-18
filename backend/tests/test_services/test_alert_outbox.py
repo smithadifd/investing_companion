@@ -16,7 +16,7 @@ and the health view reports pending/delivered/failed.
 import asyncio
 import time
 import uuid
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -56,7 +56,7 @@ def _mock_quote(price: float, high: float | None = None, low: float | None = Non
         open=price,
         previous_close=price,
         market_cap=None,
-        timestamp=datetime.now(UTC),
+        timestamp=datetime.now(timezone.utc),
     )
 
 
@@ -176,7 +176,7 @@ class TestNoDropNoDoubleSend:
         assert d.last_error == "429 rate limited"
 
         # Expire the lease to simulate the next drain cycle; it retries + sends.
-        d.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        d.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
         await db.commit()
         r2 = await service.deliver_pending()
         assert r2 == {"claimed": 1, "sent": 1, "failed": 0}
@@ -203,7 +203,7 @@ class TestNoDropNoDoubleSend:
         assert "connection reset" in (d.last_error or "")
 
         # Expire the lease (next drain cycle) -> retried and delivered.
-        d.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        d.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
         await db.commit()
         r2 = await service.deliver_pending()
         assert r2["sent"] == 1
@@ -231,7 +231,7 @@ class TestNoDropNoDoubleSend:
         assert d.attempts == 1
 
         # Expire the lease for the next drain -> attempt 2 exhausts the budget.
-        d.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        d.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
         await db.commit()
         await service.deliver_pending()  # attempt 2 -> exhausted -> failed
         d = (await _deliveries(db, alert.id))[0]
@@ -267,7 +267,7 @@ class TestLease:
         # Once the lease expires, the row is claimable again (crashed sender
         # recovery) — without ever having been sent.
         d = (await _deliveries(db, alert.id))[0]
-        d.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        d.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
         await db.commit()
         reclaimed = await service.claim_pending_deliveries(lease_seconds=120)
         assert len(reclaimed) == 1
@@ -303,7 +303,7 @@ class TestDeliveryHealth:
             a.id: (await _deliveries(db, a.id))[0] for a in alerts
         }
         deliveries[alerts[0].id].status = AlertDeliveryStatus.DELIVERED.value
-        deliveries[alerts[0].id].delivered_at = datetime.now(UTC)
+        deliveries[alerts[0].id].delivered_at = datetime.now(timezone.utc)
         deliveries[alerts[1].id].status = AlertDeliveryStatus.FAILED.value
         # alerts[2] stays pending
         await db.commit()
@@ -352,7 +352,7 @@ class TestBoundedDuplicate:
 
         # Phase 2 — the lease expires, so the next drain re-claims and RE-SENDS
         # (the bounded, <= max_attempts duplicate). Nothing was dropped.
-        row.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        row.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
         await db.commit()
         result = await service.deliver_pending()
         assert result["sent"] == 1
@@ -429,9 +429,9 @@ class TestStableIdempotencyKey:
         # window, NOT the (per-evaluation) history id, so two evaluations of the
         # same trigger produce the SAME key while a later window differs.
         alert = SimpleNamespace(id=7, cooldown_minutes=60)
-        base = datetime(2026, 7, 16, 10, 5, tzinfo=UTC)
-        later_same_window = datetime(2026, 7, 16, 10, 55, tzinfo=UTC)
-        next_window = datetime(2026, 7, 16, 11, 5, tzinfo=UTC)
+        base = datetime(2026, 7, 16, 10, 5, tzinfo=timezone.utc)
+        later_same_window = datetime(2026, 7, 16, 10, 55, tzinfo=timezone.utc)
+        next_window = datetime(2026, 7, 16, 11, 5, tzinfo=timezone.utc)
 
         k1 = AlertService._trigger_idempotency_key(alert, base)
         k2 = AlertService._trigger_idempotency_key(alert, later_same_window)
@@ -520,7 +520,7 @@ class TestReaper:
         # (attempts >= max), so without the reaper it is stuck forever.
         d = (await _deliveries(db, alert.id))[0]
         d.attempts = d.max_attempts
-        d.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        d.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
         await db.commit()
 
         assert await service.claim_pending_deliveries() == []  # unreachable
@@ -543,7 +543,7 @@ class TestReaper:
         # attempts < max_attempts -> still retryable, must NOT be reaped.
         d = (await _deliveries(db, alert.id))[0]
         d.attempts = 1
-        d.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        d.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
         await db.commit()
 
         reaped = await service.reap_stranded_deliveries()

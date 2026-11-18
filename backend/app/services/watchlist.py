@@ -1,7 +1,7 @@
 """Watchlist service - business logic for watchlist operations."""
 
 import uuid
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import func, or_, select
@@ -365,7 +365,7 @@ class WatchlistService:
         return WatchlistExport(
             name=watchlist.name,
             description=watchlist.description,
-            exported_at=datetime.now(UTC),
+            exported_at=datetime.now(timezone.utc),
             items=items,
         )
 

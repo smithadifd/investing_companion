@@ -4,7 +4,7 @@ Regression: the ORM nulled ``trade_pairs.open_trade_id`` / ``close_trade_id``
 (both NOT NULL) before the trade's DELETE, so any paired trade raised a 500.
 """
 
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -16,7 +16,7 @@ from tests.factories import create_test_account, create_test_equity, create_test
 
 
 def _at(days_ago: int) -> datetime:
-    return datetime.now(UTC) - timedelta(days=days_ago)
+    return datetime.now(timezone.utc) - timedelta(days=days_ago)
 
 
 async def _round_trip(db: AsyncSession, user, symbol: str):

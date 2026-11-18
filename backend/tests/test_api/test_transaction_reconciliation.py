@@ -11,7 +11,7 @@ ISOLATION - including the adversarial case where two users' links carry the
 SAME broker hash string.
 """
 
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -40,7 +40,7 @@ URL = "/api/v1/accounts/{}/reconciliation/transactions"
 
 
 def _ago(days: float = 0) -> datetime:
-    return datetime.now(UTC) - timedelta(days=days)
+    return datetime.now(timezone.utc) - timedelta(days=days)
 
 
 async def _headers(db: AsyncSession, user) -> dict:

@@ -7,7 +7,6 @@ from sqlalchemy import select
 from app.db.models.api_token import ApiToken
 from app.services.api_token import ApiTokenService, hash_api_token
 from scripts import mint_api_token
-from datetime import UTC
 
 
 async def test_mint_prints_token_once_and_stores_only_hash(db, test_user, capsys, caplog):
@@ -105,11 +104,11 @@ async def test_list_shows_no_secret(db, test_user, capsys):
 
 
 async def test_list_shows_expired_and_revoked_state(db, test_user, capsys):
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     service = ApiTokenService(db)
-    past = datetime.now(UTC) - timedelta(days=1)
-    future = datetime.now(UTC) + timedelta(days=1)
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    future = datetime.now(timezone.utc) + timedelta(days=1)
     expired, _ = await service.create(test_user.id, "old", ["pack:read"])
     expired.expires_at = past  # create() takes any expiry; set it in the past here
     await db.commit()

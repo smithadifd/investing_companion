@@ -16,7 +16,7 @@ coverage), the broker backfill, dividend and split `trades` rows, and the NAV
 endpoint.
 """
 
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -49,7 +49,7 @@ NAV_URL = "/api/v1/trades/nav"
 
 
 def _ago(days: float = 0) -> datetime:
-    return datetime.now(UTC) - timedelta(days=days)
+    return datetime.now(timezone.utc) - timedelta(days=days)
 
 
 async def _headers(db: AsyncSession, user) -> dict:

@@ -18,7 +18,7 @@ that lets them drift.
 """
 
 import asyncio
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
@@ -42,7 +42,7 @@ def _mock_quote(price: float, high: float | None = None, low: float | None = Non
         open=price,
         previous_close=price,
         market_cap=None,
-        timestamp=datetime.now(UTC),
+        timestamp=datetime.now(timezone.utc),
     )
 
 

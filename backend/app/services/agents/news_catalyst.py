@@ -56,7 +56,7 @@ import math
 import re
 import time
 import uuid
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
@@ -184,7 +184,7 @@ def _parse_finnhub_timestamp(value) -> datetime | None:
     if epoch <= 0:
         return None
     try:
-        return datetime.fromtimestamp(epoch, tz=UTC)
+        return datetime.fromtimestamp(epoch, tz=timezone.utc)
     except (OverflowError, OSError, ValueError):
         return None
 
@@ -305,7 +305,7 @@ class NewsCatalystAgent(AdvisoryAgent):
         enable flag, API key, or budget, so table growth stays bounded even
         for an agent that's disabled or misconfigured.
         """
-        cutoff = datetime.now(UTC) - timedelta(days=RETENTION_DAYS)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)
         result = await db.execute(delete(NewsItem).where(NewsItem.published_at < cutoff))
         await db.commit()
         return result.rowcount or 0
@@ -482,7 +482,7 @@ class NewsCatalystAgent(AdvisoryAgent):
         invalidated response, or a previous run's per-run cap) is picked up
         here automatically rather than sitting unscored until pruned.
         """
-        cutoff = datetime.now(UTC) - timedelta(days=SCORE_LOOKBACK_DAYS)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=SCORE_LOOKBACK_DAYS)
         stmt = (
             select(NewsItem)
             .where(NewsItem.relevance.is_(None), NewsItem.published_at >= cutoff)

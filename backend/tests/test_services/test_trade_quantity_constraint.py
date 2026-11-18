@@ -21,7 +21,7 @@ below closes that gap by driving the migration module's own ``upgrade()`` /
 """
 
 import importlib.util
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -52,7 +52,7 @@ CONSTRAINT_EXISTS_SQL = text(
 
 
 def _now() -> datetime:
-    return datetime.now(UTC) - timedelta(minutes=1)
+    return datetime.now(timezone.utc) - timedelta(minutes=1)
 
 
 def _trade(user_id, equity_id, *, quantity, price="10", trade_type=TradeType.BUY) -> Trade:

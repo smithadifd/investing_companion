@@ -1,6 +1,6 @@
 """Tests for tiered entry zones: status builder, zone-hit alerts, zones CRUD."""
 
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
@@ -47,7 +47,7 @@ def _quote(price: float) -> QuoteResponse:
         open=price,
         previous_close=price,
         market_cap=None,
-        timestamp=datetime.now(UTC),
+        timestamp=datetime.now(timezone.utc),
     )
 
 
@@ -261,7 +261,7 @@ class TestZoneAlertProcessing:
             "Half starter": {
                 **alert.zone_state["Half starter"],
                 "last_fired_at": (
-                    datetime.now(UTC) - timedelta(minutes=5)
+                    datetime.now(timezone.utc) - timedelta(minutes=5)
                 ).isoformat(),
             },
         }

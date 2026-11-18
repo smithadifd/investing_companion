@@ -13,7 +13,7 @@ import logging
 import os
 import shutil
 from dataclasses import dataclass
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 try:
     _ET = ZoneInfo("America/New_York")
 except ZoneInfoNotFoundError:  # pragma: no cover - environment dependent
-    _ET = UTC
+    _ET = timezone.utc
 
 # Advisor contract docs copied into <outbox>/reference/ when a source dir is set.
 _REFERENCE_DOCS = ("handoff-schema.md", "advisor-actions.md")
@@ -81,7 +81,7 @@ class ContextPackOutboxService:
         last_file: str | None = None
         if latest.exists():
             last_published_at = datetime.fromtimestamp(
-                latest.stat().st_mtime, tz=UTC
+                latest.stat().st_mtime, tz=timezone.utc
             )
             last_file = str(latest)
         return OutboxStatus(
@@ -143,7 +143,7 @@ class ContextPackOutboxService:
         retention_days = settings.CONTEXT_PACK_HISTORY_RETENTION_DAYS
         if retention_days <= 0:
             return
-        cutoff = datetime.now(UTC).timestamp() - retention_days * 86400
+        cutoff = datetime.now(timezone.utc).timestamp() - retention_days * 86400
         for f in history_dir.glob("*.md"):
             try:
                 if f.stat().st_mtime < cutoff:

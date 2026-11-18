@@ -20,7 +20,7 @@ needed - budget/discord/quote-provider are faked).
 
 import asyncio
 import uuid
-from datetime import date, datetime, UTC
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -125,18 +125,18 @@ def _empty_context(signal_date: str = "2026-07-18") -> dict:
 # ---------------------------------------------------------------------------
 def test_today_et_before_est_offset_rolls_to_previous_day():
     # January = EST (UTC-5); 03:00 UTC = 22:00 ET the day before.
-    now_utc = datetime(2026, 1, 15, 3, 0, tzinfo=UTC)
+    now_utc = datetime(2026, 1, 15, 3, 0, tzinfo=timezone.utc)
     assert sb._today_et(now_utc) == date(2026, 1, 14)
 
 
 def test_today_et_after_est_offset_is_same_day():
-    now_utc = datetime(2026, 1, 15, 12, 0, tzinfo=UTC)  # 07:00 ET
+    now_utc = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)  # 07:00 ET
     assert sb._today_et(now_utc) == date(2026, 1, 15)
 
 
 def test_today_et_edt_offset_around_midnight_utc():
     # July = EDT (UTC-4); 03:30 UTC = 23:30 ET the day before.
-    now_utc = datetime(2026, 7, 18, 3, 30, tzinfo=UTC)
+    now_utc = datetime(2026, 7, 18, 3, 30, tzinfo=timezone.utc)
     assert sb._today_et(now_utc) == date(2026, 7, 17)
 
 

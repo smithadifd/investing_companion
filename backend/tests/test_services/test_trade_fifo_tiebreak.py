@@ -24,7 +24,7 @@ which opening leg FIFO actually consumed first: the two legs have different
 prices, so a wrong pairing produces the opposite-signed P&L.
 """
 
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,7 +57,7 @@ class TestFifoTimestampTiebreak:
         eq = await create_test_equity(db, symbol="FIFOTIE")
         await db.commit()
 
-        executed_at = datetime.now(UTC) - timedelta(days=5)
+        executed_at = datetime.now(timezone.utc) - timedelta(days=5)
 
         # Insert the HIGHER id first (physically first), then the LOWER id
         # second (physically last) - decouples physical/insertion order

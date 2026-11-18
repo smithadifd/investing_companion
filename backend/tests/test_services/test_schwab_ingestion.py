@@ -23,7 +23,7 @@ with cascade cleanup afterward.
 import json
 import time
 import uuid as uuid_module
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -67,12 +67,12 @@ _CLAMP_DAYS = TRANSACTION_HISTORY_LIMIT_DAYS - 1
 
 
 def _utcnow() -> datetime:
-    return datetime.now(UTC)
+    return datetime.now(timezone.utc)
 
 
 def _schwab_ts(dt: datetime) -> str:
     """Render a datetime in Schwab's ``+0000``-suffixed timestamp format."""
-    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S+0000")
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+0000")
 
 
 # ---------------------------------------------------------------------------
@@ -400,7 +400,7 @@ class TestNormalizeTransaction:
         assert result["net_amount"] == Decimal("-1502.3")
         assert result["order_id"] == "6666666666666"
         assert result["occurred_at"] == datetime(
-            2026, 6, 1, 14, 32, tzinfo=UTC
+            2026, 6, 1, 14, 32, tzinfo=timezone.utc
         )
 
     def test_missing_activity_id_raises(self):
@@ -421,7 +421,7 @@ class TestNormalizeTransaction:
         del bad["tradeDate"]
         bad["time"] = "2026-06-02T09:00:00+0000"
         result = _normalize_transaction(bad, ACCOUNT_HASH)
-        assert result["occurred_at"] == datetime(2026, 6, 2, 9, 0, tzinfo=UTC)
+        assert result["occurred_at"] == datetime(2026, 6, 2, 9, 0, tzinfo=timezone.utc)
 
     def test_non_trade_transaction_with_no_primary_leg(self):
         """ACH-style transaction: no equity leg, symbol/price/etc all None,
@@ -465,24 +465,24 @@ class TestNormalizeTransaction:
 # ---------------------------------------------------------------------------
 class TestDateWindows:
     def test_empty_range_yields_nothing(self):
-        now = datetime(2026, 7, 1, tzinfo=UTC)
+        now = datetime(2026, 7, 1, tzinfo=timezone.utc)
         assert list(_date_windows(now, now)) == []
         assert list(_date_windows(now, now - timedelta(days=1))) == []
 
     def test_within_cap_yields_one_chunk(self):
-        start = datetime(2026, 6, 1, tzinfo=UTC)
-        end = datetime(2026, 6, 20, tzinfo=UTC)
+        start = datetime(2026, 6, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 6, 20, tzinfo=timezone.utc)
         windows = list(_date_windows(start, end, max_days=60))
         assert windows == [(start, end)]
 
     def test_exactly_at_cap_yields_one_chunk(self):
-        start = datetime(2026, 1, 1, tzinfo=UTC)
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
         end = start + timedelta(days=60)
         windows = list(_date_windows(start, end, max_days=60))
         assert windows == [(start, end)]
 
     def test_wide_range_chunks_without_gaps_or_overlap(self):
-        start = datetime(2026, 1, 1, tzinfo=UTC)
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
         end = start + timedelta(days=130)
         windows = list(_date_windows(start, end, max_days=60))
         assert len(windows) == 3

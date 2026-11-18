@@ -1,6 +1,6 @@
 """Offline checks for indicators calculated from fixed price histories."""
 
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from math import isnan, sqrt
 
@@ -11,7 +11,7 @@ from app.services.technical import TechnicalAnalysisService, TechnicalIndicators
 
 
 def _history(closes: list[Decimal | str | float], volume: int = 100) -> list[OHLCVData]:
-    start = datetime(2024, 1, 1, tzinfo=UTC)
+    start = datetime(2024, 1, 1, tzinfo=timezone.utc)
     return [
         OHLCVData(
             timestamp=start + timedelta(days=index),

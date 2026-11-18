@@ -1,7 +1,7 @@
 """Tests for the learning loop: lesson CRUD, similar-setup matching,
 position-close detection, and the context pack's lessons section."""
 
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from httpx import AsyncClient
@@ -162,7 +162,7 @@ class TestPositionCloseDetection:
                 trade_type=trade_type,
                 quantity=Decimal(qty),
                 price=Decimal(price),
-                executed_at=datetime.now(UTC),
+                executed_at=datetime.now(timezone.utc),
             ),
         )
 

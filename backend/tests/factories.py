@@ -1,7 +1,7 @@
 """Simple model factories for tests. No external dependencies (no factory-boy)."""
 
 import uuid
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -148,7 +148,7 @@ async def create_test_alert(
         last_checked_at=(
             last_checked_at
             if last_checked_at is not None or last_checked_value is None
-            else datetime.now(UTC)
+            else datetime.now(timezone.utc)
         ),
         was_above_threshold=was_above_threshold,
         last_triggered_at=last_triggered_at,
@@ -259,7 +259,7 @@ async def create_test_trade(
         quantity=quantity,
         price=price,
         fees=fees,
-        executed_at=executed_at or datetime.now(UTC),
+        executed_at=executed_at or datetime.now(timezone.utc),
         notes=notes,
         account_id=account_id,
     )

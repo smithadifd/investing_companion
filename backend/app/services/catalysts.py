@@ -23,7 +23,7 @@ output is safe by construction.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -83,7 +83,7 @@ async def get_catalyst_lines(db: AsyncSession, symbols: list[str]) -> dict[str, 
     if not unique_symbols:
         return {}
 
-    cutoff = datetime.now(UTC) - timedelta(hours=CATALYST_LOOKBACK_HOURS)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=CATALYST_LOOKBACK_HOURS)
     stmt = (
         select(NewsItem)
         .distinct(NewsItem.symbol)

@@ -25,7 +25,7 @@ Per-row, not all-or-nothing: each equity commits independently, so one skip or
 race never aborts the batch.
 """
 
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 
@@ -230,7 +230,7 @@ class AdoptionService:
             quantity=quantity,
             price=price,
             fees=Decimal("0"),
-            executed_at=datetime.now(UTC),
+            executed_at=datetime.now(timezone.utc),
             account_id=account_id,
         )
         try:

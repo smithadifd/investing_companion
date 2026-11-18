@@ -26,7 +26,7 @@ stores a conclusion. The table stores only what cannot be recomputed - which
 window a pull actually delivered, and whether any pull hit the API's clamp.
 """
 
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,7 +47,7 @@ from tests.factories import create_test_account, create_test_equity, create_test
 
 
 def _ago(days: float = 0) -> datetime:
-    return datetime.now(UTC) - timedelta(days=days)
+    return datetime.now(timezone.utc) - timedelta(days=days)
 
 
 async def _link(db, user, account_id, account_hash):

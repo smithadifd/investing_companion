@@ -1,7 +1,7 @@
 """Tests for alert condition evaluation logic in AlertService."""
 
 import uuid
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
@@ -45,7 +45,7 @@ def _mock_quote(price: float, high: float | None = None, low: float | None = Non
         open=price,
         previous_close=price,
         market_cap=None,
-        timestamp=datetime.now(UTC),
+        timestamp=datetime.now(timezone.utc),
     )
 
 
@@ -280,7 +280,7 @@ class TestEvaluateConditionPercent:
     async def test_percent_up_triggered(self, db: AsyncSession):
         equity = await create_test_equity(db, symbol="PU1")
         # Insert a reference price of 100 from ~1 day ago
-        ref_time = datetime.now(UTC) - timedelta(days=1)
+        ref_time = datetime.now(timezone.utc) - timedelta(days=1)
         await self._insert_price_history(db, equity.id, ref_time, 100.0)
 
         alert = await create_test_alert(
@@ -297,7 +297,7 @@ class TestEvaluateConditionPercent:
 
     async def test_percent_up_not_triggered(self, db: AsyncSession):
         equity = await create_test_equity(db, symbol="PU2")
-        ref_time = datetime.now(UTC) - timedelta(days=1)
+        ref_time = datetime.now(timezone.utc) - timedelta(days=1)
         await self._insert_price_history(db, equity.id, ref_time, 100.0)
 
         alert = await create_test_alert(
@@ -335,7 +335,7 @@ class TestEvaluateConditionPercent:
 
     async def test_percent_down_triggered(self, db: AsyncSession):
         equity = await create_test_equity(db, symbol="PD1")
-        ref_time = datetime.now(UTC) - timedelta(days=1)
+        ref_time = datetime.now(timezone.utc) - timedelta(days=1)
         await self._insert_price_history(db, equity.id, ref_time, 100.0)
 
         alert = await create_test_alert(
@@ -352,7 +352,7 @@ class TestEvaluateConditionPercent:
 
     async def test_percent_down_not_triggered(self, db: AsyncSession):
         equity = await create_test_equity(db, symbol="PD2")
-        ref_time = datetime.now(UTC) - timedelta(days=1)
+        ref_time = datetime.now(timezone.utc) - timedelta(days=1)
         await self._insert_price_history(db, equity.id, ref_time, 100.0)
 
         alert = await create_test_alert(
@@ -369,7 +369,7 @@ class TestEvaluateConditionPercent:
     async def test_percent_down_weekly_lookback(self, db: AsyncSession):
         """Verify 1w comparison_period looks back ~7 days."""
         equity = await create_test_equity(db, symbol="PD3")
-        ref_time = datetime.now(UTC) - timedelta(days=7)
+        ref_time = datetime.now(timezone.utc) - timedelta(days=7)
         await self._insert_price_history(db, equity.id, ref_time, 100.0)
 
         alert = await create_test_alert(
@@ -419,7 +419,7 @@ class TestEvaluateConditionPercentFromHigh:
 
     async def test_drawdown_triggered(self, db: AsyncSession):
         equity = await create_test_equity(db, symbol="PFH1")
-        high_time = datetime.now(UTC) - timedelta(days=30)
+        high_time = datetime.now(timezone.utc) - timedelta(days=30)
         await self._insert_price_history(db, equity.id, high_time, 95.0, high=100.0)
 
         alert = await create_test_alert(
@@ -437,7 +437,7 @@ class TestEvaluateConditionPercentFromHigh:
 
     async def test_drawdown_not_triggered(self, db: AsyncSession):
         equity = await create_test_equity(db, symbol="PFH2")
-        high_time = datetime.now(UTC) - timedelta(days=30)
+        high_time = datetime.now(timezone.utc) - timedelta(days=30)
         await self._insert_price_history(db, equity.id, high_time, 95.0, high=100.0)
 
         alert = await create_test_alert(
@@ -455,7 +455,7 @@ class TestEvaluateConditionPercentFromHigh:
     async def test_current_price_is_the_high(self, db: AsyncSession):
         """A live price above all stored highs means zero drawdown."""
         equity = await create_test_equity(db, symbol="PFH3")
-        high_time = datetime.now(UTC) - timedelta(days=30)
+        high_time = datetime.now(timezone.utc) - timedelta(days=30)
         await self._insert_price_history(db, equity.id, high_time, 95.0, high=100.0)
 
         alert = await create_test_alert(
@@ -473,7 +473,7 @@ class TestEvaluateConditionPercentFromHigh:
     async def test_lookback_window_excludes_old_highs(self, db: AsyncSession):
         """Highs outside the comparison_period must not be the reference."""
         equity = await create_test_equity(db, symbol="PFH4")
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         # Old spike outside the 1y window, recent high inside it
         await self._insert_price_history(db, equity.id, now - timedelta(days=400), 195.0, high=200.0)
         await self._insert_price_history(db, equity.id, now - timedelta(days=30), 95.0, high=100.0)
@@ -499,7 +499,7 @@ class TestEvaluateConditionPercentFromHigh:
         self, db: AsyncSession, period: str, old_days: int
     ):
         equity = await create_test_equity(db, symbol=f"PFH{period.upper()}")
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         await self._insert_price_history(db, equity.id, now - timedelta(days=old_days), 195.0, high=200.0)
         await self._insert_price_history(db, equity.id, now - timedelta(days=30), 95.0, high=100.0)
 
@@ -608,7 +608,7 @@ class TestHistoricalReferenceRatioForexLeg:
         num_equity = await create_test_equity(db, symbol="SPY")
         den_equity = await create_test_equity(db, symbol="JPY=X")
 
-        ref_time = datetime.now(UTC) - timedelta(days=1)
+        ref_time = datetime.now(timezone.utc) - timedelta(days=1)
         await self._insert_price_history(db, num_equity.id, ref_time, 400.0)
         await self._insert_price_history(db, den_equity.id, ref_time, 100.0)
 
@@ -634,7 +634,7 @@ class TestHistoricalReferenceRatioForexLeg:
         num_equity = await create_test_equity(db, symbol="SPY")
         den_equity = await create_test_equity(db, symbol="QQQ")
 
-        ref_time = datetime.now(UTC) - timedelta(days=1)
+        ref_time = datetime.now(timezone.utc) - timedelta(days=1)
         await self._insert_price_history(db, num_equity.id, ref_time, 400.0)
         await self._insert_price_history(db, den_equity.id, ref_time, 350.0)
 
@@ -663,7 +663,7 @@ class TestHistoricalReferenceRatioForexLeg:
         # Numerator is fully resolvable, so the only reason for a None result
         # is the bare-USD denominator leg.
         num_equity = await create_test_equity(db, symbol="SPY")
-        ref_time = datetime.now(UTC) - timedelta(days=1)
+        ref_time = datetime.now(timezone.utc) - timedelta(days=1)
         await self._insert_price_history(db, num_equity.id, ref_time, 400.0)
         # No Equity row is created for "USD" (and none could match: a "USD=X"
         # row wouldn't either, since normalize_symbol("USD") == "USD").
@@ -699,7 +699,7 @@ class TestCheckCooldown:
 
     async def test_within_cooldown_blocks_notification(self, db: AsyncSession):
         equity = await create_test_equity(db, symbol="CD2")
-        recent = datetime.now(UTC) - timedelta(minutes=10)
+        recent = datetime.now(timezone.utc) - timedelta(minutes=10)
         alert = await create_test_alert(
             db, equity, cooldown_minutes=60, last_triggered_at=recent
         )
@@ -709,7 +709,7 @@ class TestCheckCooldown:
 
     async def test_past_cooldown_allows_notification(self, db: AsyncSession):
         equity = await create_test_equity(db, symbol="CD3")
-        old = datetime.now(UTC) - timedelta(minutes=120)
+        old = datetime.now(timezone.utc) - timedelta(minutes=120)
         alert = await create_test_alert(
             db, equity, cooldown_minutes=60, last_triggered_at=old
         )
@@ -763,7 +763,7 @@ class TestCheckAlert:
     @patch("app.services.alert.YahooFinanceProvider")
     async def test_check_alert_respects_cooldown(self, MockYahoo, db: AsyncSession):
         equity = await create_test_equity(db, symbol="CA3")
-        recent = datetime.now(UTC) - timedelta(minutes=10)
+        recent = datetime.now(timezone.utc) - timedelta(minutes=10)
         alert = await create_test_alert(
             db, equity,
             condition_type="above",

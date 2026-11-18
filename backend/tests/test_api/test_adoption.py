@@ -10,7 +10,7 @@ scoping, plus the §3 estimated-basis quote fallback and the no-link/never-
 imported 409 guards.
 """
 
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -34,7 +34,7 @@ HASH = "ADOPT_HASH"
 
 
 def _now(minutes_ago: int = 0) -> datetime:
-    return datetime.now(UTC) - timedelta(minutes=minutes_ago)
+    return datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
 
 
 async def _link(db, user, account_id, account_hash=HASH):
@@ -76,7 +76,7 @@ async def _seed_run(
 
 
 async def _trade(authed_client, symbol, qty, price, account_id, *, trade_type="buy", days_ago=5):
-    executed = (datetime.now(UTC) - timedelta(days=days_ago)).isoformat()
+    executed = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
     return await authed_client.post("/api/v1/trades", json={
         "symbol": symbol, "trade_type": trade_type, "quantity": str(qty),
         "price": str(price), "executed_at": executed, "account_id": account_id,

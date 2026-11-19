@@ -123,6 +123,8 @@ to this app's read/write contract ([`docs/api/handoff-schema.md`](docs/api/hando
 
 ### Docker (recommended)
 
+Releases are tagged `vX.Y.Z` with notes in [`CHANGELOG.md`](CHANGELOG.md); deploying is unchanged, so keep running from `main` as before.
+
 ```bash
 git clone https://github.com/smithadifd/investing_companion.git
 cd investing_companion

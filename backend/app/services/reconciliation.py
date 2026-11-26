@@ -350,7 +350,7 @@ class ReconciliationService:
         trade the broker does not report" on the one screen whose whole purpose
         is trustworthy diffs.
 
-        This also covers ``split`` rows independently of D6. A split's
+        This also covers ``split`` rows regardless of their account scope. A split's
         ``account_id`` is NULL today, which keeps it out of the ``account_id ==``
         filter above - but that is a side effect of an unrelated decision, not
         a guard. If splits ever become per-account rows the exposure returns

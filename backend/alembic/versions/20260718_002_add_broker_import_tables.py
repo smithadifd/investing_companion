@@ -1,4 +1,4 @@
-"""Add broker import tables (Schwab positions/transactions ingestion, T2 sub-PR 1/3)
+"""Add broker import tables (Schwab positions/transactions ingestion)
 
 Creates ``broker_import_runs`` (one row per provenance-stamped ingestion
 pull), ``imported_positions`` (snapshot rows FK'd to a positions run - "current
@@ -9,7 +9,7 @@ ingestion is scheduled by this migration; see app/services/schwab_ingestion.py
 for the pull -> normalize -> upsert primitive this schema backs.
 
 Table/column names are broker-agnostic (``source`` defaults to
-"schwab_api") so a future broker-CSV import (sub-PR 3) can reuse this same
+"schwab_api") so a broker-CSV import can reuse this same
 shape with a different source value.
 
 Revision ID: 20260718_002

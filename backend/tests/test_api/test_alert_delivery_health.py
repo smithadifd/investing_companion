@@ -1,4 +1,4 @@
-"""API tests for the user-visible alert-delivery health endpoint (Queue S S1)."""
+"""API tests for the user-visible alert-delivery health endpoint."""
 
 from app.db.models.alert import AlertDelivery, AlertDeliveryStatus
 from tests.factories import create_test_alert, create_test_equity

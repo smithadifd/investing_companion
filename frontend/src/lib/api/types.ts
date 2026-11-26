@@ -728,8 +728,7 @@ export interface AppSettings {
   theme: string;
   morning_notification_time: string;
   eod_notification_time: string;
-  // Tier-1 advisory agents (docs/issues/014) - default OFF; schema + rails
-  // only until each agent's follow-up sub-PR lands.
+  // Advisory agents (docs/issues/014-intelligent-agents.md) - default OFF.
   news_agent_enabled: boolean;
   trade_journal_agent_enabled: boolean;
   strategy_agent_enabled: boolean;

@@ -1,6 +1,6 @@
-"""Tests for the Trade Journal & Pattern Analysis agent (T1 sub-PR 3/4).
+"""Tests for the Trade Journal & Pattern Analysis agent.
 
-Covers, per the builder brief's verification bar:
+Covers:
   * window computation (ET<->UTC, most-recently-COMPLETED-week semantics,
     including DST-transition weeks in both directions)
   * deterministic metrics computed from a seeded set of fake closed trades
@@ -52,10 +52,10 @@ ET = tj.ET
 # compute_review_window(now) always resolves to the MOST RECENTLY COMPLETED
 # ET week as of `now` - never the week `now` itself falls inside. The agent's
 # actual beat trigger (Monday ~00:30-01:30 ET / 05:30 UTC) is just one point
-# on this curve; the function must be correct for any `now` (codex-flagged
-# schedule/window mismatch: the original version selected the week
-# CONTAINING `now`, which was still in progress at the old Sunday-evening
-# trigger time and would never get recomputed once it actually ended).
+# on this curve; the function must be correct for any `now`. The original
+# version selected the week CONTAINING `now`, which was still in progress at
+# the old Sunday-evening trigger time and would never get recomputed once it
+# actually ended.
 # ---------------------------------------------------------------------------
 def test_compute_review_window_monday_beat_run_selects_week_just_ended():
     """The Monday-05:30-UTC beat schedule resolves to the week that just finished."""

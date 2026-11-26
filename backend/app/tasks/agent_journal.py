@@ -1,7 +1,7 @@
 """Celery task for the Trade Journal & Pattern Analysis advisory agent.
 
-T1 sub-PR 3/4 (docs/issues/014). Scheduled weekly (see ``celery_app.py``'s
-beat entry); this module is just the guard-and-dispatch wrapper around
+Scheduled weekly (see ``celery_app.py``'s beat entry); this module is the
+guard-and-dispatch wrapper around
 :class:`~app.services.agents.trade_journal.TradeJournalAgent` - all the
 review logic lives there.
 """

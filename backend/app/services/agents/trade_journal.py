@@ -1,4 +1,4 @@
-"""Trade Journal & Pattern Analysis agent (T1 sub-PR 3/4, docs/issues/014).
+"""Trade Journal & Pattern Analysis agent (docs/issues/014-intelligent-agents.md).
 
 Weekly behavioral-pattern review of closed trades: "you sold winners 3x
 faster than losers", entry/exit quality commentary, a Discord summary.
@@ -8,7 +8,7 @@ Design (see the PR body for the full writeup):
 * **Population** — closed trades = :class:`~app.db.models.trade.TradePair`
   rows whose ``close_trade.executed_at`` falls in ``[window_start,
   window_end)`` for the owner user. Lessons/notes are deliberately NOT
-  incorporated (out of scope for this sub-PR).
+  incorporated into this review.
 * **Deterministic-first** — every number in ``metrics`` is computed in plain
   Python from those rows *before* any LLM call. The LLM only narrates; it
   never invents or restates different statistics.
@@ -29,7 +29,7 @@ Design (see the PR body for the full writeup):
 
 * **Window** — ``[Monday 00:00 ET, next Monday 00:00 ET)`` for the most
   recently COMPLETED ET week as of "now" - never the week still in progress
-  (codex-flagged schedule/window mismatch; see ``compute_review_window``).
+  (see ``compute_review_window``).
   Both bounds are converted to UTC. The task is scheduled Monday ~00:30-01:30
   ET (05:30 UTC - see ``celery_app.py``'s beat entry), i.e. shortly after the
   ET week actually ends, so in practice this always resolves to the week that
@@ -48,7 +48,7 @@ Design (see the PR body for the full writeup):
   row. The LLM narrative alone is never the dedup signal - it is free-text
   and can vary stylistically between runs on identical data, so keying dedup
   off it would re-spam Discord on a routine, content-equivalent rerun. The
-  freshly-generated narrative is still upserted either way (codex-flagged).
+  freshly-generated narrative is still upserted either way.
 * **Prompt-injection hardening** — the itemized trade list embeds
   user-entered data (equity symbols) this agent does not control; it is
   wrapped in an explicit UNTRUSTED DATA block instructing the model to treat
@@ -86,7 +86,7 @@ logger = logging.getLogger(__name__)
 
 ET = ZoneInfo("America/New_York")
 
-# Explicit ceiling on the weekly-review LLM call (S8 addendum item 8).
+# Explicit ceiling on the weekly-review LLM call.
 MAX_TOKENS = 1500
 
 # Cap on individually itemized trades in the LLM prompt - a busy week's trade
@@ -140,10 +140,10 @@ def compute_review_window(now: datetime | None = None) -> JournalWindow:
     that just finished a few hours earlier. This function is deliberately
     correct for ANY ``now`` though (not just the beat's own trigger time): a
     mid-week manual run still selects last week, not the in-progress current
-    one (codex-flagged schedule/window mismatch - the original version
-    selected the week CONTAINING ``now``, which is still in progress at the
-    beat's old Sunday-evening trigger time and would never see that week's
-    Sunday activity, nor ever get recomputed once the week actually ended).
+    one. The original version selected the week CONTAINING ``now``, which is
+    still in progress at the beat's old Sunday-evening trigger time and would
+    never see that week's Sunday activity, nor ever get recomputed once the
+    week actually ended.
 
     Arithmetic is done in ET wall-clock time and converted to UTC at the end
     so the window is correct across a DST transition that falls inside it
@@ -345,8 +345,7 @@ def _neutralize_discord_mentions(text: str) -> str:
     output is not fully trusted (it narrates from data that includes
     user-entered equity symbols - see ``_build_prompt``), so this is a second,
     independent layer of defense against a narrative that echoes an injected
-    mention, local to this agent (webhook-level ``allowed_mentions`` is a
-    charted follow-up, not done here).
+    mention, local to this agent.
     """
     return _DISCORD_MENTION_TRIGGER_RE.sub("@​", text)
 
@@ -453,7 +452,7 @@ class TradeJournalAgent(AdvisoryAgent):
         # Dedup on METRICS ONLY (not the narrative): the LLM narrative is
         # free-text and can vary stylistically run-to-run on identical data,
         # so keying dedup off it would re-spam Discord on a routine,
-        # content-equivalent rerun (codex-flagged). The fresh narrative is
+        # content-equivalent rerun. The fresh narrative is
         # upserted above regardless of whether Discord gets a resend.
         if existing is not None and existing.metrics == metrics:
             logger.info(
@@ -563,8 +562,7 @@ class TradeJournalAgent(AdvisoryAgent):
         # before any response-content parsing: the tokens are already billed
         # by Anthropic at this point regardless of whether the response body
         # parses cleanly, so a malformed/unexpected content shape below must
-        # not also cost the budget counter its settlement (codex-flagged;
-        # preserved from the prior record()-based implementation).
+        # not also cost the budget counter its settlement.
         await token_budget.settle(user_id, reservation, _usage_tokens(message))
         text = message.content[0].text if message.content else ""
         return text.strip()

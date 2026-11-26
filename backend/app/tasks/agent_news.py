@@ -1,4 +1,4 @@
-"""Celery task for the News & Catalyst advisory agent (T1 sub-PR 2/4).
+"""Celery task for the News & Catalyst advisory agent.
 
 Scheduled twice on weekdays (see the beat entry in ``app/tasks/celery_app.py``)
 - roughly pre-market and pre-close ET. The task always prunes stale
@@ -6,7 +6,7 @@ Scheduled twice on weekdays (see the beat entry in ``app/tasks/celery_app.py``)
 ``NewsCatalystAgent.prune_old_news``'s docstring), THEN runs the shared
 advisory-agent guard (enable flag -> BYO key -> daily token budget) and
 quietly no-ops with an INFO log when any precondition fails, matching every
-other agent task in this wave. Never raises on a guard denial - only an
+other advisory-agent task. Never raises on a guard denial - only an
 unexpected error inside the run itself propagates (so Celery's retry/alerting
 still sees it).
 

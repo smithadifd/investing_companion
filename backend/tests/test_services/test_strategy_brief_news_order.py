@@ -1,5 +1,5 @@
 """``_collect_news`` must return NewsItem rows deterministically when two rows
-share ONE ``published_at`` (AB3).
+share ONE ``published_at``.
 
 ``_collect_news`` (strategy_brief.py) built its query with
 ``.order_by(NewsItem.published_at.desc())`` alone. Two ``NewsItem`` rows that
@@ -13,8 +13,8 @@ This is a DISPLAY/NARRATIVE-ORDER determinism fix only, NOT a
 financial-calculation fix: ``_collect_news`` only feeds the strategy brief's
 LLM context dict, it does not compute or persist any trade/position figures.
 
-Modeled on ``tests/test_services/test_trade_journal_pair_order.py`` (AA5,
-PR #230), which fixed the sibling non-determinism in
+Modeled on ``tests/test_services/test_trade_journal_pair_order.py`` (PR #230),
+which fixed the sibling non-determinism in
 ``_closed_trade_pairs``. As there, the fix adds the primary-key column as a
 secondary sort key: ``.order_by(NewsItem.published_at.desc(),
 NewsItem.id.desc())`` - descending to match the primary (`.desc()`) key,
@@ -84,7 +84,7 @@ class TestCollectNewsTiebreak:
 
 
 class TestCollectNewsCapBoundary:
-    """Cap-boundary extension of AB3/#232's 2-row tie test (AC6).
+    """Cap-boundary extension of #232's 2-row tie test.
 
     #232 proved the tiebreak orders two tied rows deterministically. It did
     not prove what happens when MORE tied rows exist than ``NEWS_LIMIT``

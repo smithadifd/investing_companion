@@ -10,9 +10,8 @@
 The Astro Starlight docs site at `docs.smithadifd.com` ships without
 screenshots. All seven feature pages read as text-only. A single
 representative image at the top of each feature page would make the
-docs scannable and give a visual anchor before the prose. This was
-explicitly deferred during the P3 drafting pass so the site could land
-and the deploy pipeline could be proven out first.
+docs scannable and give a visual anchor before the prose. Screenshots were
+deferred so the site and its deployment pipeline could be established first.
 
 ## Targets
 

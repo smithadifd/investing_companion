@@ -118,7 +118,7 @@ else:
             "task": "agents.strategy_brief_run",
             "schedule": crontab(minute=30, hour=11, day_of_week="mon-fri"),
         },
-        # News & Catalyst advisory agent (T1 sub-PR 2/4, docs/issues/014):
+        # News & Catalyst advisory agent (docs/issues/014-intelligent-agents.md):
         # fetch + score watchlist news, feeding the morning pulse's catalyst
         # lines. Twice on weekdays, ~pre-market and ~pre-close ET. Fixed UTC
         # hours drift by an hour across DST rather than tracking ET exactly -
@@ -134,7 +134,7 @@ else:
         # Monday 05:30 UTC (~00:30 ET EST / 01:30 ET EDT) - shortly AFTER the
         # ET week actually ends (Monday 00:00 ET), so compute_review_window()
         # always finds a fully-COMPLETED week to review rather than the week
-        # still in progress (codex-flagged schedule/window mismatch: the
+        # still in progress: the
         # previous Sunday-22:00-UTC trigger fired while the week was still
         # live, missing Sunday-evening activity and never getting rerun after
         # the week actually closed - fixed on both sides, see

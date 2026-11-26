@@ -35,7 +35,7 @@ existing rows at ADD time, so a single row that predates the rule fails the
 migration outright. All four members are new as of ``20260830_001``, so on a
 DB migrated straight through there is nothing to violate them - but this repo's
 prod has been running since long before, the deploy tail is manual, and rows
-can be written between R1 and this promotion (the broker backfill and any hand
+can be written between ``20260830_001`` and this promotion (the broker backfill and any hand
 entry both mint rows). Prod data cannot be inspected from a PR.
 
 Rule 3 is the one most likely to have real violations: a dividend entered

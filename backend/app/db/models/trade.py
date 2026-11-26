@@ -57,7 +57,7 @@ class TradeType(str, enum.Enum):
     SELL = "sell"
     SHORT = "short"
     COVER = "cover"
-    # --- total-return build (foundry plans/investing_companion/total-return-design.md) ---
+    # Total-return entries: equity events and account cash movements.
     DIVIDEND = "dividend"  # equity-scoped cash-in       -> trades
     SPLIT = "split"  # equity-scoped share adjust  -> trades
     DEPOSIT = "deposit"  # account-scoped cash-in      -> cash_transactions
@@ -65,7 +65,7 @@ class TradeType(str, enum.Enum):
 
 
 # The fills: the only types that represent a share transaction at a broker.
-# A POSITIVE allow-list on purpose (Surface 1 of the design doc) - every
+# A POSITIVE allow-list on purpose - every
 # consumer that means "a real fill" must test membership here instead of
 # excluding the members it happens to know about, so adding a ninth member
 # cannot silently widen a match pool.

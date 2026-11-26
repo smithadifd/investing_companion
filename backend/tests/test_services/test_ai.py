@@ -1,4 +1,4 @@
-"""Tests for the AI analysis revival (Queue S S5).
+"""Tests for AI analysis.
 
 Covers, without live infra (Postgres/Redis mocked or faked):
   * current model ids + configurable default resolution

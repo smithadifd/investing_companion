@@ -1,4 +1,4 @@
-"""Tests for the key-gated Alpha Vantage fallback provider (Queue S S4)."""
+"""Tests for the key-gated Alpha Vantage fallback provider."""
 
 from decimal import Decimal
 from unittest.mock import AsyncMock

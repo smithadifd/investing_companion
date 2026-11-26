@@ -1,9 +1,8 @@
 """Model-level tests for the Tier-1 advisory-agent tables.
 
-Schema + rails only (sub-PR 1, see docs/issues/014-intelligent-agents.md) -
-no agent logic exists yet, so these tests only cover that the three new
-SQLAlchemy models instantiate, persist, resolve their relationships/columns,
-and enforce the constraints declared on them. Needs a real Postgres
+These tests cover that the three SQLAlchemy models instantiate, persist,
+resolve their relationships/columns, and enforce the constraints declared
+on them. Needs a real Postgres
 connection (the ``db``/``engine`` fixtures in tests/conftest.py) - runs in CI,
 not necessarily locally if Postgres isn't available.
 """

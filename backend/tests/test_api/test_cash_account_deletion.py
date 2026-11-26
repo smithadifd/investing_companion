@@ -180,7 +180,7 @@ class TestTheDatabaseIsTheBackstop:
 
         assert await AccountService(db).delete_account(account.id, test_user.id) is True
 class TestConcurrentInsertDuringDeletion:
-    """REVIEW ROUND 2, ISSUE 5 - the check and the delete are two statements.
+    """The check and the delete are two statements.
 
     A backfill (or a second tab) inserting a cash row in the window between
     them leaves the application check satisfied and the FK correctly refusing

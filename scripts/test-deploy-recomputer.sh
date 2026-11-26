@@ -1,6 +1,6 @@
 #!/bin/bash
 # Regression tests for scripts/deploy-recomputer.sh and the RETIRED guard on
-# scripts/deploy-synology.sh (CM6 findings F2, F4, F5).
+# scripts/deploy-synology.sh.
 #
 # Plain bash + assertions, matching this repo's existing scripts/test-build.sh
 # convention — there is no shell test framework (bats, shunit2, etc.) in use
@@ -83,7 +83,7 @@ echo "$OUT_1" | grep -q "No ssh invoked, no host reached." \
     || check "plan text says no ssh/no host reached" 1
 echo ""
 
-# --- Test 2: plan text names the build step (F1) -----------------------------
+# --- Test 2: plan text names the build step ----------------------------------
 echo "-- plan text names the build step --"
 echo "$OUT_1" | grep -q -- "--build" \
     && check "plan text contains --build" 0 \
@@ -93,7 +93,7 @@ echo "$OUT_1" | grep -q "api, celery_worker, celery_beat, frontend" \
     || check "plan text names the four build-only services" 1
 echo ""
 
-# --- Test 3: hostile branch name is refused, not executed (F2) --------------
+# --- Test 3: hostile branch name is refused, not executed --------------------
 echo "-- hostile branch name refused --"
 GITSTUBDIR="$WORKDIR/gitstub"
 mkdir -p "$GITSTUBDIR"
@@ -125,7 +125,7 @@ else
 fi
 echo ""
 
-# --- Test 4: deploy-synology.sh refuses without the override (F4) -----------
+# --- Test 4: deploy-synology.sh refuses without the override -----------------
 echo "-- retired Synology script refuses by default --"
 : > "$INVOKED_LOG"
 OUT_4="$(PATH="$STUBDIR:$PATH" bash scripts/deploy-synology.sh 2>&1)"

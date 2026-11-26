@@ -1,6 +1,6 @@
 """Regression: DISCORD_WEBHOOK_URL must be decrypted before use as a URL.
 
-S8 (fix #2) moved DISCORD_WEBHOOK_URL into SettingsService.ENCRYPTED_KEYS, so
+DISCORD_WEBHOOK_URL belongs to SettingsService.ENCRYPTED_KEYS, so
 new/updated rows are stored as versioned ciphertext (``v2:...``). The Discord
 notifier previously read ``UserSetting.value`` directly on the assumption it
 was always plaintext ("Discord webhook URLs are not encrypted, use directly").

@@ -23,8 +23,8 @@ def sync_all_price_history():
 
     async def _sync():
         async with AsyncSessionLocal() as session:
-            # Alerts read reference values from this table; moving its provider
-            # is row CI3's decision. Keep the persisted series pinned to Yahoo.
+            # Alerts read reference values from this table; keep it pinned to
+            # Yahoo to avoid mixing provider adjustment bases in a stored series.
             service = PriceHistoryService(session, provider=YahooFinanceProvider())
             return await service.sync_all()
 

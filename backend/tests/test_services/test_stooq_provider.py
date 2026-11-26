@@ -1,4 +1,4 @@
-"""Tests for the Stooq no-key fallback provider (Queue S S4).
+"""Tests for the Stooq no-key fallback provider.
 
 Pure parsing + symbol mapping tests, plus provider I/O with the CSV fetch
 stubbed — no live network.

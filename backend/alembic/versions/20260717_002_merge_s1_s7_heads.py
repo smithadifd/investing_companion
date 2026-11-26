@@ -1,7 +1,7 @@
-"""merge S1 + S7 heads
+"""Merge alert outbox and price-history policy migration heads
 
-Both ``20260716_001`` (S1 — ``alert_deliveries`` outbox table) and
-``20260717_001`` (S7 — ``price_history`` TimescaleDB policies + daily CAGG)
+Both ``20260716_001`` (``alert_deliveries`` outbox table) and
+``20260717_001`` (``price_history`` TimescaleDB policies + daily CAGG)
 branch off the same parent ``20260715_002``, creating two heads. Left as-is,
 ``alembic upgrade head`` fails with "Multiple head revisions are present".
 

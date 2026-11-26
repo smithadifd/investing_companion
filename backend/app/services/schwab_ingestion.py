@@ -1,4 +1,4 @@
-"""Schwab positions/transactions ingestion (T2 sub-PR 1/3).
+"""Schwab positions/transactions ingestion.
 
 ``pull -> normalize -> upsert``. Positions are whole-snapshot runs: each
 successful pull creates one :class:`~app.db.models.broker_import.BrokerImportRun`
@@ -43,14 +43,14 @@ within the trailing 60 days and has no pagination past that boundary (see
 clamped to that horizon. When clamping truncates the requested start - e.g.
 the since-last-cursor default after a >60-day ingestion outage - the
 truncation is recorded LOUDLY (``BrokerImportRun.notes`` + a warning log):
-the skipped span is unrecoverable via this API, and the broker-CSV import
-(sub-PR 3) is the designated recovery path.
+the skipped span is unrecoverable via this API, and broker-CSV import is the
+designated recovery path.
 
 NO reconciliation logic and NO API endpoint/UI live in THIS module - it is
 only the ingestion primitive: given a user + an already-known Schwab account
 hash, pull once, normalize, and write. Those layers have since landed
 elsewhere and call in here: ``services/reconciliation.py`` +
-``services/adoption.py`` (sub-PR 2's logic), and ``services/broker_import.py``
+``services/adoption.py``, and ``services/broker_import.py``
 + ``POST /api/v1/accounts/{account_id}/import`` (the trigger that actually
 invokes the two pull functions below, honoring the session ownership above by
 never handing them a request-scoped session).
@@ -522,7 +522,7 @@ async def get_current_positions(
     db: AsyncSession, user_id: uuid.UUID, account_hash: str
 ) -> list[ImportedPosition]:
     """Positions from the latest complete snapshot run, or ``[]`` if none
-    yet. A thin read helper for sub-PR 2 to build reconciliation on top of -
+    yet. A thin read helper for reconciliation -
     no reconciliation logic lives here. Read-only; safe with any session."""
     run = await get_latest_complete_run(db, user_id, account_hash)
     if run is None:

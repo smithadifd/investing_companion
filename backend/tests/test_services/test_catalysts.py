@@ -1,10 +1,9 @@
 """Tests for app.services.catalysts (morning-pulse catalyst line selection).
 
-Selection is deterministic (docs/issues/014 T1 sub-PR 2/4, binding addendum
-#6): relevance >= 0.70, one row per symbol (highest relevance, then newest,
+Selection is deterministic: relevance >= 0.70, one row per symbol (highest relevance, then newest,
 then highest id), within the last 36 hours, text = summary-else-headline,
 whitespace-normalized, truncated to 80 chars including the ellipsis, and
-(codex-cycle fix #1b) Discord mention syntax (@everyone/@here/role-mention)
+Discord mention syntax (@everyone/@here/role-mention)
 neutralized before it can reach a webhook message.
 """
 
@@ -177,7 +176,7 @@ async def test_get_catalyst_lines_only_returns_requested_symbols(db):
 
 
 # ---------------------------------------------------------------------------
-# Mention neutralization (codex-cycle fix #1b)
+# Mention neutralization
 # ---------------------------------------------------------------------------
 def test_neutralize_mentions_defangs_everyone():
     result = _neutralize_mentions("Breaking: @everyone should sell now")

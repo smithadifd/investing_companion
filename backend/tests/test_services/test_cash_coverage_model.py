@@ -1,14 +1,13 @@
-"""The cash-completeness model - review round 2.
+"""The cash-completeness model.
 
 SEAM UNDER TEST: the **cash-coverage seam** - ``CashLedgerService.coverage``.
 Its interface is one question: *"is the cash balance I just folded for this
 scope COMPLETE?"* Everything else in this file is a way of asking it
 adversarially.
 
-Round 1 replaced a row-date heuristic with persisted import provenance and
-fixed the headline case. Two review lanes then found five bugs in the new
-logic, all of them the same shape - **a conclusion computed at the wrong time,
-over the wrong set**:
+Import provenance replaced a row-date heuristic, but persisted provenance
+alone is not enough: completeness must be checked at the right time and
+over every account in scope. Earlier bugs included:
 
 * the multi-account fold ran ``all()`` over *whichever provenance rows existed*
   rather than over *every account in scope*, so an account with no row simply
@@ -119,7 +118,7 @@ async def _trade(db, equity, user, *, days_ago, account_id):
 
 
 class TestMultiAccountScope:
-    """ISSUE 1 (both lanes, HIGH). An account with no provenance row did not
+    """An account with no provenance row did not
     vote in the whole-ledger fold, so one well-covered account could carry a
     portfolio that contained an obviously incomplete one. This is the DEFAULT
     call - ``account_id=None`` is what the Total Return tab opens on."""
@@ -127,7 +126,7 @@ class TestMultiAccountScope:
     async def test_one_covered_account_cannot_vouch_for_an_uncovered_one(
         self, db: AsyncSession, test_user
     ):
-        """The reviewer's reproduction, verbatim in shape.
+        """A covered account must not hide another account's history gap.
 
         A: fully backfilled, unclamped, window reaches past its first trade.
         B: manual only, a 400-day-old trade but cash starting 5 days ago.
@@ -214,7 +213,7 @@ class TestMultiAccountScope:
 
 
 class TestProvenanceIsRecheckedAgainstLiveActivity:
-    """ISSUE 2 (codex, HIGH). ``is_true_origin`` was a CONCLUSION written at
+    """``is_true_origin`` was a CONCLUSION written at
     backfill time. A trade backdated afterwards - an import, a correction, a
     forgotten fill - could not invalidate it, so NAV kept reporting a complete
     cash history over one that provably was not."""
@@ -271,7 +270,7 @@ class TestProvenanceIsRecheckedAgainstLiveActivity:
 
 
 class TestGapStateIsCombinedAcrossRuns:
-    """ISSUE 3 (codex, HIGH). The window was combined across every run but the
+    """The window was combined across every run but the
     gap note was taken from the LATEST one. A clamped pull followed by an
     ordinary incremental pull kept the old short window and lost the clamp -
     so coverage could be declared established without a single missing
@@ -331,8 +330,8 @@ class TestGapStateIsCombinedAcrossRuns:
 
 
 class TestEmptyLedgerNeverOverridesProvenance:
-    """ISSUE 4 (codex, HIGH). "Nothing happened, so nothing is missing" is only
-    true when nothing is KNOWN to be missing. A clamped pull that returned no
+    """An empty ledger is complete only
+    when nothing is KNOWN to be missing. A clamped pull that returned no
     rows in its window said exactly that - and the shortcut ran first and
     declared the empty ledger complete."""
 

@@ -3,9 +3,9 @@ title: Schwab adopt semantics
 description: How a Schwab-reported position becomes an IC-managed position — account mapping, the synthetic trade, basis math, and the reconciliation view this unblocks.
 ---
 
-This page pins the semantics for "adopting" a Schwab-reported position into Investing Companion, before any of it gets built. It is a decision record, not a build: every recommendation below is a proposal that needs to be ratified (or amended) before the next wave can implement the read-only reconciliation view it ends on.
+This page records the design for "adopting" a Schwab-reported position into Investing Companion. It defines account mapping, trade provenance, basis calculations, and the read-only reconciliation view that can be implemented independently of adoption.
 
-The problem: `schwab_ingestion.pull_positions` (`backend/app/services/schwab_ingestion.py`) already lands read-only snapshots of what Schwab reports per account — see PR #216 (`981f370`), sub-PR 1 of the T2 chain, schema + client only, "no reconciliation logic, no CSV import, no UI." Investing Companion's own positions are not stored rows at all; `TradeService._calculate_positions` (`backend/app/services/trade.py:551-669`) recomputes them on every read by walking the append-and-mutate `trades` table. There is no `position` row to "adopt into" — the only way to make IC agree with Schwab is to change what the trade ledger contains. This page defines how.
+The problem: `schwab_ingestion.pull_positions` (`backend/app/services/schwab_ingestion.py`) already lands read-only snapshots of what Schwab reports per account — see PR #216 (`981f370`), which added the schema and client, with no reconciliation logic, CSV import, or UI. Investing Companion's own positions are not stored rows at all; `TradeService._calculate_positions` (`backend/app/services/trade.py:551-669`) recomputes them on every read by walking the append-and-mutate `trades` table. There is no `position` row to "adopt into" — the only way to make IC agree with Schwab is to change what the trade ledger contains. This page defines how.
 
 For the trade ledger's actual mutation model (not the append-only model this page's predecessor assumed — see the note at the end of [Basis math](#3-basis-math-fifo-remaining-lots-not-net-cash)), see [FIFO trade matching](/design-decisions/fifo-matching/). For the Schwab OAuth/client layer, see `backend/app/services/data_providers/schwab.py` and `backend/app/api/v1/endpoints/schwab.py`.
 
@@ -40,7 +40,7 @@ v1 scope restriction: the adjustment trade only ever picks `BUY` (delta > 0) or 
 **Basis convergence is a non-goal of v1 — decisively.** The delta trade above is priced at Schwab's reported average ([§3](#3-basis-math-fifo-remaining-lots-not-net-cash)'s basis source), a real, currently-observed number — but pricing *one new trade* at today's Schwab average does not make the position's *overall* weighted-average basis equal Schwab's average, except by coincidence. Concretely: IC holds 5 shares at a $50 average; Schwab reports 10 shares at a $100 average; the delta is 5 shares, priced at $100 per §3 — but the resulting IC position is 10 shares at a $75 weighted average (`(5×50 + 5×100)/10`), not Schwab's $100. Reconciling that residual is explicitly out of scope: adoption v1 reconciles **quantity**, full stop. The reconciliation view ([§6](#6-the-read-only-reconciliation-view-the-buildable-slice)) keeps surfacing `basis_delta` after adoption for exactly this reason — a non-zero `basis_delta` post-adoption is expected, not a bug, whenever the pre-adoption average differed from Schwab's. Making the two averages actually converge would require replaying Schwab's own lot structure (its per-lot cost basis, not just its blended average) into IC's FIFO queues — **lot-level basis alignment** — which this brief deliberately defers as its own follow-up design decision, not something v1's synthetic trade attempts.
 
 Fields on the trade record, and why each is new: `Trade` today (`trade.py:40-89`) has no field that marks a row as machine-generated. Adding, all nullable/defaulted so existing rows are unaffected:
-- `source` (String(50), default `"manual"`) — mirrors `broker_import`'s `source` convention; distinguishes `manual` from `schwab_api` (and later `csv_import`, sub-PR 3). Note this is provenance, not "syntheticness": sub-PR 3's CSV import will write *real* historical fills sourced from a broker file — those get `source="csv_import"` but are not synthetic.
+- `source` (String(50), default `"manual"`) — mirrors `broker_import`'s `source` convention; distinguishes `manual` from `schwab_api` and `csv_import`. Note this is provenance, not "syntheticness": CSV imports write *real* historical fills sourced from a broker file — those get `source="csv_import"` but are not synthetic.
 - `is_synthetic` (Boolean, default `False`) — true only for a delta-adjustment/synthetic-opening trade. Orthogonal to `source`.
 - `basis_is_estimated` (Boolean, default `False`) — see [§3](#3-basis-math-fifo-remaining-lots-not-net-cash).
 - `source_import_run_id` (nullable FK `broker_import_runs.id`, `ON DELETE SET NULL`) — the idempotency/provenance key, see below.
@@ -55,7 +55,7 @@ Fields on the trade record, and why each is new: `Trade` today (`trade.py:40-89`
 - *Synthetic-opening only (ignore existing trades, always write one trade for the full Schwab quantity).* Rejected as the general mechanism — it silently discards real trade history (timing, realized P&L) whenever the user already has some organic trades for that equity, which is exactly the case the delta form handles for free. Kept as the degenerate case.
 - *Notes-field convention* (encode "SYNTHETIC" in `Trade.notes`) — explicitly rejected per amendment 4: not queryable, not enforceable, not a real idempotency key.
 
-**Consequences:** requires a schema migration (new `Trade` columns + partial unique index) and a `TradeService` change (the detach-before-edit guard). Neither ships in this brief — this is the design the next-wave migration follows.
+**Consequences:** requires a schema migration (new `Trade` columns + partial unique index) and a `TradeService` change (the detach-before-edit guard).
 
 - [x] RATIFIED (Andrew, 2026-07-23) / - [ ] AMENDED: ___
 
@@ -77,9 +77,9 @@ Two prerequisites the helper's spec must pin, since it's a fresh implementation 
 - *Use `avg_cost_basis` as-is (it's already computed, zero new code).* Rejected — it's the wrong number, per the mutability finding above; shipping a reconciliation view that compares it against Schwab's basis would produce false "drift" alerts for any account with a realized gain.
 - *User-supplied basis at adoption time.* Rejected as the default (adds a manual-entry step to what should be a one-click adoption) but kept available as a per-row override in the eventual adoption UI, since Schwab's `average_price` semantics (does it include fees? realize adjustments for wash sales?) aren't independently verifiable from the API alone — see [what the CSV specimens would firm up](#what-the-csv-specimens-would-still-firm-up).
 
-**Consequences:** the reconciliation view's basis-delta column has a real prerequisite — the open-lots helper — that quantity reconciliation does not. Recommendation in [§6](#6-the-read-only-reconciliation-view-the-buildable-slice) is to ship both in the same next-wave ticket rather than sequence them, since the helper is small and self-contained.
+**Consequences:** the reconciliation view's basis-delta column has a real prerequisite — the open-lots helper — that quantity reconciliation does not. Recommendation in [§6](#6-the-read-only-reconciliation-view-the-buildable-slice) is to implement both together, since the helper is small and self-contained.
 
-*Note on `fifo-matching.md`: that page's "Edge cases and known gaps" section currently claims fees are ignored in realized P&L and that no account partitioning or tests exist. All three claims are stale — `_recalculate_pairs` nets both legs' commissions into `realized_pnl` (`trade.py:474-480`, `:520-523`), partitions FIFO queues by `account_id` (`trade.py:454-455`), and `backend/tests/test_services/test_trade_positions.py` covers exactly that partitioning. This brief does not edit `fifo-matching.md` (out of scope per the ticket) — every claim above is grounded directly in the current `trade.py`/tests, not in that page. Fixing `fifo-matching.md` is flagged as a follow-up in the PR description.*
+*Note on `fifo-matching.md`: that page's "Edge cases and known gaps" section claims fees are ignored in realized P&L and that no account partitioning or tests exist. All three claims are stale — `_recalculate_pairs` nets both legs' commissions into `realized_pnl` (`trade.py:474-480`, `:520-523`), partitions FIFO queues by `account_id` (`trade.py:454-455`), and `backend/tests/test_services/test_trade_positions.py` covers exactly that partitioning. The calculations described here are grounded in `trade.py` and its tests.*
 
 - [x] RATIFIED (Andrew, 2026-07-23) / - [ ] AMENDED: ___
 
@@ -122,7 +122,7 @@ Lifecycle, using the `AccountLink` entity from [§1](#1-what-model-is-adopted-in
 
 **Recommendation: `GET /api/v1/accounts/{account_id}/reconciliation`, gated only on an active `AccountLink` for that account — not on the Trade-provenance schema from §2/§3, which is only needed once adoption becomes a mutation.**
 
-This is the deliberate scope cut that makes something shippable next wave without waiting for the full adoption mutation: quantity reconciliation needs nothing beyond `AccountLink` (§1) plus data that already exists (`_calculate_positions(by_account=True)` and `ImportedPosition`). Basis reconciliation additionally needs the open-lots helper from §3 (small, same-ticket-sized). Neither needs the `Trade` provenance columns or the adoption endpoint from §2 — those are prerequisites for the *mutation* (a later wave), not the view.
+Quantity reconciliation can be implemented without the full adoption mutation: it needs nothing beyond `AccountLink` (§1) plus data that already exists (`_calculate_positions(by_account=True)` and `ImportedPosition`). Basis reconciliation additionally needs the open-lots helper from §3. Neither needs the `Trade` provenance columns or the adoption endpoint from §2 — those are prerequisites for the *mutation*, not the view.
 
 **Shape:** an account-level envelope (import recency — see below) wrapping `positions`, one row per symbol present on either side (union of the linked hash's latest-complete-run `ImportedPosition` rows and IC's per-`account_id` positions for that account; when `never_imported` is true the Schwab side of that union is simply empty):
 
@@ -159,9 +159,9 @@ GET /api/v1/accounts/{account_id}/reconciliation
 
 **Alternatives considered:**
 - *A global `GET /api/v1/schwab/reconciliation` across all linked accounts at once.* Kept as a plausible follow-up (a portfolio-wide "everything that needs attention" view), but per-account is the right first slice — it matches the existing per-account positions call shape (`GET /api/v1/trades/portfolio?by_account=true`) and doesn't require deciding a cross-account aggregation format up front.
-- *Ship basis reconciliation gated on the open-lots helper landing first, as a hard blocking dependency in a separate ticket.* Rejected — the helper is small enough (same walk, different return) to build in the same ticket as the view; sequencing it as a separate blocking dependency just adds a wave of latency for no isolation benefit.
+- *Ship basis reconciliation gated on the open-lots helper landing first, as a hard blocking dependency in a separate ticket.* Rejected — the helper is small enough (same walk, different return) to build with the view; a separate blocking dependency delays delivery without isolating risk.
 
-**Consequences:** this is the next AI-able ticket once §1-§5 are ratified: `AccountLink` migration + model + a minimal link/list endpoint, the open-lots helper, and the reconciliation GET endpoint + page. Still no mutation, no OAuth changes, no Schwab API calls beyond what PR #216 already added.
+**Consequences:** implementation requires an `AccountLink` migration + model + a minimal link/list endpoint, the open-lots helper, and the reconciliation GET endpoint + page. Still no mutation, no OAuth changes, no Schwab API calls beyond what PR #216 already added.
 
 - [x] RATIFIED (Andrew, 2026-07-23) / - [ ] AMENDED: ___
 
@@ -179,7 +179,7 @@ Apply the same dependency to: linking/unlinking an `AccountLink` (§1/§4), and 
 
 ## Ratification
 
-**All seven RATIFIED by Andrew, 2026-07-23 (session #45 live interview) — this design is now buildable; §6 is the chartable next-wave slice.**
+**All seven decisions were ratified on 2026-07-23. Section 6 defines the independently implementable read-only reconciliation view.**
 
 - [x] §1 What model is adopted into — RATIFIED / AMENDED: ___
 - [x] §2 Synthetic-opening vs. delta-adjustment — RATIFIED / AMENDED: ___
@@ -189,11 +189,11 @@ Apply the same dependency to: linking/unlinking an `AccountLink` (§1/§4), and 
 - [x] §6 Reconciliation view slice — RATIFIED / AMENDED: ___
 - [x] Demo-guard — RATIFIED / AMENDED: ___
 
-Once all seven are checked, §6's endpoint + `AccountLink` migration + the open-lots helper is a chartable next-wave ticket on its own; §2's `Trade` provenance migration and the adoption mutation endpoint are the wave after that.
+Section 6's endpoint, `AccountLink` migration, and open-lots helper can be implemented together; §2's `Trade` provenance migration and adoption mutation endpoint can follow independently.
 
 ### What the CSV specimens would still firm up
 
-The U12-3 redacted broker-CSV specimens (still owed by Andrew, tracked separately in §4 of the wave roadmap) are **not** a blocker for ratifying any of the above — every recommendation here is grounded in the live Schwab API contract already landed in PR #216, not in CSV shape. Where specimens would sharpen field-level detail once they exist:
+Redacted broker-CSV specimens are **not** a blocker for the decisions above — every recommendation here is grounded in the live Schwab API contract already landed in PR #216, not in CSV shape. Specimens would sharpen these field-level details:
 - Whether Schwab's `average_price` (§3) is fee-inclusive, and whether a wash-sale or corporate-action adjustment ever changes it retroactively between pulls — currently unverifiable from the position-snapshot API alone, since `ImportedPosition` rows are never updated in place (`broker_import.py:146-153`).
 - Real-world `assetType` values beyond `EQUITY`/`OPTION`/`MUTUAL_FUND` that Schwab actually returns for this account (the model comment lists these as examples, not an exhaustive enum) — firms up the `ineligible_reason` strings in §6's view.
-- Whether CSV-imported (sub-PR 3) trade rows will carry Schwab's own transaction-level fee/commission breakdown in a way `_fee_per_share` (`trade.py:33-45`) can consume directly, which would matter if a future basis recommendation ever wants to use transaction history instead of the position snapshot's `average_price`.
+- Whether CSV-imported trade rows will carry Schwab's own transaction-level fee/commission breakdown in a way `_fee_per_share` (`trade.py:33-45`) can consume directly, which would matter if a future basis recommendation ever wants to use transaction history instead of the position snapshot's `average_price`.

@@ -72,7 +72,7 @@ def deliver_pending_notifications(self):
     tradeoff is deliberate — never drop a price alert is worth a rare, bounded
     duplicate. The claim leases ONE GROUP at a time immediately before its
     single send (every row a group covers is delivered by one batched Discord
-    embed since BZ14 — see ``AlertService.deliver_pending``), so this is safe
+    embed — see ``AlertService.deliver_pending``), so this is safe
     to run on a short cadence, safe under any worker concurrency (FOR UPDATE
     SKIP LOCKED), and safe to redeliver on worker loss (``acks_late``). A
     reaper first sweeps rows stranded ``pending`` with
@@ -281,7 +281,7 @@ def send_morning_pulse():
             except Exception as e:
                 logger.warning(f"Failed to build needs-attention section: {e}")
 
-            # --- Catalysts: News & Catalyst agent context (T1 sub-PR 2/4) ---
+            # --- Catalysts: News & Catalyst agent context ---
             # Advisory-only read of news_items scored by agents.news_catalyst_run
             # (app/services/agents/news_catalyst.py). A failure here degrades to
             # an absent catalysts field (pulse renders as if the agent never
@@ -326,7 +326,7 @@ def send_morning_pulse():
 async def _build_eod_catalysts(session, watchlist_symbols: list[str]):
     """Dedup ``watchlist_symbols`` and fetch catalyst lines for the EOD wrap.
 
-    Mirrors ``send_morning_pulse``'s catalyst step (T1 sub-PR 2/4): the same
+    Mirrors ``send_morning_pulse``'s catalyst step: the same
     advisory-only read of ``news_items`` scored by the News & Catalyst agent
     (``app/services/agents/news_catalyst.py``), so a slow news day - or an
     agent that has never run - degrades to an absent ``catalysts`` field
@@ -565,8 +565,7 @@ def send_eod_wrap():
                 if (e.importance and e.importance.value in ("medium", "high"))
             ]
 
-            # --- Catalysts: News & Catalyst agent context (T1 sub-PR 2/4's
-            # morning-pulse injection, mirrored for the EOD wrap in U11) ---
+            # --- Catalysts: morning-pulse context mirrored for the EOD wrap ---
             catalysts, unavailable_sections = await _build_eod_catalysts(
                 session, watchlist_symbols
             )

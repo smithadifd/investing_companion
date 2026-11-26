@@ -344,7 +344,7 @@ async def import_broker_csv(
     account_service: AccountService = Depends(get_account_service),
     service: BrokerCsvImportService = Depends(get_broker_csv_service),
 ) -> DataResponse[CsvImportResponse]:
-    """Import a broker transaction CSV - the history recovery path (sub-PR 3).
+    """Import a broker transaction CSV - the history recovery path.
 
     Schwab's API only serves the trailing 60 days of transactions and cannot
     paginate past that, so any older activity is permanently unreachable

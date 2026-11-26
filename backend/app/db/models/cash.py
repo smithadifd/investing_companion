@@ -1,9 +1,7 @@
 """Per-account cash ledger - deposits and withdrawals.
 
-Surface 2 of the total-return design (foundry
-``plans/investing_companion/total-return-design.md``). Two tables, not one
-(Q-D, ratified): ``trades.equity_id`` stays NOT NULL, so account-scoped cash
-with no equity leg lives here instead. Relaxing that column to nullable would
+``trades.equity_id`` stays NOT NULL, so account-scoped cash
+with no equity leg lives in a separate table. Relaxing that column to nullable would
 have touched every ``select(Trade)`` in the codebase - the reconciliation match
 pool, lesson capture, the trade-journal agent, the position fold - each of
 which would then need a type filter added or would silently mis-sum.

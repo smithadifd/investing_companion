@@ -1,5 +1,5 @@
 """``_closed_trade_pairs`` must return TradePair rows deterministically when
-two rows share ONE ``close_trade.executed_at`` (AA5).
+two rows share ONE ``close_trade.executed_at``.
 
 ``_closed_trade_pairs`` (trade_journal.py) built its query with
 ``.order_by(Trade.executed_at)`` alone. Two ``TradePair`` rows whose closing

@@ -411,7 +411,7 @@ class SchwabProvider:
 
         return quote
 
-    # -- accounts: positions / transactions (T2 sub-PR 1/3) -------------------
+    # -- accounts: positions / transactions --------------------------------
     #
     # Unlike get_extended_quote above, these have no safe same-shape
     # fallback (there is no "Yahoo for your brokerage holdings") - every

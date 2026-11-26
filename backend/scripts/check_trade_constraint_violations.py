@@ -24,8 +24,8 @@ different things:
 
 It also reports the total ``trades`` row count: ``ADD CONSTRAINT ... CHECK``
 validates every existing row while holding an ACCESS EXCLUSIVE lock, so the row
-count is the input to "how long is that lock held?" (migration 20260729_001,
-decision D5). It never affects the exit code.
+count is the input to "how long is that lock held?" (migration 20260729_001).
+It never affects the exit code.
 
 Read-only by construction: it opens one transaction, issues
 ``SET TRANSACTION READ ONLY`` before any other statement, and only ever SELECTs.
@@ -73,9 +73,9 @@ from app.core.config import settings  # noqa: E402
 DEFAULT_SAMPLE_LIMIT = 20
 
 # Table size. `ADD CONSTRAINT ... CHECK` validates every existing row under an
-# ACCESS EXCLUSIVE lock on trades (see migration 20260729_001, decision D5), so
-# the row count is what sets how long that lock is held. Reported so the apply
-# sitting can see it rather than assume it.
+# ACCESS EXCLUSIVE lock on trades (see migration 20260729_001), so
+# the row count is what sets how long that lock is held. Reported so the
+# operator can see it rather than assume it.
 TOTAL_ROWS_SQL = "SELECT count(*) FROM trades;"
 
 # Sample columns: enough to identify and triage a row without dumping notes.

@@ -1,9 +1,7 @@
 """Add cash_transactions - the per-account cash ledger
 
-R2 of the total-return build (foundry
-``plans/investing_companion/total-return-design.md``, Surface 2). Deposits and
-withdrawals get their own table rather than nullable-``equity_id`` rows in
-``trades`` (Q-D, ratified): keeping ``trades.equity_id`` NOT NULL means the
+Deposits and withdrawals get their own table rather than nullable-``equity_id``
+rows in ``trades``: keeping ``trades.equity_id`` NOT NULL means the
 reconciliation match pool, lesson capture, the trade-journal agent and the
 position fold all keep working unchanged.
 
@@ -25,7 +23,7 @@ that cannot.
 
 ``kind`` reuses ``trade_type_enum`` with ``create_type=False`` - the idiom
 established at ``20260201_004_add_trades_tables.py`` and cited as the pattern
-by ``20260718_002``. R1 (``20260830_001``) must have added the values first;
+by ``20260718_002``. Revision ``20260830_001`` must have added the values first;
 that is why they are separate revisions, since Postgres forbids USING an enum
 value in the transaction that added it.
 
@@ -123,7 +121,7 @@ def downgrade() -> None:
     """A real drop: the table is new, so nothing predates it.
 
     ``trade_type_enum`` is deliberately NOT dropped - it is still in use by
-    ``trades.trade_type``, and R1's four added values are irreversible anyway
+    ``trades.trade_type``, and the four added values are irreversible anyway
     (see ``20260830_001``).
     """
     op.drop_index('uq_cash_transactions_external_id', table_name='cash_transactions')

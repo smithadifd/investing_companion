@@ -1,4 +1,4 @@
-"""Tests for the Daily Strategy Brief agent (T1 sub-PR 4/4, docs/issues/014).
+"""Tests for the Daily Strategy Brief agent (docs/issues/014-intelligent-agents.md).
 
 Covers, without live network/LLM calls (mocked throughout, matching
 tests/test_services/test_ai.py's style):
@@ -525,7 +525,7 @@ async def test_compose_brief_records_tokens_on_success(monkeypatch):
     assert text == "**Daily Strategy Brief**\n- Sit tight."
     # Reserve = conservative input estimate over the REAL prompt strings +
     # the output ceiling (never bare max_tokens - the systematic
-    # input-omission bias codex flagged).
+    # input-omission bias).
     expected_reserve = (
         estimate_request_tokens(sb.SYSTEM_PROMPT, sb._build_prompt(_empty_context()))
         + sb.LLM_MAX_TOKENS
@@ -702,10 +702,10 @@ async def test_execute_discord_failure_is_logged_and_swallowed(db, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# _upsert_signal - atomic ON CONFLICT DO UPDATE (codex-cycle regression)
+# _upsert_signal - atomic ON CONFLICT DO UPDATE
 # ---------------------------------------------------------------------------
 async def test_upsert_signal_survives_a_stale_prior_read(db, monkeypatch):
-    """Regression for the old select-then-insert race (codex HIGH finding).
+    """Regression for the old select-then-insert race.
 
     A redelivered/concurrent run whose own "read prior content" step sees no
     row - because it raced another run's insert, or read a stale snapshot -
@@ -779,7 +779,7 @@ async def test_upsert_signal_updates_updated_at_on_conflict(db):
 
 
 # ---------------------------------------------------------------------------
-# _extract_text - defensive response-shape validation (codex MED finding)
+# _extract_text - defensive response-shape validation
 # ---------------------------------------------------------------------------
 def test_extract_text_none_content_returns_none():
     message = MagicMock(content=None)
@@ -854,7 +854,7 @@ async def test_compose_brief_still_records_tokens_on_unexpected_shape(monkeypatc
 
 
 # ---------------------------------------------------------------------------
-# _compose_brief - in-code 1800-char ceiling enforcement (codex MED finding)
+# _compose_brief - in-code 1800-char ceiling enforcement
 # ---------------------------------------------------------------------------
 async def test_compose_brief_enforces_1800_char_ceiling_in_code(monkeypatch):
     """The 1800-char cap is a prompt instruction only unless enforced in
@@ -889,7 +889,7 @@ async def test_compose_brief_under_ceiling_untouched(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# _compose_brief - Anthropic client is always closed (codex LOW finding)
+# _compose_brief - Anthropic client is always closed
 # ---------------------------------------------------------------------------
 async def test_compose_brief_closes_client_on_success(monkeypatch):
     monkeypatch.setattr(
@@ -926,7 +926,7 @@ async def test_compose_brief_closes_client_even_when_create_raises(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# _build_prompt - untrusted-data fencing against prompt injection (codex MED)
+# _build_prompt - untrusted-data fencing against prompt injection
 # ---------------------------------------------------------------------------
 def test_prompt_wraps_data_in_untrusted_delimiters_with_ignore_instructions():
     prompt = sb._build_prompt(_empty_context())
@@ -960,7 +960,7 @@ def test_prompt_data_block_is_between_the_delimiters():
 
 
 # ---------------------------------------------------------------------------
-# _sanitize_discord_mentions - mass-ping neutralization (codex MED finding)
+# _sanitize_discord_mentions - mass-ping neutralization
 # ---------------------------------------------------------------------------
 def test_sanitize_discord_mentions_neutralizes_everyone():
     result = sb._sanitize_discord_mentions("hey @everyone check CCJ")

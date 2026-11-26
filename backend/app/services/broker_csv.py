@@ -1,4 +1,4 @@
-"""Generic broker-CSV import (T2 sub-PR 3) - the history recovery path.
+"""Generic broker-CSV import - the history recovery path.
 
 WHY THIS EXISTS - the 60-day horizon
 ------------------------------------
@@ -18,12 +18,9 @@ does, which is years rather than 60 days.
 
 That is the whole design rationale, and it is why this writes into the SAME
 :class:`~app.db.models.broker_import.ImportedTransaction` table the API pull
-writes into, distinguished only by ``source="csv_import"``. The broker_import
-tables were declared broker-agnostic for exactly this
-("generic 'imported' tables so a future broker-CSV import (sub-PR 3) can reuse
-the same shape with a different ``source`` value"), so CSV-recovered rows
-reconcile side by side with API-pulled rows in one view rather than living in
-a parallel universe.
+writes into, distinguished only by ``source="csv_import"``. Broker-agnostic
+tables let CSV-recovered rows reconcile side by side with API-pulled rows
+in one view.
 
 FORMAT - deliberately generic
 -----------------------------

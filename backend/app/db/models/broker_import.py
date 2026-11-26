@@ -1,11 +1,8 @@
-"""Broker positions/transactions ingestion schema (T2 sub-PR 1/3).
+"""Broker positions/transactions ingestion schema.
 
-Generic "imported" tables so a future broker-CSV import (sub-PR 3, see the
-T2 charter) can reuse the same shape with a different ``source`` value; this
-sub-PR only ever writes ``source="schwab_api"``. The three-part chain is:
-1) this schema + the Schwab API client (this sub-PR), 2) a reconciliation
-view/service comparing imported rows against manual trades (sub-PR 2),
-3) broker CSV import (sub-PR 3). No reconciliation logic lives here.
+Generic "imported" tables let broker API and CSV imports reuse the same shape
+with different ``source`` values. Reconciliation compares imported rows
+against manual trades in a separate service; no reconciliation logic lives here.
 
 SECURITY: Schwab's account HASH (an opaque per-account token Schwab mints
 specifically so callers never need the real account number) is the only
@@ -120,8 +117,8 @@ class BrokerImportRun(Base, TimestampMixin):
     # Loud, structured caveats on a COMPLETE run - today: the HISTORY GAP
     # note written when a transactions pull's requested window start
     # predated Schwab's 60-day history boundary and had to be clamped (the
-    # skipped span is unrecoverable via the API; broker-CSV import, sub-PR
-    # 3, is the recovery path). See schwab_ingestion._history_gap_note.
+    # skipped span is unrecoverable via the API; broker-CSV import is the
+    # recovery path). See schwab_ingestion._history_gap_note.
     # Kept separate from error_message so a completed-with-caveat run is
     # never mistaken for a failed one.
     notes: Mapped[str | None] = mapped_column(Text)
@@ -175,7 +172,7 @@ class ImportedPosition(Base, TimestampMixin):
     cusip: Mapped[str | None] = mapped_column(String(20))
 
     # Signed net quantity (long positive, short negative) = longQuantity -
-    # shortQuantity - the field sub-PR 2's reconciliation compares against
+    # shortQuantity - the field reconciliation compares against
     # manual trades. long_quantity/short_quantity keep Schwab's own raw
     # halves for anyone who needs them un-netted.
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False)
@@ -238,7 +235,7 @@ class ImportedTransaction(Base, TimestampMixin):
     )
 
     # Schwab's activityId, stringified so this table stays broker-agnostic
-    # for a future CSV/other-broker source (sub-PR 3).
+    # for a CSV/other-broker source.
     external_transaction_id: Mapped[str] = mapped_column(String(64), nullable=False)
 
     transaction_type: Mapped[str] = mapped_column(String(50), nullable=False)

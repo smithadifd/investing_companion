@@ -1,4 +1,4 @@
-"""Tests for the Trade Journal & Pattern Analysis Celery task (T1 sub-PR 3/4).
+"""Tests for the Trade Journal & Pattern Analysis Celery task.
 
 Covers the guard/no-op paths at the task level: no resolvable owner user,
 guard-denied (disabled / no key / budget exceeded, already unit-tested at the

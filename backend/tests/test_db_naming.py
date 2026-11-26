@@ -49,7 +49,7 @@ class TestValidateTestDbName:
         with pytest.raises(UnsafeTestDatabaseName):
             validate_test_db_name('bobby_test"; DROP DATABASE prod; --')
 
-    # -- finding 1 (codex second pass): the old check was `"_test" in name`,
+    # The old check was `"_test" in name`,
     # a substring test that is NOT fail-closed — names like
     # "production_test_backup" or "customer_testimonials" contain "_test" as
     # a substring but are exactly the real-looking names the guard exists to

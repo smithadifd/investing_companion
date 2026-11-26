@@ -1,8 +1,7 @@
-"""Tenant-isolation tests — the core security property of R8.
+"""Tenant-isolation tests.
 
 Proves a user cannot read or mutate another user's watchlists, ratios, alerts,
-or triggers. Every assertion here FAILS on main (where the services never
-filter by user_id) and PASSES once user scoping is threaded through.
+or triggers.
 
 Alerts/equities are seeded via factories (no network); watchlists, ratios, and
 triggers are created through the real API as user A so we also prove that the
@@ -299,7 +298,7 @@ class TestContextPackIsolation:
 
 
 # ---------------------------------------------------------------------------
-# AI settings (default_model / custom_instructions) — the R8 residual (MC-3).
+# Per-user AI settings (default_model / custom_instructions).
 # Before this fix, AIService.get_settings()/_upsert_setting() read/wrote these
 # two UserSetting rows keyed only by `key`, with no user_id filter, so they
 # were process-global: B's write clobbered A's read (and vice versa).

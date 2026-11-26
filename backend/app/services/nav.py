@@ -207,9 +207,8 @@ class NavService:
 
         Consequence to know about: NAV's ``unrealized_pnl`` will differ from the
         Positions tab's for any position with a profitable partial sale behind
-        it. The portfolio hot path is deliberately left alone (design doc,
-        Surface 4), so this is a real difference between two surfaces, not a
-        rounding artefact.
+        it. The portfolio hot path is deliberately left alone, so this is a
+        real difference between two surfaces, not a rounding artefact.
 
         Fees ride along the same way ``_recalculate_pairs`` treats them: the
         matched share of the opening commission is netted out, so an open lot

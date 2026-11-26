@@ -92,7 +92,7 @@ class MorningData:
     triggered_overnight: int = 0
     # Pre-formatted "what needs a decision today" lines - shown first
     needs_attention: list[str] = field(default_factory=list)
-    # News & Catalyst agent (T1 sub-PR 2/4): symbol -> catalyst line (<=80
+    # News & Catalyst agent: symbol -> catalyst line (<=80
     # chars), e.g. "DOE announced new uranium reserve program." None/empty
     # (the default) must render byte-identical to before this field existed -
     # see tests/test_services/test_briefing_formatters.py's catalyst-absent case.
@@ -373,8 +373,8 @@ class EODData:
     playbook_status: list[str] = field(default_factory=list)
     # Tomorrow's calendar: [{event_time, title, importance, event_type, symbol}, ...]
     tomorrow_events: list[dict] = field(default_factory=list)
-    # News & Catalyst agent (T1 sub-PR 2/4's MorningData.catalysts, mirrored
-    # for the EOD wrap in U11): symbol -> catalyst line (<=80 chars), e.g.
+    # News & Catalyst agent, matching MorningData.catalysts:
+    # symbol -> catalyst line (<=80 chars), e.g.
     # "DOE announced new uranium reserve program." None/empty (the default)
     # must render byte-identical to before this field existed - see
     # tests/test_services/test_briefing_formatters.py's catalyst-absent case.

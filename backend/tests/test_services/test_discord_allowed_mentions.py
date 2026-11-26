@@ -7,7 +7,7 @@ intact, Discord itself is told to resolve zero mentions into pings. Those
 sanitizers stay in place and are not touched or weakened here - this is a
 second, independent layer at the send choke point (``_post_webhook``), which
 all seven webhook-posting methods on ``DiscordNotificationService`` route
-through (``send_alert_batch`` became the seventh in BZ14).
+through, including ``send_alert_batch``.
 
 No test in this module performs real network I/O: every ``DiscordNotification
 Service`` under test has its ``httpx.AsyncClient`` replaced by a mock before
@@ -332,8 +332,8 @@ async def test_all_seven_methods_route_through_post_webhook_helper(monkeypatch):
 # ---------------------------------------------------------------------------
 # Belt-over-braces: mention syntax that somehow reaches the send layer still
 # ships with the empty-parse field (the scenario is a sanitizer regression or
-# an untrusted-text path that forgot to call the per-agent neutralizer - the
-# #33 codex HIGH class of bug). #209/#210/#211's text-level neutralization is
+# an untrusted-text path that forgot to call the per-agent neutralizer, as in
+# #33). #209/#210/#211's text-level neutralization is
 # a separate, independent layer and is not exercised or bypassed here.
 # ---------------------------------------------------------------------------
 

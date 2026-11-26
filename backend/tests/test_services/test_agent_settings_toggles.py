@@ -1,9 +1,8 @@
 """Tests for the three Tier-1 advisory-agent enable toggles on AppSettings.
 
-Schema + rails only (sub-PR 1, see docs/issues/014-intelligent-agents.md) -
-these cover that the toggles default OFF and round-trip correctly through
+These cover that the toggles default OFF and round-trip correctly through
 SettingsService, the same read/write path the Settings page and the
-follow-up agents' guard (app.services.agents.guards) both use. Needs a real
+agents' guard (app.services.agents.guards) both use. Needs a real
 Postgres connection (the ``db`` fixture) - runs in CI, not necessarily
 locally if Postgres isn't available.
 """

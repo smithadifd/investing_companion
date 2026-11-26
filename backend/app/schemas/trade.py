@@ -39,7 +39,7 @@ def validate_trade_shape(
     * a ``split`` row's ``price`` is the sentinel ``0`` (its ``quantity`` is the
       ratio: 4 for 4:1, 0.25 for a 1:4 reverse), and it carries **no account** -
       a split is a property of the security, so one row adjusts every account
-      partition holding it (design doc, Surface 3 "Ordering and scope").
+      partition holding it.
     * a ``split`` row carries **no fees**. Nothing consumes them: the cash fold
       gives a split zero cash effect and the FIFO unrealized walk ignores a
       split row entirely - but ``NavSummary.fees_paid`` sums every

@@ -7,7 +7,7 @@
 
 set -e
 
-# F4: refuse to run. Synology is no longer prod (reComputer is; see
+# Refuse to run. Synology is no longer prod (reComputer is; see
 # scripts/deploy-recomputer.sh) and its IC containers have been Exited since
 # ~2026-08-25. A stale instruction or a tab-completion slip running this
 # script would deploy to a dead host and migrate its live database. This

@@ -1,10 +1,9 @@
 """Broker-cash backfill - establishing the opening balance from Schwab's own
-transaction history (Q-E, ratified).
+transaction history.
 
-Q-E asked how a real account with years of prior deposits gets a ledger. The
-ratified answer is the automated one: **backfill where Schwab's 60-day
-transaction window reaches, and read ``is_estimated`` before it.** Not
-hand-entry, and not start-at-zero.
+Backfill where Schwab's 60-day transaction window reaches, and read
+``is_estimated`` before it. Do not require hand-entry or assume a zero
+opening balance for an account with years of prior deposits.
 
 WHERE THE CREDENTIALS ARE (and are not). This service touches no token, makes
 no network call and never constructs a Schwab client. It reads

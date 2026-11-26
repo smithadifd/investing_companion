@@ -175,7 +175,7 @@ class CashCoverage(BaseModel):
 class NavSummary(BaseModel):
     """Total-return / NAV view for one account, or for the whole user ledger.
 
-    Return methodology is the ABSOLUTE DOLLAR figure (Q-A, ratified):
+    Return methodology is the ABSOLUTE DOLLAR figure:
     ``total_return_amount`` is unambiguous and is a correct answer to "did this
     account make money". ``total_return_percent`` divided by net contributions
     is NOT a time-weighted return and reads oddly when a large deposit lands

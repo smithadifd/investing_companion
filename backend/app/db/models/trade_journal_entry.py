@@ -1,11 +1,9 @@
 """TradeJournalEntry model - periodic behavioral-pattern reviews.
 
-Schema-only for now (sub-PR 1 of the Tier-1 advisory agents wave, see
-``docs/issues/014-intelligent-agents.md``). The Trade Journal & Pattern
-Analysis agent (a follow-up sub-PR) will analyze closed trades over a window
-(e.g. "you sold winners 3x faster than losers") and write one row per
-reviewed window here; this PR only lays down the table. No analysis logic
-lives here yet.
+The Trade Journal & Pattern Analysis agent analyzes closed trades over a
+window (e.g. "you sold winners 3x faster than losers") and writes one row per
+reviewed window here. Analysis logic lives in
+``app/services/agents/trade_journal.py``.
 """
 
 import uuid

@@ -1,6 +1,6 @@
 """Secrets-at-rest encryption: the versioned, non-bricking scheme.
 
-These tests are the load-bearing proof for the S8 crypto change. They run
+These tests cover versioned encryption and key compatibility. They run
 without a database — SettingsService's cipher construction touches only config,
 not the session — so they exercise pure encrypt/decrypt behavior.
 
@@ -144,7 +144,7 @@ def test_discord_webhook_url_is_encrypted_at_rest():
 
 
 def test_existing_encrypted_keys_still_present():
-    # Backward-compat: S5 reads the AI key through the existing accessor, which
+    # Backward-compat: AI analysis reads the key through the existing accessor, which
     # depends on CLAUDE_API_KEY staying in ENCRYPTED_KEYS.
     for key in (
         SettingsService.CLAUDE_API_KEY,

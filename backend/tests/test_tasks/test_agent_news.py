@@ -1,4 +1,4 @@
-"""Tests for the News & Catalyst agent's Celery task body (T1 sub-PR 2/4).
+"""Tests for the News & Catalyst agent's Celery task body.
 
 Exercises ``run_news_catalyst_agent`` (the ``news_catalyst_run`` task's
 testable inner function - see app/tasks/agent_news.py's module docstring)
@@ -6,9 +6,8 @@ directly with the ``db`` fixture, wrapped so the task's own
 ``async with session_factory() as session`` doesn't close the shared test
 session out from under the fixture's rollback.
 
-Covers: retention pruning runs even when the guard denies (binding addendum
-#7's explicit "test the disabled-agent run prunes"), and the guard-allowed
-path invokes ``execute()`` while the guard-denied path does not.
+Covers retention pruning even when the guard denies, and verifies the
+guard-allowed path invokes ``execute()`` while the guard-denied path does not.
 """
 
 from datetime import datetime, timedelta, timezone

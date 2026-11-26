@@ -1,4 +1,4 @@
-"""Q-E - establishing the opening balance from the broker's own transactions.
+"""Establishing the opening balance from the broker's own transactions.
 
 SEAM UNDER TEST: the **broker-cash seam** - the already-persisted
 ``imported_transactions`` table. That table is an existing seam between Schwab
@@ -11,12 +11,12 @@ Consequently these tests need **no Schwab client, no token and no network** -
 they seed the table the ingestion writes and exercise the real service against
 it. Nothing internal is mocked.
 
-Q-E's ratified answer: backfill where Schwab's 60-day window reaches, and read
+Backfill where Schwab's 60-day window reaches, and read
 ``is_estimated`` before it. So the deliberate boundaries are as important as
 the adoptions:
 
-* ``DIVIDEND_OR_INTEREST`` is NOT adopted - dividends are manual-entry only
-  (Q-B), and they are equity-scoped ``trades`` rows, not cash-ledger rows.
+* ``DIVIDEND_OR_INTEREST`` is NOT adopted - dividends are manual-entry only,
+  and they are equity-scoped ``trades`` rows, not cash-ledger rows.
 * ``JOURNAL`` is NOT adopted - an internal transfer between two of the user's
   own accounts would be counted as an external contribution to one of them.
 * the classifier is a positive ALLOW-list, so an unrecognised Schwab type is

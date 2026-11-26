@@ -1,4 +1,4 @@
-"""Regression tests for dividendYield ingestion-scale normalization (Queue S S2).
+"""Regression tests for dividendYield ingestion-scale normalization.
 
 yfinance reports ``dividendYield`` as a fraction (``0.025`` for 2.5%) in older
 releases and as a percent (``2.5`` for 2.5%) in the 1.x line; the pinned

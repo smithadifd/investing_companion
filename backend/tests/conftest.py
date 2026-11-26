@@ -62,8 +62,8 @@ def _advisory_lock_key(db_name: str) -> int:
 async def _acquire_checkout_lock(url: URL) -> tuple[AsyncEngine, AsyncConnection]:
     """Take a session-level Postgres advisory lock for this checkout's db name.
 
-    Fixes codex finding 2: two suites run from ONE checkout derive the SAME
-    database name. Without serialization, the duplicate-CREATE-DATABASE
+    Two suites run from ONE checkout derive the SAME database name.
+    Without serialization, the duplicate-CREATE-DATABASE
     handling in _create_test_database_if_missing lets both proceed, and the
     first one's teardown (DROP DATABASE ... WITH (FORCE)) then kills the
     second one mid-run.
@@ -191,14 +191,14 @@ async def engine():
 
     For a derived (non-override) database this also owns the database's own
     lifecycle: a session-level advisory lock serializes concurrent
-    same-checkout runs (codex finding 2), the database is created if missing
+    same-checkout runs, the database is created if missing
     before first connect, and dropped after the engine disposes. A
     TEST_DATABASE_URL override skips all of the above — that database is
     caller-managed (e.g. CI's service container).
 
     Every step past lock acquisition is wrapped in nested try/finally so
     engine disposal and the derived-database drop are attempted on EVERY
-    exit path (codex finding 3) — including a failed create_all()/
+    exit path — including a failed create_all()/
     drop_all() — since an orphaned derived database is worse than a noisy
     teardown warning. Lock acquisition itself is deliberately NOT inside
     that try/finally: if we never acquired the lock (e.g. another suite

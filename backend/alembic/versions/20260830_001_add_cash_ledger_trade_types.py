@@ -1,16 +1,15 @@
 """Add dividend/split/deposit/withdrawal to trade_type_enum
 
-R1 of the total-return build (foundry
-``plans/investing_companion/total-return-design.md``, Surface 1). Four new
-values on the native Postgres enum ``trade_type_enum``::
+The total-return ledger uses four additional values on the native Postgres
+enum ``trade_type_enum``::
 
     dividend    equity-scoped cash-in       -> trades
     split       equity-scoped share adjust  -> trades
-    deposit     account-scoped cash-in      -> cash_transactions (R2)
-    withdrawal  account-scoped cash-out     -> cash_transactions (R2)
+    deposit     account-scoped cash-in      -> cash_transactions
+    withdrawal  account-scoped cash-out     -> cash_transactions
 
 The two homes are discriminated by the member because ``trades.equity_id`` is
-NOT NULL and a deposit has no equity (design doc Q-D, ratified). Keeping that
+NOT NULL and a deposit has no equity. Keeping that
 column NOT NULL is what stops every ``select(Trade)`` in the codebase from
 needing a type filter added.
 
@@ -23,11 +22,10 @@ partially-applied deploy tail can be re-run safely.
 
 **downgrade() cannot be honest, and does not pretend to be.** Postgres has no
 ``DROP VALUE``; removing an enum member means recreating the type and
-rewriting every dependent column (``trades.trade_type``, and after R2
-``cash_transactions.kind``). So downgrade is a documented no-op:
+rewriting every dependent column (``trades.trade_type`` and
+``cash_transactions.kind`` after revision ``20260830_002``). So downgrade is a documented no-op:
 ``trade_type_enum`` permanently carries four extra values even if the feature
-is abandoned. That is THE one irreversible step in the whole design, and it
-was ratified as such (design doc Q-F). The cost is close to zero - an unused
+is abandoned. This is irreversible. The cost is close to zero - an unused
 enum value is inert, occupies no storage, and constrains nothing - but it is
 irreversible, so it is stated here rather than papered over.
 

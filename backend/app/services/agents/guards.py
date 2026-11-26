@@ -1,20 +1,17 @@
 """Shared precondition guard for Tier-1 advisory agents.
 
-Schema + rails only (sub-PR 1, see ``docs/issues/014-intelligent-agents.md``)
-- this module contains no agent run logic. Every follow-up agent sub-PR calls
-:func:`check_agent_preconditions` before doing any work so the three rails
-below are enforced consistently and in one place, instead of each agent
-re-deriving them:
+Each advisory agent calls :func:`check_agent_preconditions` before doing work
+so these three preconditions are enforced consistently in one place:
 
-1. **Per-user enable flag** - one of the three Settings toggles added in this
-   PR (``AppSettings.news_agent_enabled`` / ``trade_journal_agent_enabled`` /
+1. **Per-user enable flag** - one of the three Settings toggles
+   (``AppSettings.news_agent_enabled`` / ``trade_journal_agent_enabled`` /
    ``strategy_agent_enabled``), default OFF. Reused via
    ``SettingsService.get_app_settings`` - the same aggregation the Settings
    page reads - rather than re-parsing the raw ``UserSetting`` row.
 2. **BYO Claude key** - reused via ``AIService.get_api_key()``, the existing
    per-user encrypted accessor (falls back to the app-level env key), so a
    user without a key configured gets a quiet no-op instead of a crash.
-3. **Per-day AI token budget** - reused via the existing S5 mechanism,
+3. **Per-day AI token budget** - reused via
    ``app.services.ai_budget.token_budget`` (the same ``AITokenBudget``
    instance ``AIService`` already enforces for interactive AI analysis).
    There is deliberately no separate "agent budget": agent spend and
@@ -24,7 +21,7 @@ None of these three mechanisms is new; this module only composes them behind
 one call so a follow-up agent doesn't have to import and sequence all three
 itself.
 
-U10 note (atomic reserve/settle): this guard's budget check
+Atomic reserve/settle: this guard's budget check
 (:meth:`AITokenBudget.check`) is intentionally NOT the atomicity boundary —
 it stays a cheap, non-mutating early exit (skip assembling agent context
 when the budget is obviously already exhausted). Enforcement now lives in

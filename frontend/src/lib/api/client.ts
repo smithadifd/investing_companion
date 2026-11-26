@@ -797,7 +797,7 @@ class ApiClient {
   ): AsyncGenerator<string, void, unknown> {
     // SSE stream: needs the raw ReadableStream body (not the JSON envelope),
     // but still carries the bearer and mirrors the 401 -> refresh -> retry path.
-    // R8 scopes the AI endpoints to the user, so the bearer is required.
+    // The AI endpoints are user-scoped, so the bearer is required.
     const doFetch = () => {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',

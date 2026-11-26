@@ -623,9 +623,9 @@ class TestNonFillTypesStayOutOfTheMatchPool:
     ):
         """Written so it holds whether or not the split row carries an account.
 
-        Today a split's ``account_id`` is NULL (D6), which keeps it out of
+        Today a split's ``account_id`` is NULL, which keeps it out of
         ``_ic_trades``' ``account_id ==`` filter by accident. This is the guard
-        for that coupling: if D6 is ever revisited and splits become
+        for that coupling: if the scope changes and splits become
         per-account rows, the ``carries_account=True`` case must still pass on
         the strength of the allow-list alone.
         """

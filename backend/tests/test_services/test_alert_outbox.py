@@ -1,9 +1,7 @@
-"""Tests for the alert-delivery transactional outbox (Queue S S1).
+"""Tests for the alert-delivery transactional outbox.
 
-These reference the ``AlertDelivery`` outbox model, which does not exist on
-``origin/main`` — so on main the whole module fails to import (the feature is
-absent). On this branch they pin the delivery contract: enqueue is atomic and
-does not send inline; delivery is AT-LEAST-ONCE with a bounded (<=
+These pin the delivery contract: enqueue is atomic and does not send inline;
+delivery is AT-LEAST-ONCE with a bounded (<=
 ``max_attempts``) duplicate window — a crash BEFORE the send is retried (no
 drop), a crash AFTER a successful send re-sends once the lease expires (the
 deliberate bounded duplicate); a failed send is retried, retries exhausted is
@@ -389,7 +387,7 @@ class TestInFlightLease:
 
     @patch("app.services.alert.discord_service")
     async def test_batch_drains_fully_in_one_grouped_send(self, mock_discord, db):
-        # Two rows drain fully, with no lost tail. Since BZ14 they are covered
+        # Two rows drain fully, with no lost tail. They are covered
         # by ONE grouped send rather than one send each — the send-count half
         # of this contract now lives in test_alert_batching.py; what stays
         # pinned here is that every claimed row is delivered (claimed == sent,

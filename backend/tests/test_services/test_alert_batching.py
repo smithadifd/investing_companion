@@ -1,4 +1,4 @@
-"""BZ14 — same-cycle alert batching + equity deep links.
+"""Same-cycle alert batching + equity deep links.
 
 Two seams are pinned here, one section each.
 
@@ -13,9 +13,8 @@ SYM)** …`` line per alert, in the order given. Observed through the existing
 no test here reaches past the interface into the builder.
 
 **Seam 1:** the *outbox-drain -> Discord-send* seam, located where
-``AlertService.deliver_pending`` calls into ``discord_service``. Before BZ14 its
-interface was "one claimed row => one ``send_alert_notification`` await". After
-BZ14 it is "one claimed GROUP of same-cycle rows => ONE await" —
+``AlertService.deliver_pending`` calls into ``discord_service``. Its interface
+is "one claimed GROUP of same-cycle rows => ONE await" —
 ``send_alert_notification`` for a lone row (the rich single-alert embed is
 unchanged), ``send_alert_batch`` for two or more. Observed through the
 pre-existing ``@patch("app.services.alert.discord_service")`` mock adapter.
@@ -337,8 +336,8 @@ class TestDeepLink:
         # The threshold reads "$80.00" because _get_condition_description
         # price-formats every non-percent condition — pre-existing behaviour
         # that the single-alert embed's description already has (see
-        # test_single_ratio_notification_is_not_linked). BZ14 deliberately does
-        # not change it; the batched line just matches it.
+        # test_single_ratio_notification_is_not_linked). The batched line
+        # deliberately matches that existing format.
         assert description == (
             "• **GLD/SLV** — gold-silver: above $80.00 (observed 82.1234)"
         )
@@ -584,7 +583,7 @@ class TestDeepLink:
             "**[AAPL](https://ic.example.test/equity/AAPL)** (Apple Inc.) "
             "is above $200.00"
         )
-        # The rich single-alert fields are untouched by BZ14.
+        # Batching leaves the rich single-alert fields untouched.
         assert [f["name"] for f in embed["fields"]] == [
             "Observed Value",
             "Threshold",

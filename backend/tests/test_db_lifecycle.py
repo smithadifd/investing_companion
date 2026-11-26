@@ -1,8 +1,8 @@
 """Integration tests for the advisory-lock helpers in tests/conftest.py.
 
 Requires a live Postgres connection (unlike tests/test_db_naming.py, which is
-pure). Exercises codex finding 2 empirically: a second same-checkout suite
-must be refused, not allowed to race the first one's teardown DROP DATABASE.
+pure). A second same-checkout suite must be refused, not allowed to race the
+first one's teardown DROP DATABASE.
 
 Uses a fixed, clearly-scratch database name — not the real per-checkout
 TEST_DATABASE_URL — so this file never contends with the actual `engine`
@@ -43,8 +43,7 @@ class TestAcquireCheckoutLock:
                 await _acquire_checkout_lock(_SCRATCH_URL)
                 assert False, "second acquire should have raised RuntimeError"
             except RuntimeError as exc:
-                # This is the exact "refusal message" codex finding 2 asks
-                # for — assert on its content, not just the exception type.
+                # Assert on the conflict message, not just the exception type.
                 assert "already running from this checkout" in str(exc)
                 assert _SCRATCH_DB_NAME in str(exc)
         finally:

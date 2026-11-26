@@ -1,14 +1,14 @@
-# Daily price-history pin compatibility — CK4
+# Daily price-history pin compatibility
 
 **Recommendation: KEEP the daily Yahoo pin. Confidence: high for the current code boundary; low for asserting provider-basis equivalence without upstream evidence.**
 
-This is a bounded, offline study on draft-PR #328 head `93f7000`. It does not change a provider, schema, task schedule, or stored series. NY-102 settled quote latency only; it did not settle daily-bar adjustment compatibility.
+This is a bounded, offline study on draft PR #328 head `93f7000`. It does not change a provider, schema, task schedule, or stored series. The accepted 15-minute quote delay settled quote latency only; it did not settle daily-bar adjustment compatibility.
 
 ## Decision
 
 Keep `YahooFinanceProvider()` explicitly injected by `backend/app/tasks/price_history.py:28`. Removing it would let the Massive-primary chain overwrite a Yahoo-origin two-year series over each one-month overlap. `PriceHistoryService.sync_equity` uses `(equity_id, timestamp)` as the sole conflict key and replaces all OHLCV fields (`backend/app/services/price_history.py:96-139`); it records neither provider nor adjustment basis. A mixed basis can therefore be silently persisted and read as one series.
 
-The checked-in adapters do not establish that Yahoo's `Ticker.history()` default output and Massive's `adjusted=true` aggregate output have equivalent split/dividend rules or matching daily-bar timestamps. The synthetic cases below faithfully exercise the transformations after those upstream values enter this code, but they cannot manufacture upstream equivalence. CK4's default for that exact unknown is KEEP.
+The checked-in adapters do not establish that Yahoo's `Ticker.history()` default output and Massive's `adjusted=true` aggregate output have equivalent split/dividend rules or matching daily-bar timestamps. The synthetic cases below faithfully exercise the transformations after those upstream values enter this code, but they cannot manufacture upstream equivalence. The daily Yahoo pin stays until that unknown is resolved.
 
 ## Traced persistence boundary and readers
 
@@ -35,24 +35,13 @@ Search of `backend/app` for `PriceHistory.(open|high|low|close|timestamp)` and `
 
 Yahoo calls `ticker.history(period=period, interval=interval)` without an explicit `auto_adjust` argument (`services/data_providers/yahoo.py:383-420`). Massive calls aggregates with `adjusted=true` (`services/data_providers/massive.py:792-811`). These are upstream request/default semantics, not transformations implemented in this repository. `yfinance` is pinned to `1.1.0` (`backend/requirements.txt:40-46`), but this study intentionally made no network call or copied paid response; it therefore does not convert either provider's external documentation into observed production behavior.
 
-## Reproducible offline comparison
+## Offline comparison method
 
-The following was run with no network transport, a fake `yf.Ticker.history` DataFrame, `Massive.parse_aggregates`, and the real `_to_utc` seam:
+The comparison used no network transport: a fake `yf.Ticker.history` DataFrame,
+`Massive.parse_aggregates`, and the real `_to_utc` seam supplied the inputs.
+The self-contained example below replaces no repository code and makes no
+provider call. Run it with `backend` on `PYTHONPATH` in the backend Python environment.
 
-```bash
-PYTHONPATH=backend backend/.venv/bin/python /tmp/ck4_history_pin_compat.py
-```
-
-Exact stdout (exit 0):
-
-```text
-split 50 50
-dividend 99 100
-boundary 2026-11-02T00:00:00-05:00 2026-11-02T00:00:00 2026-11-02T05:00:00+00:00 2026-11-02T00:00:00+00:00
-incomplete 105 111 2026-06-03T00:00:00
-```
-
-To reproduce without retaining that temporary runner, use this self-contained script as `/tmp/ck4_history_pin_compat.py`; it deliberately replaces no repository code and makes no provider call:
 
 ```python
 import asyncio
@@ -107,8 +96,8 @@ Unknowns that block removal: (1) actual Yahoo `Ticker.history()` adjustment/defa
 
 If a future, authorized evidence collection establishes equivalence, the unapplied removal boundary is deliberately narrow: change only `backend/app/tasks/price_history.py` to stop injecting `YahooFinanceProvider`, allowing `PriceHistoryService` to resolve the elected chain; update `backend/tests/test_services/test_primary_consumers.py::test_daily_history_task_pins_yahoo` to assert that selection instead; add provider-basis/timestamp fixtures at the existing adapter and persistence boundaries. Do **not** rewrite existing rows, alter `AlertService`'s explicit Yahoo injection, change the schema, or migrate stored series in that follow-on without a separate decision.
 
-## D-records and scheduled REGROUP
+## Decision boundaries
 
-- **D1 — KEEP:** Daily history remains pinned to Yahoo because persisted alert/reference readers have no basis provenance and adapter-only evidence cannot establish upstream equivalence.
-- **D2 — separation preserved:** NY-102's accepted 15-minute quote delay authorizes no daily-history basis change.
-- **D3 — no implied implementation:** This report schedules a Claude/Andrew **REGROUP** to decide whether authorized upstream evidence is worth collecting and, only after it exists, whether to build the narrow removal boundary above. No removal build follows from this artifact.
+- Daily history remains pinned to Yahoo because persisted alert/reference readers have no basis provenance and adapter-only evidence cannot establish upstream equivalence.
+- Accepting a 15-minute quote delay authorizes no daily-history basis change.
+- Removing the pin requires a separate decision about collecting upstream evidence and, only after that evidence exists, implementing the narrow removal boundary above.

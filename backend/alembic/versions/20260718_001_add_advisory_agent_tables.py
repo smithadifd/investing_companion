@@ -4,12 +4,7 @@ Creates the three tables backing the Tier-1 advisory agents from
 docs/issues/014-intelligent-agents.md: ``news_items`` (News & Catalyst
 Aggregator), ``trade_journal_entries`` (Trade Journal & Pattern Analysis),
 and ``strategy_signals`` (Daily Strategy Agent). This is schema-only — no
-agent run logic ships in this migration; the tables sit empty until their
-follow-up agent sub-PRs populate them.
-
-MULTI-HEAD NOTE: a sibling PR (T2) also branches a migration off
-``20260717_002``. If both merge, run ``alembic merge`` to reconcile the two
-heads before ``alembic upgrade head`` (see the PR description).
+agent run logic ships in this migration.
 
 Revision ID: 20260718_001
 Revises: 20260717_002

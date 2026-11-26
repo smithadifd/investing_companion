@@ -1,5 +1,5 @@
 """``_select_scoring_candidates`` must return NewsItem rows deterministically
-when two rows share ONE ``published_at`` (AB3).
+when two rows share ONE ``published_at``.
 
 ``_select_scoring_candidates`` (news_catalyst.py) built its query with
 ``.order_by(NewsItem.published_at.desc())`` alone. Two unscored ``NewsItem``
@@ -17,8 +17,8 @@ this run's cap is automatically retried on a later run (see the module
 docstring on ``_select_scoring_candidates``) - only the order is now
 deterministic.
 
-Modeled on ``tests/test_services/test_trade_journal_pair_order.py`` (AA5,
-PR #230), which fixed the sibling non-determinism in
+Modeled on ``tests/test_services/test_trade_journal_pair_order.py`` (PR #230),
+which fixed the sibling non-determinism in
 ``_closed_trade_pairs``. As there, the fix adds the primary-key column as a
 secondary sort key: ``.order_by(NewsItem.published_at.desc(),
 NewsItem.id.desc())`` - descending to match the primary (`.desc()`) key,
@@ -92,7 +92,7 @@ class TestSelectScoringCandidatesTiebreak:
 
 
 class TestSelectScoringCandidatesCapBoundary:
-    """Cap-boundary extension of AB3/#232's 2-row tie test (AC6).
+    """Cap-boundary extension of #232's 2-row tie test.
 
     #232 proved the tiebreak orders two tied rows deterministically. It did
     not prove what happens when MORE tied rows exist than

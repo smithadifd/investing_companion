@@ -1,5 +1,5 @@
 """Tests for the Schwab positions/transactions ingestion service
-(T2 sub-PR 1/3, see app/services/schwab_ingestion.py).
+(see app/services/schwab_ingestion.py).
 
 Covers: normalization edge cases (short-position signing, missing/malformed
 fields, transaction leg selection, date parsing, pagination windowing),

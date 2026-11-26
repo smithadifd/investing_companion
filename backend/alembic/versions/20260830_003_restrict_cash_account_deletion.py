@@ -23,9 +23,8 @@ count and telling the user to remove the cash rows first; this FK is the
 backstop underneath that, binding every other writer (psql, seeds, a future
 bulk path) that never comes through the service.
 
-Rewriting ``20260830_002`` in place was considered and rejected: it is already
-in this branch's history and a reviewer has read it. A forward correction with
-its own reasoning is the honest record.
+A separate revision preserves ``20260830_002`` and records why its referential
+action needed correcting.
 
 Additive/metadata only - no table rewrite, no row is touched. Postgres
 re-validates nothing when an FK's referential action changes.

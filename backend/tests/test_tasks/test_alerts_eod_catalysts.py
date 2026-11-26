@@ -1,4 +1,4 @@
-"""Tests for the EOD wrap's catalyst-assembly step (U11, mirroring #210's
+"""Tests for the EOD wrap's catalyst-assembly step (mirroring #210's
 morning-pulse catalyst injection).
 
 Covers only the dedup + query-args + failure-degradation contract of

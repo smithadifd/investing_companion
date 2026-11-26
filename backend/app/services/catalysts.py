@@ -5,8 +5,7 @@ owns writing/scoring ``news_items``; this module just turns already-scored rows
 into short display strings for ``format_morning_pulse`` ("UUUU up 5%" -> "UUUU
 up 5% - DOE announced new uranium reserve program.").
 
-Selection is deterministic (docs/issues/014 T1 sub-PR 2/4, binding addendum
-#6): only rows scored >= ``CATALYST_MIN_RELEVANCE``, one row per symbol (the
+Selection is deterministic: only rows scored >= ``CATALYST_MIN_RELEVANCE``, one row per symbol (the
 highest-relevance / most-recent / highest-id, in that tiebreak order), within
 the last ``CATALYST_LOOKBACK_HOURS``.
 

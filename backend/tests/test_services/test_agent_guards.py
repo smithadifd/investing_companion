@@ -1,7 +1,6 @@
 """Tests for the shared Tier-1 advisory-agent precondition guard.
 
-Schema + rails only (sub-PR 1, see docs/issues/014-intelligent-agents.md) -
-these tests cover the guard's decision logic in isolation, with the three
+These tests cover the guard's decision logic in isolation, with the three
 mechanisms it composes (settings enable-flag, BYO Claude key, per-day token
 budget) faked/mocked. No live Postgres/Redis needed - pure logic, matching
 the style of tests/test_services/test_ai.py.

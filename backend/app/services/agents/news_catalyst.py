@@ -1,8 +1,7 @@
-"""News & Catalyst advisory agent (T1 sub-PR 2/4, docs/issues/014-intelligent-agents.md).
+"""News & Catalyst advisory agent (docs/issues/014-intelligent-agents.md).
 
-Ticket: "News & Catalyst Aggregator: Pull news/catalysts for watchlist items,
-inject context into morning pulse and EOD wrap." This PR covers morning-pulse
-injection only; EOD-wrap enrichment is a declared follow-up.
+Pulls and scores news for watchlist items. Briefing tasks consume the stored
+results through ``app/services/catalysts.py``.
 
 ``execute()`` runs fetch -> persist -> score:
 
@@ -490,7 +489,7 @@ class NewsCatalystAgent(AdvisoryAgent):
             # identical `published_at` still sort deterministically - timestamp
             # alone is not a unique key, and an unordered tie would let the
             # narrative-prompt ordering vary across otherwise identical reruns
-            # (mirrors AA5/#230's fix in trade_journal.py's
+            # (mirrors #230's fix in trade_journal.py's
             # `_closed_trade_pairs`). Descending to match the primary key's
             # `.desc()` - newest-first among ties.
             .order_by(NewsItem.published_at.desc(), NewsItem.id.desc())

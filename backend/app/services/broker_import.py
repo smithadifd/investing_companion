@@ -1,14 +1,9 @@
 """Broker import trigger - the user-facing "pull from Schwab now" action.
 
-``schwab_ingestion`` landed the pull primitives (T2 sub-PR 1) and
-``reconciliation``/``adoption`` landed the compare + adopt layers (sub-PR 2),
-but until this module nothing in the running application ever CALLED
-:func:`~app.services.schwab_ingestion.pull_positions` or
-:func:`~app.services.schwab_ingestion.pull_transactions` - they were reachable
-only from tests. The reconciliation view could therefore never leave its
-``never_imported`` state in a deployed instance. This is that missing arm: it
-resolves the account's active :class:`AccountLink` to a Schwab account hash and
-invokes the pulls for it.
+Resolves the account's active :class:`AccountLink` to a Schwab account hash
+and invokes :func:`~app.services.schwab_ingestion.pull_positions` and
+:func:`~app.services.schwab_ingestion.pull_transactions`. The imported rows
+feed the reconciliation view and adoption services.
 
 SESSION OWNERSHIP (the contract this module exists to respect): the two pull
 functions own their entire transactional lifecycle and must NEVER be handed a

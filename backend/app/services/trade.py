@@ -752,7 +752,7 @@ class TradeService:
                 # this branch loops over all queue keys instead of using
                 # `acct`. Deliberately independent of the row's own
                 # account_id - if one ever carries an account (a hand-inserted
-                # row, or a future revisit of D6), applying it security-wide is
+                # row, or a future account-scoping change), applying it security-wide is
                 # still the correct reading.
                 #
                 # It writes no TradePair: a split realizes nothing.

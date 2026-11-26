@@ -1,16 +1,9 @@
-"""Regression tests for the alert-pipeline reliability fixes (Queue S S1).
+"""Regression tests for alert-pipeline reliability.
 
-These tests reference only symbols that exist on ``origin/main`` (no outbox
-model), so they collect and run on both branches. Each of the first two FAILS
-on ``origin/main`` and PASSES on this branch:
-
-* ``test_get_stats_no_concurrent_session`` — main runs four ``self.db.scalar``
-  calls through ``asyncio.gather`` on one AsyncSession (a concurrency bug); the
-  re-entrancy guard fires. The fix serializes them.
-* ``test_process_alert_defers_discord_send`` — main sends Discord inline inside
-  the evaluation transaction (the crash-unsafe "fire then record" path); the
-  fix defers the send to the outbox/claim step, so ``process_alert`` no longer
-  sends.
+* ``test_get_stats_no_concurrent_session`` — serializes four ``self.db.scalar``
+  calls on one AsyncSession instead of running them through ``asyncio.gather``.
+* ``test_process_alert_defers_discord_send`` — defers the send to the
+  outbox/claim step instead of sending inline inside the evaluation transaction.
 
 ``test_sustained_counter_lockstep`` is a PINNING test: it passes on both
 branches today (the two counter sites agree) and guards against a future edit

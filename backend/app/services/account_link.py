@@ -1,6 +1,6 @@
 """AccountLink service - user-initiated linking of a broker hash to an account.
 
-Implements the §4 lifecycle for the buildable slice:
+Implements the account-link lifecycle:
 
 * **user-initiated** - a hash is only ever linked by explicit action;
 * **orphan = status flag, never delete** - a rotation/re-link flips the old row
@@ -11,9 +11,8 @@ Implements the §4 lifecycle for the buildable slice:
   baseline (the one place a mis-link could pull an unrelated account's real
   history into a delta).
 
-Discovery of hashes (``get_account_hashes()``), the orphan-detection sweep, and
-any adoption mutation are the larger linking-UI / next-wave surfaces and are NOT
-built here.
+Hash discovery (``get_account_hashes()``), orphan detection, and adoption
+mutations are separate from this service's link/unlink operations.
 """
 
 from uuid import UUID

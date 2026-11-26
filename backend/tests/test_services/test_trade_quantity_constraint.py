@@ -1,4 +1,4 @@
-"""DB-level regression tests for ``ck_trades_quantity_positive`` (AE10).
+"""DB-level regression tests for ``ck_trades_quantity_positive``.
 
 The point of these tests is that they bypass every application guard. The API
 layer already rejects quantity <= 0 (``schemas/trade.py`` uses

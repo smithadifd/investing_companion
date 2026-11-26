@@ -1,4 +1,4 @@
-"""Tests for the atomic reserve/settle AI token budget (U10).
+"""Tests for the atomic reserve/settle AI token budget.
 
 The atomicity this module exists to provide lives in server-side Redis Lua
 scripts (app/services/ai_budget.py) - a hand-rolled Python double can't
@@ -417,7 +417,7 @@ def test_reservation_token_repr_omits_id_and_who():
 
 
 # ---------------------------------------------------------------------------
-# estimate_request_tokens - the shared input-estimate helper (codex M3)
+# estimate_request_tokens - the shared input-estimate helper
 # ---------------------------------------------------------------------------
 def test_estimate_request_tokens_rule_is_total_chars_div_3():
     assert estimate_request_tokens("a" * 300) == 100
@@ -443,7 +443,7 @@ def test_estimate_request_tokens_overestimates_typical_english():
 
 
 # ---------------------------------------------------------------------------
-# Reservations cover input + output (codex M3): a call whose input estimate
+# Reservations cover input + output: a call whose input estimate
 # + max_tokens exceeds the remaining budget is REJECTED where bare
 # max_tokens alone would have passed.
 # ---------------------------------------------------------------------------
@@ -514,7 +514,7 @@ async def test_analyze_rejected_when_input_estimate_pushes_over_remaining(
 
 
 # ---------------------------------------------------------------------------
-# Cluster hash-tag key scheme (codex H1): all keys for one user-day share one
+# Cluster hash-tag key scheme: all keys for one user-day share one
 # literal {who:day} hash tag so the multi-key Lua scripts co-slot on a
 # clustered Redis (no CROSSSLOT -> no silent persistent fail-open).
 # ---------------------------------------------------------------------------
@@ -541,7 +541,7 @@ async def test_scripting_error_fails_open_but_logs_at_error_level(
     script - what CROSSSLOT would look like on a cluster) still fails open,
     but at ERROR level, not the routine WARNING used for a Redis outage - a
     persistently rejected script silently disabling all enforcement must be
-    loud (codex H1, second half)."""
+    loud."""
     budget = _budget(real_redis)
     uid = uuid.uuid4()
 

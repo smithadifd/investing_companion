@@ -126,7 +126,7 @@ class TestMorningPulseMoversLabel:
 
 
 class TestMorningPulseCatalysts:
-    """News & Catalyst agent injection into the morning pulse (T1 sub-PR 2/4)."""
+    """News & Catalyst agent injection into the morning pulse."""
 
     _FIXED_NOW = datetime(2026, 7, 18, 8, 0, 0, tzinfo=ZoneInfo("America/New_York"))
 
@@ -245,7 +245,7 @@ class TestEODPostMarketMovers:
 
 
 class TestEODWrapCatalysts:
-    """News & Catalyst agent injection into the EOD wrap (U11, mirroring
+    """News & Catalyst agent injection into the EOD wrap (mirroring
     #210's TestMorningPulseCatalysts)."""
 
     _FIXED_NOW = datetime(2026, 7, 18, 16, 30, 0, tzinfo=ZoneInfo("America/New_York"))

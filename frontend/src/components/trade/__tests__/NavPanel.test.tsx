@@ -221,7 +221,7 @@ describe('NavPanel', () => {
     ).toBeInTheDocument();
   });
   it('lists one reason per account when several are incomplete', () => {
-    // REVIEW ROUND 2, ISSUE 1: completeness is per-account, so the panel must
+    // Completeness is per-account, so the panel must
     // name WHICH accounts are short. One flat sentence over a multi-account
     // scope is what let a covered account speak for an uncovered sibling.
     mockNav.mockReturnValue({

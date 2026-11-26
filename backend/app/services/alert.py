@@ -58,7 +58,7 @@ PERIOD_LOOKBACK = {
 # retried forever.
 DELIVERY_LEASE_SECONDS = 120
 DELIVERY_BATCH_LIMIT = 100
-# Max rows covered by ONE grouped Discord send (BZ14). Sized so the rendered
+# Max rows covered by ONE grouped Discord send. Sized so the rendered
 # embed stays comfortably inside Discord's 4096-char description budget: a
 # worst-case line is ~180 chars (the alert name is capped at
 # BATCH_LINE_NAME_LIMIT in the notification service), so 20 x 180 = 3600. A
@@ -102,8 +102,8 @@ class AlertService:
         self._quote_source: str | None = None
         self._quote_stale: bool = False
         self._quote_timestamp: datetime | None = None
-        # Daily reference history stays Yahoo-pinned (CK4 KEEP). Quote and
-        # crossing evaluation use ``provider`` / the elected chain.
+        # Daily reference history stays Yahoo-pinned to avoid mixing price
+        # adjustment bases. Quotes and crossings use ``provider`` / the elected chain.
         self.yahoo = YahooFinanceProvider()
         self.equity_service = EquityService(db)
         self.price_history_service = PriceHistoryService(db, provider=self.yahoo)
@@ -667,7 +667,7 @@ class AlertService:
     # before the group's own send), delivers the whole group in a SINGLE Discord
     # send, and marks every member delivered/failed. A group of one uses the
     # rich single-alert embed; two or more collapse into one batched embed with
-    # a deep-linked line each (BZ14).
+    # a deep-linked line each.
     #
     # Delivery guarantee: AT-LEAST-ONCE with a bounded (<= max_attempts)
     # duplicate window. Discord has no receiver-side dedup, so a crash AFTER a
@@ -815,7 +815,7 @@ class AlertService:
         tiers writes three rows with identical ``created_at``. Ordering by the
         timestamp alone left their relative order up to the planner, which was
         invisible while each row got its own message and became user-visible
-        the moment a group renders as ordered lines in one embed (BZ14).
+        the moment a group renders as ordered lines in one embed.
         """
         now = datetime.now(timezone.utc)
         lease_until = now + timedelta(seconds=lease_seconds)
@@ -870,13 +870,13 @@ class AlertService:
         a time. Called by Celery.
 
         Every row this drain claims in one group is delivered by a SINGLE
-        Discord send (BZ14): a broad selloff that trips 30 alerts in one
+        Discord send: a broad selloff that trips 30 alerts in one
         evaluation cycle produces a couple of grouped messages instead of 30
         webhook posts. Groups are capped at ``DELIVERY_GROUP_LIMIT``; a bigger
         backlog simply becomes several groups, so nothing is ever dropped or
         truncated to fit.
 
-        Lease safety is unchanged by the grouping. The pre-BZ14 reason for
+        Lease safety is unchanged by the grouping. The original reason for
         claiming ONE row per iteration was the batch-vs-lease amplifier: under
         per-row sends, a slow send let a not-yet-sent TAIL row's lease expire
         while this worker still held it, so a concurrent drain could re-claim
@@ -970,8 +970,8 @@ class AlertService:
         """Send ONE Discord message covering ``deliveries`` and record outcomes.
 
         A group of one uses the rich single-alert embed (unchanged shape); two
-        or more collapse into one batched embed with a deep-linked line each
-        (BZ14). Exactly one send is attempted per call, under the same hard
+        or more collapse into one batched embed with a deep-linked line each.
+        Exactly one send is attempted per call, under the same hard
         total timeout the per-row path used, so the lease invariant documented
         on ``deliver_pending`` still holds for every member.
 

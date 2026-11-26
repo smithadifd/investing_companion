@@ -1,6 +1,6 @@
 """Regression guard for the ``seed_macro_events.py --all`` cross-loop crash.
 
-Root cause (issue X1): the module-level async engine in ``app/db/session.py``
+Root cause: the module-level async engine in ``app/db/session.py``
 pools an asyncpg connection bound to the event loop it is first used on. The
 old ``--all`` branch ran the 2025 and 2026 seeds under two *separate*
 ``asyncio.run()`` calls; the second call spins up a fresh loop, and the pooled

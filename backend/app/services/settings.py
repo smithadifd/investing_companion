@@ -62,9 +62,7 @@ class SettingsService:
     # the old implicit "oldest active user" resolution used by background tasks.
     OWNER_USER_ID = "OWNER_USER_ID"
 
-    # Tier-1 advisory agent toggles (docs/issues/014). Schema + rails only in
-    # this sub-PR - each flag stays OFF until its agent sub-PR lands, so the
-    # not-yet-built agents are inert even though the setting key exists.
+    # Per-user advisory-agent toggles; each agent is disabled by default.
     NEWS_AGENT_ENABLED = "NEWS_AGENT_ENABLED"
     TRADE_JOURNAL_AGENT_ENABLED = "TRADE_JOURNAL_AGENT_ENABLED"
     STRATEGY_AGENT_ENABLED = "STRATEGY_AGENT_ENABLED"

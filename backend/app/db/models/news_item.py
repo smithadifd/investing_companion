@@ -1,11 +1,9 @@
 """NewsItem model - stored news/catalyst articles for the News & Catalyst agent.
 
-Schema-only for now (sub-PR 1 of the Tier-1 advisory agents wave, see
-``docs/issues/014-intelligent-agents.md``). The News & Catalyst agent (a
-follow-up sub-PR) will populate this table from a news provider and read it
-back to enrich the morning pulse / EOD wrap ("UUUU up 5%" -> "UUUU up 5% -
-DOE announced new uranium reserve program."). No ingestion or agent-run logic
-lives here yet.
+The News & Catalyst agent populates this table from a news provider and reads
+it back to enrich the morning pulse / EOD wrap ("UUUU up 5%" -> "UUUU up 5% -
+DOE announced new uranium reserve program."). Ingestion and agent-run logic
+live in ``app/services/agents/news_catalyst.py``, not in this model.
 
 Not user-scoped: news articles are shared context, not per-user data (mirrors
 how ``EconomicEvent`` links to an equity rather than a user for macro/earnings

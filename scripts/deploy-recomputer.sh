@@ -43,7 +43,7 @@ for arg in "$@"; do
     esac
 done
 
-# F2 hardening: branch names are attacker-controlled input that crosses the
+# Branch names are attacker-controlled input that crosses the
 # ssh boundary as part of a string the remote shell parses (remote() /
 # remote_compose() below). `git check-ref-format --branch` accepts branch
 # names containing shell metacharacters (e.g. `main;touch${IFS}/tmp/pwn` is a
@@ -190,7 +190,7 @@ echo "  ✓ Images pulled"
 echo ""
 
 # 4. compose up --build (rebuilds the four build-only services: api,
-#    celery_worker, celery_beat, frontend — see F1: without --build the old
+#    celery_worker, celery_beat, frontend — without --build the old
 #    images kept running and a "successful" deploy shipped nothing new).
 echo "Step 4/6: docker compose up -d --build..."
 if ! remote_compose up -d --build; then

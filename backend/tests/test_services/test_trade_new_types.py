@@ -1,12 +1,12 @@
-"""R1 - the four new ``TradeType`` members and the fail-open dispatch they expose.
+"""The four non-fill ``TradeType`` members and fail-open dispatch.
 
 SEAM UNDER TEST: the **position-fold seam** - ``TradeService``'s public
 position interface (``get_open_positions`` / ``get_position``). Its invariant
 is *"a row that is not a fill must not move net quantity in the wrong
 direction"*, and before this build ``_calculate_positions`` closed its type
 dispatch with a bare ``else`` that subtracted shares and cost for **any**
-unrecognised member (``services/trade.py``, design doc "The hazard that
-governs the whole design"). A $120 dividend silently shrank the position.
+unrecognised member (``services/trade.py``). A $120 dividend silently shrank
+the position.
 
 Every assertion here crosses the public interface. Nothing reaches into
 ``_calculate_positions``: if a test needed to, the module would be the wrong

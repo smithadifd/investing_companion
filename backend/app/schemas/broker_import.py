@@ -5,7 +5,7 @@ Covers both import lanes that write
 
 * the live Schwab API pull (``source="schwab_api"``), triggered by
   ``POST /api/v1/accounts/{account_id}/import``;
-* the broker-CSV upload (``source="csv_import"``, T2 sub-PR 3), the designated
+* the broker-CSV upload (``source="csv_import"``), the designated
   recovery path past Schwab's 60-day transaction-history horizon, triggered by
   ``POST /api/v1/accounts/{account_id}/import/csv``.
 
@@ -90,7 +90,7 @@ class CsvImportRequest(BaseModel):
 
 
 class CsvImportResponse(BaseModel):
-    """Result of one broker-CSV upload (sub-PR 3).
+    """Result of one broker-CSV upload.
 
     Per-row, not all-or-nothing at the *reporting* level (every rejected row is
     named with a reason) but strictly atomic at the *write* level: either the

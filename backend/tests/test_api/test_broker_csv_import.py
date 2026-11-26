@@ -1,6 +1,6 @@
 """Tests for the broker-CSV import (POST /accounts/{id}/import/csv).
 
-Sub-PR 3, the recovery path for activity older than Schwab's 60-day API
+The recovery path for activity older than Schwab's 60-day API
 transaction horizon. Covers the Schwab-shaped export (preamble line, "as of"
 dates, $-formatted numbers), the generic header synonyms, the sign/positionEffect
 round-trip that lets a CSV row and an API row reconcile through the SAME
@@ -652,7 +652,7 @@ class TestCsvImportCrossUserIsolation:
 
 
 class TestMalformedValuesAreRejectedAtWriteTime:
-    """F1: nothing unparseable may be PERSISTED.
+    """Nothing unparseable may be PERSISTED.
 
     Nothing in this application can delete an ImportedTransaction ("deletions
     are out of scope for v1"), so a row that the write path accepts but the
@@ -762,7 +762,7 @@ class TestMalformedValuesAreRejectedAtWriteTime:
 
 
 class TestReferenceNumberCollisionsWithinAFile:
-    """F2: two different fills sharing one reference must never merge."""
+    """Two different fills sharing one reference must never merge."""
 
     async def test_duplicate_reference_numbers_keep_both_rows(
         self, authed_client: AsyncClient, db: AsyncSession, test_user
@@ -816,7 +816,7 @@ class TestReferenceNumberCollisionsWithinAFile:
 
 
 class TestUnclassifiableActionsAreNotSilentlyCash:
-    """F3: a real buy must never be described to the user as a transfer."""
+    """A real buy must never be described to the user as a transfer."""
 
     async def test_unknown_action_vocabulary_is_refused(
         self, authed_client: AsyncClient, db: AsyncSession, test_user
@@ -953,7 +953,7 @@ class TestParsingRobustness:
 
 
 class TestDerivedKeyIsAccountScoped:
-    """F5: the derived digest must stay account-namespaced.
+    """The derived digest must stay account-namespaced.
 
     Dropping account_hash from the digest survives every other test in this
     file, because every other test uses one account. This is the derived-path

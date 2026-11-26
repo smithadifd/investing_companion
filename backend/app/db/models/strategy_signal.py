@@ -1,10 +1,8 @@
 """StrategySignal model - one daily strategy brief per user per trading day.
 
-Schema-only for now (sub-PR 1 of the Tier-1 advisory agents wave, see
-``docs/issues/014-intelligent-agents.md``). The Daily Strategy agent (a
-follow-up sub-PR) will generate the morning game plan ("SPY near resistance,
-UUUU earnings tonight...") and write one row per trading day here; this PR
-only lays down the table. No generation logic lives here yet.
+The Daily Strategy agent generates the morning game plan ("SPY near resistance,
+UUUU earnings tonight...") and writes one row per trading day here.
+Generation logic lives in ``app/services/agents/strategy_brief.py``.
 """
 
 import uuid

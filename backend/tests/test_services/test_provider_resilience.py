@@ -1,4 +1,4 @@
-"""Tests for the provider-resilience layer (Queue S S4).
+"""Tests for the provider-resilience layer.
 
 Circuit breaker, retry + exponential backoff, and health-based failover with
 stale-data stamping. All deterministic: the clock and sleep are injected, and

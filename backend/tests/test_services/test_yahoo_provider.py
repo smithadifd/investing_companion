@@ -1,4 +1,4 @@
-"""Tests for YahooFinanceProvider's degraded-vs-not-found rule (Queue S S4).
+"""Tests for YahooFinanceProvider's degraded-vs-not-found rule.
 
 A rate-limited Yahoo returns a wholly-empty ``info`` dict; that must count as a
 provider FAILURE (so the breaker can open) rather than a clean not-found (which

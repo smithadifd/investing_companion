@@ -27,9 +27,8 @@ practice (the table is new in this unmerged branch, so no deployed database
 has a row) and harmless in principle (coverage is regenerable provenance -
 re-running the backfill restores it).
 
-Forward correction rather than editing ``20260830_004`` in place, per the same
-reasoning as ``20260830_003``: a reviewer has read ``_004``, and rewriting it
-would erase the reasoning that produced this.
+A separate revision preserves ``20260830_004`` and records why storing a
+completeness conclusion was unsafe, as ``20260830_003`` does for account deletion.
 
 Additive/metadata only on a table with no rows - no rewrite of anything else.
 
